@@ -100,8 +100,7 @@
       HorizontalAlignment="Stretch"
       VerticalAlignment="Stretch"
       NavigationStarting="OnNavigationStarting"
-      NavigationCompleted="OnNavigationCompleted"
-      SourceChanged="OnSourceChanged" />
+      NavigationCompleted="OnNavigationCompleted" />
 
     <InfoBar
       x:Name="StatusBar"

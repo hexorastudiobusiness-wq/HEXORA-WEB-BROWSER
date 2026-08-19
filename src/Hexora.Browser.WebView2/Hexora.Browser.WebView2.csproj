@@ -6,7 +6,6 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Web.WebView2" />
     <ProjectReference Include="../Hexora.Browser.Core/Hexora.Browser.Core.csproj" />
   </ItemGroup>
 </Project>

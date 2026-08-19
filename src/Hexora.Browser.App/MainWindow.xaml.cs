@@ -44,6 +44,7 @@ public sealed partial class MainWindow : Window
         core.Settings.IsStatusBarEnabled = false;
         core.Settings.IsZoomControlEnabled = true;
         core.DocumentTitleChanged += OnDocumentTitleChanged;
+        core.SourceChanged += OnCoreSourceChanged;
         core.ProcessFailed += OnWebViewProcessFailed;
     }
 
@@ -104,7 +105,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnSourceChanged(WebView2 sender, CoreWebView2SourceChangedEventArgs args) => UpdateViewModel();
+    private void OnCoreSourceChanged(CoreWebView2 sender, CoreWebView2SourceChangedEventArgs args) => UpdateViewModel();
 
     private void OnDocumentTitleChanged(CoreWebView2 sender, object args) => UpdateViewModel();
 
