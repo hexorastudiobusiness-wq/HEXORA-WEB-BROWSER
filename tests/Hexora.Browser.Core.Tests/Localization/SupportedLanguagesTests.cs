@@ -5,7 +5,7 @@ namespace Hexora.Browser.Core.Tests.Localization;
 public sealed class SupportedLanguagesTests
 {
     [Fact]
-    public void All_ContainsInitialProductLanguages()
+    public void AllContainsInitialProductLanguages()
     {
         Assert.Collection(
             SupportedLanguages.All,
@@ -17,13 +17,13 @@ public sealed class SupportedLanguagesTests
     [Theory]
     [InlineData("fa-IR")]
     [InlineData("ar-SA")]
-    public void GetOrDefault_RtlLanguage_IsRightToLeft(string tag)
+    public void GetOrDefaultRtlLanguageIsRightToLeft(string tag)
     {
         Assert.True(SupportedLanguages.GetOrDefault(tag).IsRightToLeft);
     }
 
     [Fact]
-    public void GetOrDefault_UnknownLanguage_FallsBackToEnglish()
+    public void GetOrDefaultUnknownLanguageFallsBackToEnglish()
     {
         Assert.Equal(SupportedLanguages.English, SupportedLanguages.GetOrDefault("de-DE"));
     }

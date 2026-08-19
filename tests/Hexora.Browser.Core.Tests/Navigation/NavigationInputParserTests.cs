@@ -9,7 +9,7 @@ public sealed class NavigationInputParserTests
     [Theory]
     [InlineData("https://example.com/path", "https://example.com/path")]
     [InlineData("http://localhost:8080", "http://localhost:8080/")]
-    public void Parse_AbsoluteWebAddress_ReturnsAddress(string input, string expected)
+    public void ParseAbsoluteWebAddressReturnsAddress(string input, string expected)
     {
         var result = _sut.Parse(input);
 
@@ -20,7 +20,7 @@ public sealed class NavigationInputParserTests
     [Theory]
     [InlineData("example.com", "https://example.com/")]
     [InlineData("localhost:5000", "https://localhost:5000/")]
-    public void Parse_HostWithoutScheme_AddsHttps(string input, string expected)
+    public void ParseHostWithoutSchemeAddsHttps(string input, string expected)
     {
         var result = _sut.Parse(input);
 
@@ -33,7 +33,7 @@ public sealed class NavigationInputParserTests
     [InlineData("modern browser")]
     [InlineData("javascript:alert(1)")]
     [InlineData("file:///C:/secret.txt")]
-    public void Parse_SearchOrUnsafeScheme_ReturnsEncodedSearch(string input)
+    public void ParseSearchOrUnsafeSchemeReturnsEncodedSearch(string input)
     {
         var result = _sut.Parse(input);
 
@@ -43,7 +43,7 @@ public sealed class NavigationInputParserTests
     }
 
     [Fact]
-    public void Parse_Whitespace_Throws()
+    public void ParseWhitespaceThrows()
     {
         Assert.Throws<ArgumentException>(() => _sut.Parse("   "));
     }

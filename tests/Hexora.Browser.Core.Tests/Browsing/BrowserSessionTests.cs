@@ -5,7 +5,7 @@ namespace Hexora.Browser.Core.Tests.Browsing;
 public sealed class BrowserSessionTests
 {
     [Fact]
-    public void Constructor_CreatesOneActiveNewTab()
+    public void ConstructorCreatesOneActiveNewTab()
     {
         var session = new BrowserSession();
 
@@ -16,7 +16,7 @@ public sealed class BrowserSessionTests
     }
 
     [Fact]
-    public void OpenTab_ActivatesNewTabAndKeepsExistingState()
+    public void OpenTabActivatesNewTabAndKeepsExistingState()
     {
         var session = new BrowserSession();
         var original = session.ActiveTab;
@@ -31,7 +31,7 @@ public sealed class BrowserSessionTests
     }
 
     [Fact]
-    public void Close_ActiveTab_ActivatesNearestRemainingTab()
+    public void CloseActiveTabActivatesNearestRemainingTab()
     {
         var session = new BrowserSession();
         var first = session.ActiveTab;
@@ -47,7 +47,7 @@ public sealed class BrowserSessionTests
     }
 
     [Fact]
-    public void Close_LastTab_ReplacesItWithFreshActiveTab()
+    public void CloseLastTabReplacesItWithFreshActiveTab()
     {
         var session = new BrowserSession();
         var closingId = session.ActiveTab.Id;
@@ -60,7 +60,7 @@ public sealed class BrowserSessionTests
     }
 
     [Fact]
-    public void UpdateNavigation_UpdatesOnlyTargetTab()
+    public void UpdateNavigationUpdatesOnlyTargetTab()
     {
         var session = new BrowserSession();
         var target = session.ActiveTab;
@@ -74,7 +74,7 @@ public sealed class BrowserSessionTests
     }
 
     [Fact]
-    public void Operations_UnknownTab_ReturnFalse()
+    public void OperationsOnUnknownTabReturnFalse()
     {
         var session = new BrowserSession();
         var unknown = BrowserTabId.New();
