@@ -4,6 +4,7 @@ using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
+using WebViewControl = Microsoft.UI.Xaml.Controls.WebView2;
 
 namespace Hexora.Browser.App;
 
@@ -90,13 +91,13 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnNavigationStarting(WebView2 sender, CoreWebView2NavigationStartingEventArgs args)
+    private void OnNavigationStarting(WebViewControl sender, CoreWebView2NavigationStartingEventArgs args)
     {
         StatusBar.IsOpen = false;
         UpdateViewModel(isLoading: true);
     }
 
-    private void OnNavigationCompleted(WebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
+    private void OnNavigationCompleted(WebViewControl sender, CoreWebView2NavigationCompletedEventArgs args)
     {
         UpdateViewModel(isLoading: false);
         if (!args.IsSuccess)
