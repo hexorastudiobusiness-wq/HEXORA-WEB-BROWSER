@@ -12,7 +12,10 @@ public sealed class WebViewEnvironmentProvider
     {
         Profile = profile ?? throw new ArgumentNullException(nameof(profile));
         _environment = new Lazy<Task<CoreWebView2Environment>>(
-            () => CoreWebView2Environment.CreateAsync(null, profile.UserDataFolder, null));
+            () => CoreWebView2Environment.CreateWithOptionsAsync(
+                null,
+                profile.UserDataFolder,
+                new CoreWebView2EnvironmentOptions()));
     }
 
     public WebViewProfileOptions Profile { get; }
