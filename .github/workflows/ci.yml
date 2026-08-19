@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - arena/01a01ae8-hexora-web-browser
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    name: Core tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+
+      - name: Restore core tests
+        run: dotnet restore tests/Hexora.Browser.Core.Tests/Hexora.Browser.Core.Tests.csproj
+
+      - name: Test core
+        run: dotnet test tests/Hexora.Browser.Core.Tests/Hexora.Browser.Core.Tests.csproj --configuration Release --no-restore --logger "trx;LogFileName=core-tests.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-test-results
+          path: tests/Hexora.Browser.Core.Tests/TestResults
+          if-no-files-found: ignore
+
+  windows-build:
+    name: Windows x64 build
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+
+      - name: Restore solution
+        run: dotnet restore HEXORA.slnx -p:Platform=x64
+
+      - name: Build solution
+        run: dotnet build HEXORA.slnx --configuration Release --no-restore -p:Platform=x64
