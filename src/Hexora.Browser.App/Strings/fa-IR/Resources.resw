@@ -165,4 +165,23 @@
   <data name="CertificateErrorFormat" xml:space="preserve">
     <value>اتصال مسدود شد، چون گواهی سایت معتبر نیست: {0}</value>
   </data>
+  <data name="PerformanceSnapshotMenu" xml:space="preserve">
+    <value>نمای لحظه‌ای عملکرد</value>
+  </data>
+  <data name="PerformanceSnapshotTitle" xml:space="preserve">
+    <value>نمای محلی عملکرد</value>
+  </data>
+  <data name="PerformanceSnapshotFormat" xml:space="preserve">
+    <value>پردازش‌های WebView2: تعداد {0} گزارش و {1} نمونه‌برداری شد
+حافظه فعال: {2} مگابایت
+حافظه خصوصی: {3} مگابایت
+زمان تجمعی پردازنده: {4} میلی‌ثانیه
+حافظه فعال پردازش اصلی هکسورا: {5} مگابایت</value>
+  </data>
+  <data name="PerformanceSnapshotClose" xml:space="preserve">
+    <value>بستن</value>
+  </data>
+  <data name="PerformanceSnapshotFailed" xml:space="preserve">
+    <value>اطلاعات عملکرد با سیاست فعلی ویندوز در دسترس نیست.</value>
+  </data>
 </root>

@@ -111,7 +111,10 @@ It must never contain URLs, search terms, page titles, page content, cookies, re
 - WebView controls are created lazily on first tab activation.
 - Closing a tab closes and detaches its WebView.
 - Diagnostic file size and retention are bounded.
-- Background tab suspension/discard policies remain pending because media, capture, downloads, and unsaved forms require explicit exceptions.
+- Inactive tabs receive a cancellable, event-driven 30-second sleep delay rather than a polling loop.
+- Active, audio-playing, downloading, permission-granted, and security-prompt tabs are not suspended.
+- WebView2 suspension is best effort and rejected suspensions do not affect browsing.
+- Memory-pressure discarding remains pending because capture, WebRTC, unsaved forms, and additional activity signals require explicit policy.
 
 ## Sensitive assets not yet implemented
 

@@ -32,7 +32,9 @@ This checklist tracks the foundation exit gate defined in the [product roadmap](
 - [x] Add privacy-safe structured local logging with bounded retention.
 - [x] Add a global unhandled-exception boundary and local crash-recovery marker.
 - [x] Record startup duration and host-process working set as local-only baseline inputs.
-- [ ] Create the full WebView2 process-group performance harness on the reference device.
+- [x] Add an on-demand aggregate WebView2 process-group sampler.
+- [x] Implement an event-driven, conservative sleeping-tab policy.
+- [ ] Run the full performance harness on the physical reference device.
 - [ ] Record repeatable cold/warm startup and one-tab process-group memory baselines.
 - [x] Create the data-flow diagram and initial threat model.
 - [x] Implement the initial non-persistent, explicit permission-request policy.

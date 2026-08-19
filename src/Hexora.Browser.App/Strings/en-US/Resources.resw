@@ -165,4 +165,23 @@
   <data name="CertificateErrorFormat" xml:space="preserve">
     <value>The connection was blocked because the site certificate is not valid: {0}</value>
   </data>
+  <data name="PerformanceSnapshotMenu" xml:space="preserve">
+    <value>Performance snapshot</value>
+  </data>
+  <data name="PerformanceSnapshotTitle" xml:space="preserve">
+    <value>Local performance snapshot</value>
+  </data>
+  <data name="PerformanceSnapshotFormat" xml:space="preserve">
+    <value>WebView2 processes: {0} reported, {1} sampled
+Working set: {2} MB
+Private memory: {3} MB
+Cumulative CPU time: {4} ms
+HEXORA host working set: {5} MB</value>
+  </data>
+  <data name="PerformanceSnapshotClose" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="PerformanceSnapshotFailed" xml:space="preserve">
+    <value>Performance metrics are not available under the current Windows policy.</value>
+  </data>
 </root>

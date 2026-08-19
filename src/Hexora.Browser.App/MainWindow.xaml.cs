@@ -22,6 +22,7 @@ namespace Hexora.Browser.App;
 
 public sealed partial class MainWindow : Window
 {
+    private static readonly TimeSpan BackgroundTabSleepDelay = TimeSpan.FromSeconds(30);
     private static readonly HashSet<string> AllowedExternalSchemes = new(StringComparer.OrdinalIgnoreCase)
     {
         "mailto",
@@ -183,13 +184,20 @@ public sealed partial class MainWindow : Window
         }
 
         _session.Activate(id);
+        CancelScheduledSleep(runtime);
         await EnsureWebViewAsync(runtime);
+        ResumeTab(runtime);
 
         foreach (var candidate in _tabsById.Values)
         {
             if (candidate.View is not null)
             {
                 candidate.View.Visibility = candidate.Id == id ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (candidate.Id != id)
+            {
+                ScheduleTabSleep(candidate);
             }
         }
 
@@ -201,6 +209,7 @@ public sealed partial class MainWindow : Window
     {
         foreach (var runtime in _tabsById.Values)
         {
+            CancelScheduledSleep(runtime);
             runtime.View?.Close();
         }
 
@@ -217,6 +226,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        CancelScheduledSleep(runtime);
         Tabs.TabItems.Remove(runtime.Item);
         if (runtime.View is not null)
         {
@@ -322,6 +332,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        runtime.HasSensitiveActivity = false;
         StatusBar.IsOpen = false;
         UpdateRuntimeState(runtime, isLoading: true);
     }
@@ -403,6 +414,7 @@ public sealed partial class MainWindow : Window
             if (result == ContentDialogResult.Primary)
             {
                 args.State = CoreWebView2PermissionState.Allow;
+                runtime.HasSensitiveActivity = true;
                 _diagnostics.Record("permission.allowed_once");
             }
             else
@@ -505,6 +517,7 @@ public sealed partial class MainWindow : Window
             {
                 args.Cancel = false;
                 args.Handled = false;
+                TrackDownload(runtime, args.DownloadOperation);
                 _diagnostics.Record("download.allowed");
             }
             else
@@ -709,6 +722,98 @@ public sealed partial class MainWindow : Window
     private static bool IsBlankPage(string value) =>
         string.Equals(value, "about:blank", StringComparison.OrdinalIgnoreCase);
 
+    private void TrackDownload(TabRuntime runtime, CoreWebView2DownloadOperation download)
+    {
+        runtime.IsDownloading = true;
+        download.StateChanged += OnStateChanged;
+
+        void OnStateChanged(CoreWebView2DownloadOperation operation, object eventArgs)
+        {
+            if (operation.State == CoreWebView2DownloadState.InProgress || operation.CanResume)
+            {
+                return;
+            }
+
+            operation.StateChanged -= OnStateChanged;
+            runtime.IsDownloading = false;
+            if (_tabsById.ContainsKey(runtime.Id) && runtime.Id != _session.ActiveTab.Id)
+            {
+                ScheduleTabSleep(runtime);
+            }
+        }
+    }
+
+    private void ScheduleTabSleep(TabRuntime runtime)
+    {
+        CancelScheduledSleep(runtime);
+        if (runtime.Core is null || runtime.Id == _session.ActiveTab.Id)
+        {
+            return;
+        }
+
+        runtime.SleepCancellation = new CancellationTokenSource();
+        _ = SuspendTabAfterDelayAsync(runtime, runtime.SleepCancellation.Token);
+    }
+
+    private async Task SuspendTabAfterDelayAsync(TabRuntime runtime, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(BackgroundTabSleepDelay, cancellationToken);
+            if (cancellationToken.IsCancellationRequested ||
+                !_tabsById.ContainsKey(runtime.Id) ||
+                runtime.Core is null)
+            {
+                return;
+            }
+
+            var activity = new TabActivityState(
+                IsActive: runtime.Id == _session.ActiveTab.Id,
+                IsInitialized: true,
+                IsPlayingAudio: runtime.Core.IsDocumentPlayingAudio,
+                IsDownloading: runtime.IsDownloading,
+                HasSensitiveActivity: runtime.HasSensitiveActivity,
+                IsSecurityPromptOpen: _securityPromptOpen);
+            if (!TabSleepPolicy.CanSuspend(activity))
+            {
+                return;
+            }
+
+            runtime.IsSuspended = await runtime.Core.TrySuspendAsync();
+            if (runtime.IsSuspended)
+            {
+                _diagnostics.Record("tab.suspended");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Selecting or closing the tab cancels its pending sleep operation.
+        }
+        catch (Exception exception)
+        {
+            _diagnostics.Record("tab.suspend_failed", DiagnosticLevel.Warning, exception);
+        }
+    }
+
+    private static void CancelScheduledSleep(TabRuntime runtime)
+    {
+        runtime.SleepCancellation?.Cancel();
+        runtime.SleepCancellation?.Dispose();
+        runtime.SleepCancellation = null;
+    }
+
+    private void ResumeTab(TabRuntime runtime)
+    {
+        if (!runtime.IsSuspended || runtime.Core is null)
+        {
+            return;
+        }
+
+        runtime.Core.Resume();
+        runtime.IsSuspended = false;
+        _diagnostics.Record("tab.resumed");
+    }
+
     private void OnAddTabButtonClick(TabView sender, object args)
     {
         var state = _session.OpenTab();
@@ -731,6 +836,54 @@ public sealed partial class MainWindow : Window
         if (args.Tab.Tag is BrowserTabId id)
         {
             CloseTab(id);
+        }
+    }
+
+    private async void OnPerformanceSnapshotClick(object sender, RoutedEventArgs args)
+    {
+        if (_securityPromptOpen || RootLayout.XamlRoot is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _securityPromptOpen = true;
+            var environment = await _environmentProvider.GetEnvironmentAsync();
+            var snapshot = WebViewProcessSampler.Capture(environment);
+            _diagnostics.Record(
+                "webview.process_snapshot",
+                durationMilliseconds: snapshot.TotalProcessorTimeMilliseconds,
+                workingSetMegabytes: snapshot.WorkingSetMegabytes);
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = RootLayout.XamlRoot,
+                Title = _localizer.GetString("PerformanceSnapshotTitle"),
+                Content = new TextBlock
+                {
+                    Text = _localizer.Format(
+                        "PerformanceSnapshotFormat",
+                        snapshot.ReportedProcessCount,
+                        snapshot.SampledProcessCount,
+                        snapshot.WorkingSetMegabytes,
+                        snapshot.PrivateMemoryMegabytes,
+                        snapshot.TotalProcessorTimeMilliseconds,
+                        snapshot.HostWorkingSetMegabytes),
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                CloseButtonText = _localizer.GetString("PerformanceSnapshotClose"),
+            };
+            await dialog.ShowAsync();
+        }
+        catch (Exception exception)
+        {
+            _diagnostics.Record("webview.process_snapshot_failed", DiagnosticLevel.Error, exception);
+            ShowError(_localizer.GetString("PerformanceSnapshotFailed"));
+        }
+        finally
+        {
+            _securityPromptOpen = false;
         }
     }
 
@@ -787,6 +940,7 @@ public sealed partial class MainWindow : Window
             ? _localizer.Format("PrivateWindowTitleFormat", appTitle)
             : appTitle;
         NewPrivateWindowItem.Text = _localizer.GetString("NewPrivateWindow");
+        PerformanceSnapshotItem.Text = _localizer.GetString("PerformanceSnapshotMenu");
         RootLayout.Language = _language.Tag;
         RootLayout.FlowDirection = _language.IsRightToLeft
             ? FlowDirection.RightToLeft
@@ -883,6 +1037,14 @@ public sealed partial class MainWindow : Window
 
         public CoreWebView2? Core { get; set; }
 
+        public CancellationTokenSource? SleepCancellation { get; set; }
+
         public bool IsLoading { get; set; }
+
+        public bool IsDownloading { get; set; }
+
+        public bool HasSensitiveActivity { get; set; }
+
+        public bool IsSuspended { get; set; }
     }
 }

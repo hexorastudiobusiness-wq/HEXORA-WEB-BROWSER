@@ -165,4 +165,23 @@
   <data name="CertificateErrorFormat" xml:space="preserve">
     <value>تم حظر الاتصال لأن شهادة الموقع غير صالحة: {0}</value>
   </data>
+  <data name="PerformanceSnapshotMenu" xml:space="preserve">
+    <value>لقطة الأداء</value>
+  </data>
+  <data name="PerformanceSnapshotTitle" xml:space="preserve">
+    <value>لقطة أداء محلية</value>
+  </data>
+  <data name="PerformanceSnapshotFormat" xml:space="preserve">
+    <value>عمليات WebView2: تم الإبلاغ عن {0} وأخذ عينة من {1}
+مجموعة العمل: {2} ميغابايت
+الذاكرة الخاصة: {3} ميغابايت
+وقت المعالج التراكمي: {4} مللي ثانية
+مجموعة عمل عملية هكسورا: {5} ميغابايت</value>
+  </data>
+  <data name="PerformanceSnapshotClose" xml:space="preserve">
+    <value>إغلاق</value>
+  </data>
+  <data name="PerformanceSnapshotFailed" xml:space="preserve">
+    <value>مقاييس الأداء غير متاحة ضمن سياسة ويندوز الحالية.</value>
+  </data>
 </root>

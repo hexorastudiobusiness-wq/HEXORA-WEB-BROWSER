@@ -20,6 +20,8 @@ public sealed class WebViewEnvironmentProvider
 
     public WebViewProfileOptions Profile { get; }
 
+    public Task<CoreWebView2Environment> GetEnvironmentAsync() => _environment.Value;
+
     public async Task InitializeAsync(WebViewControl view)
     {
         ArgumentNullException.ThrowIfNull(view);
