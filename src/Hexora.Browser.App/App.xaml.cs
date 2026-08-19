@@ -14,12 +14,16 @@ public partial class App : Application
     private readonly LocalDiagnosticLogger _diagnostics = LocalDiagnosticLogger.CreateDefault();
     private readonly RunStateTracker _runState = RunStateTracker.CreateDefault();
     private Window? _window;
+    private bool _hasUnhandledException;
 
     public App()
     {
         InitializeComponent();
         UnhandledException += (_, args) =>
+        {
+            _hasUnhandledException = true;
             _diagnostics.Record("app.unhandled_exception", DiagnosticLevel.Critical, args.Exception);
+        };
     }
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
@@ -49,6 +53,11 @@ public partial class App : Application
             previousRunEndedUnexpectedly);
         _window.Closed += (_, _) =>
         {
+            if (_hasUnhandledException)
+            {
+                return;
+            }
+
             _diagnostics.Record("app.closed");
             _runState.CompleteRun();
         };
