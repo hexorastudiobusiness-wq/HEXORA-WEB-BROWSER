@@ -9,6 +9,8 @@ This checklist tracks the foundation exit gate defined in the [product roadmap](
 - [x] Keep Core independent of Windows and WebView2.
 - [x] Add an initial MVVM presentation foundation without a runtime MVVM dependency.
 - [x] Add a WinUI 3/WebView2 vertical slice with address/search navigation.
+- [x] Connect the tab/session model to independently owned, lazy-created WebView2 controls.
+- [x] Implement real tab creation, activation, closing, title updates, and active-tab navigation state.
 - [x] Reject direct navigation to unsafe address-bar schemes.
 - [x] Disable WebView host objects by default.
 - [x] Add English, Persian, and Arabic WinUI resource files.

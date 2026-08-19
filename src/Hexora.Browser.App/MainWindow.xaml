@@ -7,7 +7,10 @@
   mc:Ignorable="d"
   Title="HEXORA BROWSER">
 
-  <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+  <Grid
+    x:Name="RootLayout"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+    Loaded="OnRootLoaded">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -19,15 +22,9 @@
       x:Name="Tabs"
       Grid.Row="0"
       IsAddTabButtonVisible="True"
-      AddTabButtonClick="OnAddTabButtonClick">
-      <TabView.TabItems>
-        <TabViewItem
-          x:Name="ActiveTab"
-          x:Uid="ActiveTab"
-          Header="New tab"
-          IsClosable="False" />
-      </TabView.TabItems>
-    </TabView>
+      AddTabButtonClick="OnAddTabButtonClick"
+      SelectionChanged="OnTabSelectionChanged"
+      TabCloseRequested="OnTabCloseRequested" />
 
     <Border
       Grid.Row="1"
@@ -94,13 +91,10 @@
       </Grid>
     </Border>
 
-    <WebView2
-      x:Name="BrowserView"
+    <Grid
+      x:Name="BrowserHost"
       Grid.Row="2"
-      HorizontalAlignment="Stretch"
-      VerticalAlignment="Stretch"
-      NavigationStarting="OnNavigationStarting"
-      NavigationCompleted="OnNavigationCompleted" />
+      Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" />
 
     <InfoBar
       x:Name="StatusBar"

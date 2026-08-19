@@ -81,10 +81,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public void UpdateNavigationState(Uri? source, string? title, bool isLoading, bool canGoBack, bool canGoForward)
     {
-        if (source is not null && source.Scheme is "http" or "https")
-        {
-            Address = source.AbsoluteUri;
-        }
+        Address = source is not null && source.Scheme is "http" or "https"
+            ? source.AbsoluteUri
+            : string.Empty;
 
         PageTitle = string.IsNullOrWhiteSpace(title) ? "New tab" : title;
         IsLoading = isLoading;
