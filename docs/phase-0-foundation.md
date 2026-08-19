@@ -21,7 +21,8 @@ This checklist tracks the foundation exit gate defined in the [product roadmap](
 
 - [ ] Confirm the Windows App SDK 1.8 servicing line on real target hardware.
 - [ ] Add dependency injection at the composition root without service-location in views.
-- [ ] Define tab, window, session, and profile lifecycle models.
+- [x] Define the initial tab/session state model.
+- [ ] Define window and WebView profile lifecycle models.
 - [ ] Implement runtime language selection, persistence, and complete RTL layout mirroring.
 - [ ] Add pseudo-localization and automated resource-key parity checks.
 - [ ] Replace temporary diagnostic strings with localized error codes/messages.
