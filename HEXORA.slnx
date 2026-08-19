@@ -7,5 +7,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Hexora.Browser.Core.Tests/Hexora.Browser.Core.Tests.csproj" />
+    <Project Path="tests/Hexora.Browser.Infrastructure.Tests/Hexora.Browser.Infrastructure.Tests.csproj" />
   </Folder>
 </Solution>

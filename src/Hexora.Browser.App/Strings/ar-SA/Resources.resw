@@ -75,4 +75,7 @@
   <data name="SettingsSaveFailed" xml:space="preserve">
     <value>تعذر حفظ اللغة المحددة.</value>
   </data>
+  <data name="PreviousRunEndedUnexpectedly" xml:space="preserve">
+    <value>لم يُغلق هكسورا بصورة طبيعية في المرة السابقة. لا يزال ملفك الشخصي الحالي متاحًا.</value>
+  </data>
 </root>

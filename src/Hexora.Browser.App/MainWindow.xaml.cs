@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Hexora.Browser.App.Localization;
 using Hexora.Browser.App.ViewModels;
@@ -5,6 +6,7 @@ using Hexora.Browser.Core.Browsing;
 using Hexora.Browser.Core.Localization;
 using Hexora.Browser.Core.Navigation;
 using Hexora.Browser.Core.Settings;
+using Hexora.Browser.Infrastructure.Diagnostics;
 using Hexora.Browser.Infrastructure.Settings;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -20,7 +22,10 @@ public sealed partial class MainWindow : Window
 {
     private readonly BrowserSession _session = new();
     private readonly BrowserSettingsRepository _settingsRepository;
+    private readonly LocalDiagnosticLogger _diagnostics;
+    private readonly Stopwatch _startupTimer;
     private readonly AppLocalizer _localizer;
+    private readonly bool _previousRunEndedUnexpectedly;
     private readonly Dictionary<BrowserTabId, TabRuntime> _tabsById = [];
     private readonly Dictionary<WebViewControl, TabRuntime> _tabsByView = [];
     private readonly Dictionary<CoreWebView2, TabRuntime> _tabsByCore = [];
@@ -33,11 +38,17 @@ public sealed partial class MainWindow : Window
     public MainWindow(
         BrowserSettingsRepository settingsRepository,
         BrowserSettings settings,
-        SupportedLanguage language)
+        SupportedLanguage language,
+        LocalDiagnosticLogger diagnostics,
+        Stopwatch startupTimer,
+        bool previousRunEndedUnexpectedly)
     {
         _settingsRepository = settingsRepository;
         _settings = settings;
         _language = language;
+        _diagnostics = diagnostics;
+        _startupTimer = startupTimer;
+        _previousRunEndedUnexpectedly = previousRunEndedUnexpectedly;
         _localizer = new AppLocalizer(language.Tag);
 
         InitializeComponent();
@@ -60,6 +71,18 @@ public sealed partial class MainWindow : Window
 
         _isRootLoaded = true;
         await ActivateTabAsync(_session.ActiveTab.Id);
+
+        using var currentProcess = Process.GetCurrentProcess();
+        var workingSetMegabytes = currentProcess.WorkingSet64 / (1024 * 1024);
+        _diagnostics.Record(
+            "app.window_interactive",
+            durationMilliseconds: _startupTimer.ElapsedMilliseconds,
+            workingSetMegabytes: workingSetMegabytes);
+
+        if (_previousRunEndedUnexpectedly && !StatusBar.IsOpen)
+        {
+            ShowWarning(_localizer.GetString("PreviousRunEndedUnexpectedly"));
+        }
     }
 
     private TabRuntime CreateVisualTab(BrowserTabState state)
@@ -113,6 +136,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception)
         {
+            _diagnostics.Record("webview.initialization_failed", DiagnosticLevel.Error, exception);
             ShowError(_localizer.Format("InitializationFailedFormat", exception.Message));
         }
     }
@@ -258,6 +282,7 @@ public sealed partial class MainWindow : Window
         UpdateRuntimeState(runtime, isLoading: false);
         if (!args.IsSuccess && runtime.Id == _session.ActiveTab.Id)
         {
+            _diagnostics.Record("webview.navigation_failed", DiagnosticLevel.Warning);
             ShowError(_localizer.Format("NavigationFailedFormat", args.WebErrorStatus));
         }
     }
@@ -282,6 +307,7 @@ public sealed partial class MainWindow : Window
     {
         if (_tabsByCore.TryGetValue(sender, out var runtime) && runtime.Id == _session.ActiveTab.Id)
         {
+            _diagnostics.Record("webview.process_failed", DiagnosticLevel.Error);
             ShowError(_localizer.Format("WebContentProcessFailedFormat", args.ProcessFailedKind));
         }
     }
@@ -341,9 +367,11 @@ public sealed partial class MainWindow : Window
             App.ApplyCulture(selectedLanguage.Tag);
             _localizer.SetLanguage(selectedLanguage.Tag);
             ApplyLocalization();
+            _diagnostics.Record("settings.language_changed");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
+            _diagnostics.Record("settings.save_failed", DiagnosticLevel.Error, exception);
             ShowError(_localizer.GetString("SettingsSaveFailed"));
             UpdateLanguageChecks();
         }
@@ -426,6 +454,14 @@ public sealed partial class MainWindow : Window
 
     private void ShowError(string message)
     {
+        StatusBar.Severity = InfoBarSeverity.Error;
+        StatusBar.Message = message;
+        StatusBar.IsOpen = true;
+    }
+
+    private void ShowWarning(string message)
+    {
+        StatusBar.Severity = InfoBarSeverity.Warning;
         StatusBar.Message = message;
         StatusBar.IsOpen = true;
     }

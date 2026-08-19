@@ -75,4 +75,7 @@
   <data name="SettingsSaveFailed" xml:space="preserve">
     <value>ذخیره زبان انتخاب‌شده امکان‌پذیر نبود.</value>
   </data>
+  <data name="PreviousRunEndedUnexpectedly" xml:space="preserve">
+    <value>هکسورا دفعه قبل به‌طور عادی بسته نشد. نمایه فعلی شما همچنان در دسترس است.</value>
+  </data>
 </root>

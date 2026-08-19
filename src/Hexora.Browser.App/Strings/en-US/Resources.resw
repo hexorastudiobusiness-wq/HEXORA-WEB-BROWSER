@@ -75,4 +75,7 @@
   <data name="SettingsSaveFailed" xml:space="preserve">
     <value>The language preference could not be saved.</value>
   </data>
+  <data name="PreviousRunEndedUnexpectedly" xml:space="preserve">
+    <value>HEXORA did not close normally last time. Your current profile remains available.</value>
+  </data>
 </root>

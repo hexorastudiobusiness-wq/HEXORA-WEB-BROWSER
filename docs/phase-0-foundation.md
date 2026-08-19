@@ -29,11 +29,12 @@ This checklist tracks the foundation exit gate defined in the [product roadmap](
 - [ ] Complete RTL visual validation at all target display scales.
 - [ ] Add pseudo-localization and automated resource-key parity checks.
 - [x] Replace current dynamic diagnostic strings with localized messages.
-- [ ] Add privacy-safe structured local logging with bounded retention.
-- [ ] Add global crash boundaries and a local crash-recovery marker.
-- [ ] Create the WebView2 baseline/performance harness on the reference device.
-- [ ] Record cold/warm startup and one-tab memory baselines.
-- [ ] Create the data-flow diagram and initial threat model.
+- [x] Add privacy-safe structured local logging with bounded retention.
+- [x] Add a global unhandled-exception boundary and local crash-recovery marker.
+- [x] Record startup duration and host-process working set as local-only baseline inputs.
+- [ ] Create the full WebView2 process-group performance harness on the reference device.
+- [ ] Record repeatable cold/warm startup and one-tab process-group memory baselines.
+- [x] Create the data-flow diagram and initial threat model.
 - [ ] Define permission, download, certificate, external-protocol, and authentication policies.
 - [ ] Add architecture tests to enforce project dependency direction.
 - [ ] Produce a signed development MSIX proof of concept.
