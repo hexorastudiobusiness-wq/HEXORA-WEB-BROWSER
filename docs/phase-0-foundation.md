@@ -24,7 +24,7 @@ This checklist tracks the foundation exit gate defined in the [product roadmap](
 - [ ] Confirm the Windows App SDK 1.8 servicing line on real target hardware.
 - [ ] Add dependency injection at the composition root without service-location in views.
 - [x] Define the initial tab/session state model.
-- [ ] Define window and WebView profile lifecycle models.
+- [x] Define normal-window and isolated private-profile lifecycle models.
 - [x] Implement runtime language selection, persistence, and immediate RTL/LTR switching.
 - [ ] Complete RTL visual validation at all target display scales.
 - [ ] Add pseudo-localization and automated resource-key parity checks.
@@ -35,7 +35,8 @@ This checklist tracks the foundation exit gate defined in the [product roadmap](
 - [ ] Create the full WebView2 process-group performance harness on the reference device.
 - [ ] Record repeatable cold/warm startup and one-tab process-group memory baselines.
 - [x] Create the data-flow diagram and initial threat model.
-- [ ] Define permission, download, certificate, external-protocol, and authentication policies.
+- [x] Implement the initial non-persistent, explicit permission-request policy.
+- [ ] Define download, certificate, external-protocol, and authentication policies.
 - [ ] Add architecture tests to enforce project dependency direction.
 - [ ] Produce a signed development MSIX proof of concept.
 

@@ -19,8 +19,8 @@ public sealed class AppLocalizer
     public string GetString(string resourceName) =>
         _resourceMap.GetValue(resourceName, _context).ValueAsString;
 
-    public string Format(string resourceName, object? value) =>
-        string.Format(System.Globalization.CultureInfo.CurrentCulture, GetString(resourceName), value);
+    public string Format(string resourceName, params object?[] values) =>
+        string.Format(System.Globalization.CultureInfo.CurrentCulture, GetString(resourceName), values);
 
     public void SetLanguage(string languageTag)
     {

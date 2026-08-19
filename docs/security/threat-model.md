@@ -64,6 +64,23 @@ It must never contain URLs, search terms, page titles, page content, cookies, re
 - A stale marker shows a localized warning on the next launch and records a local event.
 - The marker contains only start time and process ID; it is not a crash dump.
 
+### Profile and private-window isolation
+
+- Normal tabs share one named persistent WebView2 profile and user-data folder.
+- Each private window receives a unique user-data folder and an InPrivate controller profile.
+- Private browsing data is not intentionally persisted by WebView2; the temporary folder is also deleted on close when file locks permit.
+- Locked abandoned private folders older than seven days are removed on a later launch.
+- Deletion is constrained to descendants of the dedicated private-profile root.
+
+### Site permissions
+
+- Every permission request defaults to deny.
+- Decisions are never saved into the WebView2 profile.
+- Only the active tab can display a prompt; background and concurrent requests are denied.
+- An allow decision applies to the current request only.
+- The prompt displays only the requesting host and localized capability name.
+- Permission decisions are logged without origin, URL, or capability details.
+
 ### Resource exhaustion
 
 - WebView controls are created lazily on first tab activation.
@@ -77,9 +94,9 @@ The following require separate designs before code is accepted:
 
 - passwords, passkeys, payment and autofill data;
 - downloads and dangerous-file classification;
-- camera, microphone, location, clipboard, notification, and screen-capture permissions;
+- persistent per-site permission management and screen-capture policy;
 - certificate errors and HTTP authentication;
-- private profiles and profile deletion;
+- private-profile verification under crash, update, and multi-instance conditions;
 - content blocking and remotely updated rules;
 - extension installation and permissions;
 - cloud accounts and encrypted sync.

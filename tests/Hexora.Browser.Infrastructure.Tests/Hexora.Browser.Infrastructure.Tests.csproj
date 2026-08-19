@@ -15,5 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Hexora.Browser.Infrastructure/Hexora.Browser.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/Hexora.Browser.WebView2/Hexora.Browser.WebView2.csproj" />
   </ItemGroup>
 </Project>

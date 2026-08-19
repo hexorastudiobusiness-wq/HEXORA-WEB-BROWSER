@@ -2,12 +2,14 @@ using System.Diagnostics;
 using System.Text.Json;
 using Hexora.Browser.App.Localization;
 using Hexora.Browser.App.ViewModels;
+using Hexora.Browser.App.WebView;
 using Hexora.Browser.Core.Browsing;
 using Hexora.Browser.Core.Localization;
 using Hexora.Browser.Core.Navigation;
 using Hexora.Browser.Core.Settings;
 using Hexora.Browser.Infrastructure.Diagnostics;
 using Hexora.Browser.Infrastructure.Settings;
+using Hexora.Browser.WebView2;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -25,6 +27,8 @@ public sealed partial class MainWindow : Window
     private readonly LocalDiagnosticLogger _diagnostics;
     private readonly Stopwatch _startupTimer;
     private readonly AppLocalizer _localizer;
+    private readonly WebViewEnvironmentProvider _environmentProvider;
+    private bool _permissionPromptOpen;
     private readonly bool _previousRunEndedUnexpectedly;
     private readonly Dictionary<BrowserTabId, TabRuntime> _tabsById = [];
     private readonly Dictionary<WebViewControl, TabRuntime> _tabsByView = [];
@@ -35,12 +39,17 @@ public sealed partial class MainWindow : Window
 
     public MainWindowViewModel ViewModel { get; } = new(new NavigationInputParser());
 
+    public WebViewProfileOptions Profile => _environmentProvider.Profile;
+
+    public event EventHandler<PrivateWindowRequestedEventArgs>? PrivateWindowRequested;
+
     public MainWindow(
         BrowserSettingsRepository settingsRepository,
         BrowserSettings settings,
         SupportedLanguage language,
         LocalDiagnosticLogger diagnostics,
         Stopwatch startupTimer,
+        WebViewEnvironmentProvider environmentProvider,
         bool previousRunEndedUnexpectedly)
     {
         _settingsRepository = settingsRepository;
@@ -48,6 +57,7 @@ public sealed partial class MainWindow : Window
         _language = language;
         _diagnostics = diagnostics;
         _startupTimer = startupTimer;
+        _environmentProvider = environmentProvider;
         _previousRunEndedUnexpectedly = previousRunEndedUnexpectedly;
         _localizer = new AppLocalizer(language.Tag);
 
@@ -57,6 +67,7 @@ public sealed partial class MainWindow : Window
 
         ViewModel.NavigationRequested += OnNavigationRequested;
         ViewModel.CommandRequested += OnCommandRequested;
+        Closed += OnWindowClosed;
 
         var initialRuntime = CreateVisualTab(_session.ActiveTab);
         Tabs.SelectedItem = initialRuntime.Item;
@@ -122,7 +133,7 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            await view.EnsureCoreWebView2Async();
+            await _environmentProvider.InitializeAsync(view);
             var core = view.CoreWebView2;
             runtime.Core = core;
             _tabsByCore.Add(core, runtime);
@@ -149,6 +160,7 @@ public sealed partial class MainWindow : Window
         core.DocumentTitleChanged += OnDocumentTitleChanged;
         core.SourceChanged += OnCoreSourceChanged;
         core.ProcessFailed += OnWebViewProcessFailed;
+        core.PermissionRequested += OnPermissionRequested;
     }
 
     private async Task ActivateTabAsync(BrowserTabId id)
@@ -171,6 +183,19 @@ public sealed partial class MainWindow : Window
 
         UpdateRuntimeState(runtime);
         AddressBox.Focus(FocusState.Programmatic);
+    }
+
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        foreach (var runtime in _tabsById.Values)
+        {
+            runtime.View?.Close();
+        }
+
+        _tabsByCore.Clear();
+        _tabsByView.Clear();
+        _tabsById.Clear();
+        BrowserHost.Children.Clear();
     }
 
     private void CloseTab(BrowserTabId id)
@@ -312,6 +337,79 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void OnPermissionRequested(CoreWebView2 sender, CoreWebView2PermissionRequestedEventArgs args)
+    {
+        args.SavesInProfile = false;
+        args.State = CoreWebView2PermissionState.Deny;
+        args.Handled = true;
+        var deferral = args.GetDeferral();
+
+        try
+        {
+            if (_permissionPromptOpen ||
+                !_tabsByCore.TryGetValue(sender, out var runtime) ||
+                runtime.Id != _session.ActiveTab.Id ||
+                RootLayout.XamlRoot is null)
+            {
+                _diagnostics.Record("permission.denied_without_prompt", DiagnosticLevel.Warning);
+                return;
+            }
+
+            _permissionPromptOpen = true;
+            var permissionName = GetPermissionDisplayName(args.PermissionKind);
+            var requestingHost = GetRequestingHost(args.Uri);
+            var dialog = new ContentDialog
+            {
+                XamlRoot = RootLayout.XamlRoot,
+                Title = _localizer.GetString("PermissionDialogTitle"),
+                Content = _localizer.Format("PermissionRequestFormat", requestingHost, permissionName),
+                PrimaryButtonText = _localizer.GetString("PermissionAllow"),
+                CloseButtonText = _localizer.GetString("PermissionDeny"),
+                DefaultButton = ContentDialogButton.Close,
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result == ContentDialogResult.Primary)
+            {
+                args.State = CoreWebView2PermissionState.Allow;
+                _diagnostics.Record("permission.allowed_once");
+            }
+            else
+            {
+                _diagnostics.Record("permission.denied");
+            }
+        }
+        catch (Exception exception)
+        {
+            _diagnostics.Record("permission.prompt_failed", DiagnosticLevel.Error, exception);
+        }
+        finally
+        {
+            _permissionPromptOpen = false;
+            deferral.Complete();
+        }
+    }
+
+    private string GetPermissionDisplayName(CoreWebView2PermissionKind permissionKind)
+    {
+        var resourceName = permissionKind.ToString() switch
+        {
+            "Camera" => "PermissionCamera",
+            "Microphone" => "PermissionMicrophone",
+            "Geolocation" => "PermissionLocation",
+            "Notifications" => "PermissionNotifications",
+            "ClipboardRead" => "PermissionClipboard",
+            "MultipleAutomaticDownloads" => "PermissionDownloads",
+            _ => "PermissionOther",
+        };
+        return _localizer.GetString(resourceName);
+    }
+
+    private static string GetRequestingHost(string value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.IdnHost)
+            ? uri.IdnHost
+            : "—";
+
     private void OnAddTabButtonClick(TabView sender, object args)
     {
         var state = _session.OpenTab();
@@ -335,6 +433,12 @@ public sealed partial class MainWindow : Window
         {
             CloseTab(id);
         }
+    }
+
+    private void OnNewPrivateWindowClick(object sender, RoutedEventArgs args)
+    {
+        _diagnostics.Record("window.private_requested");
+        PrivateWindowRequested?.Invoke(this, new PrivateWindowRequestedEventArgs(_language));
     }
 
     private async void OnLanguageItemClick(object sender, RoutedEventArgs args)
@@ -379,7 +483,11 @@ public sealed partial class MainWindow : Window
 
     private void ApplyLocalization()
     {
-        Title = _localizer.GetString("AppTitle");
+        var appTitle = _localizer.GetString("AppTitle");
+        Title = _environmentProvider.Profile.IsPrivate
+            ? _localizer.Format("PrivateWindowTitleFormat", appTitle)
+            : appTitle;
+        NewPrivateWindowItem.Text = _localizer.GetString("NewPrivateWindow");
         RootLayout.Language = _language.Tag;
         RootLayout.FlowDirection = _language.IsRightToLeft
             ? FlowDirection.RightToLeft

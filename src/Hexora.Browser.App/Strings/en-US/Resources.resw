@@ -78,4 +78,43 @@
   <data name="PreviousRunEndedUnexpectedly" xml:space="preserve">
     <value>HEXORA did not close normally last time. Your current profile remains available.</value>
   </data>
+  <data name="NewPrivateWindow" xml:space="preserve">
+    <value>New private window</value>
+  </data>
+  <data name="PrivateWindowTitleFormat" xml:space="preserve">
+    <value>{0} — Private</value>
+  </data>
+  <data name="PermissionDialogTitle" xml:space="preserve">
+    <value>Site permission</value>
+  </data>
+  <data name="PermissionRequestFormat" xml:space="preserve">
+    <value>{0} wants permission to use {1}. Allow for this request only?</value>
+  </data>
+  <data name="PermissionAllow" xml:space="preserve">
+    <value>Allow once</value>
+  </data>
+  <data name="PermissionDeny" xml:space="preserve">
+    <value>Deny</value>
+  </data>
+  <data name="PermissionCamera" xml:space="preserve">
+    <value>your camera</value>
+  </data>
+  <data name="PermissionMicrophone" xml:space="preserve">
+    <value>your microphone</value>
+  </data>
+  <data name="PermissionLocation" xml:space="preserve">
+    <value>your location</value>
+  </data>
+  <data name="PermissionNotifications" xml:space="preserve">
+    <value>notifications</value>
+  </data>
+  <data name="PermissionClipboard" xml:space="preserve">
+    <value>your clipboard</value>
+  </data>
+  <data name="PermissionDownloads" xml:space="preserve">
+    <value>automatic downloads</value>
+  </data>
+  <data name="PermissionOther" xml:space="preserve">
+    <value>a protected capability</value>
+  </data>
 </root>

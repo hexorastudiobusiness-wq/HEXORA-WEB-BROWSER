@@ -88,6 +88,10 @@
           Height="36">
           <Button.Flyout>
             <MenuFlyout>
+              <MenuFlyoutItem
+                x:Name="NewPrivateWindowItem"
+                Click="OnNewPrivateWindowClick" />
+              <MenuFlyoutSeparator />
               <MenuFlyoutSubItem x:Name="LanguageMenuItem">
                 <ToggleMenuFlyoutItem
                   x:Name="EnglishLanguageItem"

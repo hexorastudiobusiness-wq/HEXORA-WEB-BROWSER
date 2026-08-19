@@ -78,4 +78,43 @@
   <data name="PreviousRunEndedUnexpectedly" xml:space="preserve">
     <value>لم يُغلق هكسورا بصورة طبيعية في المرة السابقة. لا يزال ملفك الشخصي الحالي متاحًا.</value>
   </data>
+  <data name="NewPrivateWindow" xml:space="preserve">
+    <value>نافذة خاصة جديدة</value>
+  </data>
+  <data name="PrivateWindowTitleFormat" xml:space="preserve">
+    <value>{0} — خاص</value>
+  </data>
+  <data name="PermissionDialogTitle" xml:space="preserve">
+    <value>إذن الموقع</value>
+  </data>
+  <data name="PermissionRequestFormat" xml:space="preserve">
+    <value>يريد الموقع {0} استخدام {1}. هل تسمح لهذا الطلب فقط؟</value>
+  </data>
+  <data name="PermissionAllow" xml:space="preserve">
+    <value>السماح مرة واحدة</value>
+  </data>
+  <data name="PermissionDeny" xml:space="preserve">
+    <value>رفض</value>
+  </data>
+  <data name="PermissionCamera" xml:space="preserve">
+    <value>الكاميرا</value>
+  </data>
+  <data name="PermissionMicrophone" xml:space="preserve">
+    <value>الميكروفون</value>
+  </data>
+  <data name="PermissionLocation" xml:space="preserve">
+    <value>موقعك</value>
+  </data>
+  <data name="PermissionNotifications" xml:space="preserve">
+    <value>الإشعارات</value>
+  </data>
+  <data name="PermissionClipboard" xml:space="preserve">
+    <value>الحافظة</value>
+  </data>
+  <data name="PermissionDownloads" xml:space="preserve">
+    <value>التنزيلات التلقائية</value>
+  </data>
+  <data name="PermissionOther" xml:space="preserve">
+    <value>إمكانية محمية</value>
+  </data>
 </root>

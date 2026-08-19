@@ -78,4 +78,43 @@
   <data name="PreviousRunEndedUnexpectedly" xml:space="preserve">
     <value>هکسورا دفعه قبل به‌طور عادی بسته نشد. نمایه فعلی شما همچنان در دسترس است.</value>
   </data>
+  <data name="NewPrivateWindow" xml:space="preserve">
+    <value>پنجره خصوصی جدید</value>
+  </data>
+  <data name="PrivateWindowTitleFormat" xml:space="preserve">
+    <value>{0} — خصوصی</value>
+  </data>
+  <data name="PermissionDialogTitle" xml:space="preserve">
+    <value>دسترسی سایت</value>
+  </data>
+  <data name="PermissionRequestFormat" xml:space="preserve">
+    <value>سایت {0} می‌خواهد از {1} استفاده کند. فقط برای این درخواست اجازه می‌دهید؟</value>
+  </data>
+  <data name="PermissionAllow" xml:space="preserve">
+    <value>یک‌بار اجازه بده</value>
+  </data>
+  <data name="PermissionDeny" xml:space="preserve">
+    <value>رد کردن</value>
+  </data>
+  <data name="PermissionCamera" xml:space="preserve">
+    <value>دوربین شما</value>
+  </data>
+  <data name="PermissionMicrophone" xml:space="preserve">
+    <value>میکروفون شما</value>
+  </data>
+  <data name="PermissionLocation" xml:space="preserve">
+    <value>موقعیت مکانی شما</value>
+  </data>
+  <data name="PermissionNotifications" xml:space="preserve">
+    <value>اعلان‌ها</value>
+  </data>
+  <data name="PermissionClipboard" xml:space="preserve">
+    <value>حافظه موقت شما</value>
+  </data>
+  <data name="PermissionDownloads" xml:space="preserve">
+    <value>دانلودهای خودکار</value>
+  </data>
+  <data name="PermissionOther" xml:space="preserve">
+    <value>یک قابلیت محافظت‌شده</value>
+  </data>
 </root>
