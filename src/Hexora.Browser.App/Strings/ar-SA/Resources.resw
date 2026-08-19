@@ -117,4 +117,52 @@
   <data name="PermissionOther" xml:space="preserve">
     <value>إمكانية محمية</value>
   </data>
+  <data name="ExternalProtocolDialogTitle" xml:space="preserve">
+    <value>فتح تطبيق آخر؟</value>
+  </data>
+  <data name="ExternalProtocolRequestFormat" xml:space="preserve">
+    <value>تريد هذه الصفحة فتح بروتوكول «{0}» في تطبيق آخر. هل تريد المتابعة؟</value>
+  </data>
+  <data name="ExternalProtocolOpen" xml:space="preserve">
+    <value>فتح التطبيق</value>
+  </data>
+  <data name="ExternalProtocolCancel" xml:space="preserve">
+    <value>إلغاء</value>
+  </data>
+  <data name="DownloadDialogTitle" xml:space="preserve">
+    <value>تنزيل الملف؟</value>
+  </data>
+  <data name="DownloadRequestFormat" xml:space="preserve">
+    <value>هل تسمح لهذه الصفحة بتنزيل «{0}»؟ سيعرض مربع تنزيل WebView2 الافتراضي الوجهة للمراجعة.</value>
+  </data>
+  <data name="PrivateDownloadRequestFormat" xml:space="preserve">
+    <value>هل تسمح لهذه الصفحة الخاصة بتنزيل «{0}»؟ تبقى الملفات المنزلة على الجهاز بعد إغلاق النافذة الخاصة.</value>
+  </data>
+  <data name="DownloadAllow" xml:space="preserve">
+    <value>متابعة</value>
+  </data>
+  <data name="DownloadCancel" xml:space="preserve">
+    <value>إلغاء</value>
+  </data>
+  <data name="AuthenticationDialogTitle" xml:space="preserve">
+    <value>تسجيل الدخول إلى الموقع</value>
+  </data>
+  <data name="AuthenticationRequestFormat" xml:space="preserve">
+    <value>طلب موقع HTTPS ‏{0} مصادقة HTTP. تُستخدم البيانات لهذا الطلب فقط ولا يحفظها هكسورا.</value>
+  </data>
+  <data name="AuthenticationUserName" xml:space="preserve">
+    <value>اسم المستخدم</value>
+  </data>
+  <data name="AuthenticationPassword" xml:space="preserve">
+    <value>كلمة المرور</value>
+  </data>
+  <data name="AuthenticationContinue" xml:space="preserve">
+    <value>تسجيل الدخول</value>
+  </data>
+  <data name="AuthenticationCancel" xml:space="preserve">
+    <value>إلغاء</value>
+  </data>
+  <data name="CertificateErrorFormat" xml:space="preserve">
+    <value>تم حظر الاتصال لأن شهادة الموقع غير صالحة: {0}</value>
+  </data>
 </root>

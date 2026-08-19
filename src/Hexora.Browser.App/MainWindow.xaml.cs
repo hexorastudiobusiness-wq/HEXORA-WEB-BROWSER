@@ -22,13 +22,21 @@ namespace Hexora.Browser.App;
 
 public sealed partial class MainWindow : Window
 {
+    private static readonly HashSet<string> AllowedExternalSchemes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "mailto",
+        "sms",
+        "tel",
+        "webcal",
+    };
+
     private readonly BrowserSession _session = new();
     private readonly BrowserSettingsRepository _settingsRepository;
     private readonly LocalDiagnosticLogger _diagnostics;
     private readonly Stopwatch _startupTimer;
     private readonly AppLocalizer _localizer;
     private readonly WebViewEnvironmentProvider _environmentProvider;
-    private bool _permissionPromptOpen;
+    private bool _securityPromptOpen;
     private readonly bool _previousRunEndedUnexpectedly;
     private readonly Dictionary<BrowserTabId, TabRuntime> _tabsById = [];
     private readonly Dictionary<WebViewControl, TabRuntime> _tabsByView = [];
@@ -161,6 +169,10 @@ public sealed partial class MainWindow : Window
         core.SourceChanged += OnCoreSourceChanged;
         core.ProcessFailed += OnWebViewProcessFailed;
         core.PermissionRequested += OnPermissionRequested;
+        core.NewWindowRequested += OnNewWindowRequested;
+        core.DownloadStarting += OnDownloadStarting;
+        core.BasicAuthenticationRequested += OnBasicAuthenticationRequested;
+        core.ServerCertificateErrorDetected += OnServerCertificateErrorDetected;
     }
 
     private async Task ActivateTabAsync(BrowserTabId id)
@@ -286,10 +298,27 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnNavigationStarting(WebViewControl sender, CoreWebView2NavigationStartingEventArgs args)
+    private async void OnNavigationStarting(WebViewControl sender, CoreWebView2NavigationStartingEventArgs args)
     {
         if (!_tabsByView.TryGetValue(sender, out var runtime))
         {
+            args.Cancel = true;
+            return;
+        }
+
+        if (!TryCreateAllowedWebUri(args.Uri, out _) && !IsBlankPage(args.Uri))
+        {
+            args.Cancel = true;
+            UpdateRuntimeState(runtime, isLoading: false);
+
+            if (args.IsUserInitiated && TryCreateAllowedExternalUri(args.Uri, out var externalUri))
+            {
+                await PromptAndLaunchExternalUriAsync(externalUri);
+            }
+            else
+            {
+                _diagnostics.Record("navigation.external_blocked", DiagnosticLevel.Warning);
+            }
             return;
         }
 
@@ -343,10 +372,11 @@ public sealed partial class MainWindow : Window
         args.State = CoreWebView2PermissionState.Deny;
         args.Handled = true;
         var deferral = args.GetDeferral();
+        var ownsPrompt = false;
 
         try
         {
-            if (_permissionPromptOpen ||
+            if (_securityPromptOpen ||
                 !_tabsByCore.TryGetValue(sender, out var runtime) ||
                 runtime.Id != _session.ActiveTab.Id ||
                 RootLayout.XamlRoot is null)
@@ -355,7 +385,8 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            _permissionPromptOpen = true;
+            _securityPromptOpen = true;
+            ownsPrompt = true;
             var permissionName = GetPermissionDisplayName(args.PermissionKind);
             var requestingHost = GetRequestingHost(args.Uri);
             var dialog = new ContentDialog
@@ -385,7 +416,10 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            _permissionPromptOpen = false;
+            if (ownsPrompt)
+            {
+                _securityPromptOpen = false;
+            }
             deferral.Complete();
         }
     }
@@ -409,6 +443,271 @@ public sealed partial class MainWindow : Window
         Uri.TryCreate(value, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.IdnHost)
             ? uri.IdnHost
             : "—";
+
+    private async void OnNewWindowRequested(CoreWebView2 sender, CoreWebView2NewWindowRequestedEventArgs args)
+    {
+        args.Handled = true;
+        if (!args.IsUserInitiated)
+        {
+            _diagnostics.Record("navigation.popup_blocked", DiagnosticLevel.Warning);
+            return;
+        }
+
+        if (TryCreateAllowedWebUri(args.Uri, out var webUri))
+        {
+            OpenTab(webUri);
+            _diagnostics.Record("navigation.popup_opened_tab");
+            return;
+        }
+
+        if (TryCreateAllowedExternalUri(args.Uri, out var externalUri))
+        {
+            await PromptAndLaunchExternalUriAsync(externalUri);
+        }
+        else
+        {
+            _diagnostics.Record("navigation.popup_blocked", DiagnosticLevel.Warning);
+        }
+    }
+
+    private async void OnDownloadStarting(CoreWebView2 sender, CoreWebView2DownloadStartingEventArgs args)
+    {
+        args.Cancel = true;
+        args.Handled = true;
+        var deferral = args.GetDeferral();
+        var ownsPrompt = false;
+
+        try
+        {
+            if (_securityPromptOpen ||
+                !_tabsByCore.TryGetValue(sender, out var runtime) ||
+                runtime.Id != _session.ActiveTab.Id ||
+                RootLayout.XamlRoot is null)
+            {
+                _diagnostics.Record("download.denied_without_prompt", DiagnosticLevel.Warning);
+                return;
+            }
+
+            _securityPromptOpen = true;
+            ownsPrompt = true;
+            var suggestedName = Path.GetFileName(args.ResultFilePath);
+            var messageResource = Profile.IsPrivate
+                ? "PrivateDownloadRequestFormat"
+                : "DownloadRequestFormat";
+            var dialog = CreateConfirmationDialog(
+                "DownloadDialogTitle",
+                _localizer.Format(messageResource, suggestedName),
+                "DownloadAllow",
+                "DownloadCancel");
+
+            var result = await dialog.ShowAsync();
+            if (result == ContentDialogResult.Primary)
+            {
+                args.Cancel = false;
+                args.Handled = false;
+                _diagnostics.Record("download.allowed");
+            }
+            else
+            {
+                _diagnostics.Record("download.denied");
+            }
+        }
+        catch (Exception exception)
+        {
+            _diagnostics.Record("download.prompt_failed", DiagnosticLevel.Error, exception);
+        }
+        finally
+        {
+            if (ownsPrompt)
+            {
+                _securityPromptOpen = false;
+            }
+            deferral.Complete();
+        }
+    }
+
+    private async void OnBasicAuthenticationRequested(
+        CoreWebView2 sender,
+        CoreWebView2BasicAuthenticationRequestedEventArgs args)
+    {
+        args.Cancel = true;
+        var deferral = args.GetDeferral();
+        var ownsPrompt = false;
+
+        try
+        {
+            if (_securityPromptOpen ||
+                !_tabsByCore.TryGetValue(sender, out var runtime) ||
+                runtime.Id != _session.ActiveTab.Id ||
+                !Uri.TryCreate(args.Uri, UriKind.Absolute, out var requestUri) ||
+                requestUri.Scheme != Uri.UriSchemeHttps ||
+                RootLayout.XamlRoot is null)
+            {
+                _diagnostics.Record("authentication.denied_without_prompt", DiagnosticLevel.Warning);
+                return;
+            }
+
+            _securityPromptOpen = true;
+            ownsPrompt = true;
+            var userNameBox = new TextBox
+            {
+                Header = _localizer.GetString("AuthenticationUserName"),
+                MaxLength = 256,
+            };
+            var passwordBox = new PasswordBox
+            {
+                Header = _localizer.GetString("AuthenticationPassword"),
+                MaxLength = 1024,
+            };
+            var content = new StackPanel { Spacing = 12 };
+            content.Children.Add(new TextBlock
+            {
+                Text = _localizer.Format("AuthenticationRequestFormat", requestUri.IdnHost),
+                TextWrapping = TextWrapping.Wrap,
+            });
+            content.Children.Add(userNameBox);
+            content.Children.Add(passwordBox);
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = RootLayout.XamlRoot,
+                Title = _localizer.GetString("AuthenticationDialogTitle"),
+                Content = content,
+                PrimaryButtonText = _localizer.GetString("AuthenticationContinue"),
+                CloseButtonText = _localizer.GetString("AuthenticationCancel"),
+                DefaultButton = ContentDialogButton.Close,
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(userNameBox.Text))
+            {
+                args.Response.UserName = userNameBox.Text;
+                args.Response.Password = passwordBox.Password;
+                args.Cancel = false;
+                _diagnostics.Record("authentication.submitted");
+            }
+            else
+            {
+                _diagnostics.Record("authentication.denied");
+            }
+        }
+        catch (Exception exception)
+        {
+            _diagnostics.Record("authentication.prompt_failed", DiagnosticLevel.Error, exception);
+        }
+        finally
+        {
+            if (ownsPrompt)
+            {
+                _securityPromptOpen = false;
+            }
+            deferral.Complete();
+        }
+    }
+
+    private void OnServerCertificateErrorDetected(
+        CoreWebView2 sender,
+        CoreWebView2ServerCertificateErrorDetectedEventArgs args)
+    {
+        args.Action = CoreWebView2ServerCertificateErrorAction.Cancel;
+        _diagnostics.Record("certificate.request_blocked", DiagnosticLevel.Warning);
+
+        if (_tabsByCore.TryGetValue(sender, out var runtime) && runtime.Id == _session.ActiveTab.Id)
+        {
+            ShowError(_localizer.Format("CertificateErrorFormat", args.ErrorStatus));
+        }
+    }
+
+    private async Task PromptAndLaunchExternalUriAsync(Uri externalUri)
+    {
+        if (_securityPromptOpen || RootLayout.XamlRoot is null)
+        {
+            _diagnostics.Record("navigation.external_denied_without_prompt", DiagnosticLevel.Warning);
+            return;
+        }
+
+        try
+        {
+            _securityPromptOpen = true;
+            var dialog = CreateConfirmationDialog(
+                "ExternalProtocolDialogTitle",
+                _localizer.Format("ExternalProtocolRequestFormat", externalUri.Scheme),
+                "ExternalProtocolOpen",
+                "ExternalProtocolCancel");
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary)
+            {
+                _diagnostics.Record("navigation.external_denied");
+                return;
+            }
+
+            var launched = await Windows.System.Launcher.LaunchUriAsync(externalUri);
+            _diagnostics.Record(launched ? "navigation.external_opened" : "navigation.external_failed");
+        }
+        catch (Exception exception)
+        {
+            _diagnostics.Record("navigation.external_failed", DiagnosticLevel.Error, exception);
+        }
+        finally
+        {
+            _securityPromptOpen = false;
+        }
+    }
+
+    private ContentDialog CreateConfirmationDialog(
+        string titleResource,
+        string content,
+        string primaryButtonResource,
+        string closeButtonResource) =>
+        new()
+        {
+            XamlRoot = RootLayout.XamlRoot,
+            Title = _localizer.GetString(titleResource),
+            Content = new TextBlock
+            {
+                Text = content,
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = _localizer.GetString(primaryButtonResource),
+            CloseButtonText = _localizer.GetString(closeButtonResource),
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+    private void OpenTab(Uri source)
+    {
+        var state = _session.OpenTab(source);
+        var runtime = CreateVisualTab(state);
+        Tabs.SelectedItem = runtime.Item;
+    }
+
+    private static bool TryCreateAllowedWebUri(string value, out Uri uri)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out var candidate) &&
+            candidate.Scheme is "http" or "https")
+        {
+            uri = candidate;
+            return true;
+        }
+
+        uri = null!;
+        return false;
+    }
+
+    private static bool TryCreateAllowedExternalUri(string value, out Uri uri)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out var candidate) &&
+            AllowedExternalSchemes.Contains(candidate.Scheme))
+        {
+            uri = candidate;
+            return true;
+        }
+
+        uri = null!;
+        return false;
+    }
+
+    private static bool IsBlankPage(string value) =>
+        string.Equals(value, "about:blank", StringComparison.OrdinalIgnoreCase);
 
     private void OnAddTabButtonClick(TabView sender, object args)
     {

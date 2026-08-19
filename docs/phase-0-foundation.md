@@ -36,7 +36,7 @@ This checklist tracks the foundation exit gate defined in the [product roadmap](
 - [ ] Record repeatable cold/warm startup and one-tab process-group memory baselines.
 - [x] Create the data-flow diagram and initial threat model.
 - [x] Implement the initial non-persistent, explicit permission-request policy.
-- [ ] Define download, certificate, external-protocol, and authentication policies.
+- [x] Implement initial download, certificate, external-protocol, and HTTP authentication policies.
 - [ ] Add architecture tests to enforce project dependency direction.
 - [ ] Produce a signed development MSIX proof of concept.
 

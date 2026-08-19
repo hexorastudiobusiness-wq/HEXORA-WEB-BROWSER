@@ -117,4 +117,52 @@
   <data name="PermissionOther" xml:space="preserve">
     <value>a protected capability</value>
   </data>
+  <data name="ExternalProtocolDialogTitle" xml:space="preserve">
+    <value>Open another app?</value>
+  </data>
+  <data name="ExternalProtocolRequestFormat" xml:space="preserve">
+    <value>This page wants to open the “{0}” protocol in another app. Continue?</value>
+  </data>
+  <data name="ExternalProtocolOpen" xml:space="preserve">
+    <value>Open app</value>
+  </data>
+  <data name="ExternalProtocolCancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="DownloadDialogTitle" xml:space="preserve">
+    <value>Download file?</value>
+  </data>
+  <data name="DownloadRequestFormat" xml:space="preserve">
+    <value>Allow this page to download “{0}”? The default WebView2 download dialog will let you review the destination.</value>
+  </data>
+  <data name="PrivateDownloadRequestFormat" xml:space="preserve">
+    <value>Allow this private page to download “{0}”? Downloaded files remain on this device after the private window closes.</value>
+  </data>
+  <data name="DownloadAllow" xml:space="preserve">
+    <value>Continue</value>
+  </data>
+  <data name="DownloadCancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="AuthenticationDialogTitle" xml:space="preserve">
+    <value>Sign in to site</value>
+  </data>
+  <data name="AuthenticationRequestFormat" xml:space="preserve">
+    <value>The HTTPS site {0} requested HTTP authentication. Credentials are used for this request and are not saved by HEXORA.</value>
+  </data>
+  <data name="AuthenticationUserName" xml:space="preserve">
+    <value>User name</value>
+  </data>
+  <data name="AuthenticationPassword" xml:space="preserve">
+    <value>Password</value>
+  </data>
+  <data name="AuthenticationContinue" xml:space="preserve">
+    <value>Sign in</value>
+  </data>
+  <data name="AuthenticationCancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="CertificateErrorFormat" xml:space="preserve">
+    <value>The connection was blocked because the site certificate is not valid: {0}</value>
+  </data>
 </root>

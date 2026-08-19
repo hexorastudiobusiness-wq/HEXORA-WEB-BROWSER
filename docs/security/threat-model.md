@@ -81,6 +81,31 @@ It must never contain URLs, search terms, page titles, page content, cookies, re
 - The prompt displays only the requesting host and localized capability name.
 - Permission decisions are logged without origin, URL, or capability details.
 
+### External protocols and pop-ups
+
+- Web pages cannot directly navigate HEXORA to arbitrary non-web schemes.
+- Only user-initiated `mailto`, `tel`, `sms`, and `webcal` requests can prompt to open another app.
+- The user sees the protocol name and must explicitly confirm before Windows Launcher is invoked.
+- HTTP(S) user-initiated pop-ups open as a new HEXORA tab; background pop-ups are blocked.
+- `file`, `javascript`, `data`, unknown, and non-user-initiated external navigations are blocked.
+
+### Downloads
+
+- Every download defaults to canceled while a localized confirmation is shown.
+- Concurrent or background-tab downloads are denied.
+- Approved downloads continue through the standard WebView2 download UI and destination handling.
+- Private-window prompts explicitly warn that downloaded files remain after private browsing ends.
+- Diagnostic events never contain source URL, destination path, or filename.
+- Dangerous-file classification and a first-party download manager remain future work.
+
+### Certificates and HTTP authentication
+
+- Certificate-error requests are canceled with no bypass option and no cached exception.
+- Basic HTTP authentication is accepted only for HTTPS origins and the active tab.
+- User name and password are held only long enough to populate the current WebView2 response.
+- HEXORA does not persist credentials or include them in diagnostics.
+- Concurrent authentication prompts are canceled.
+
 ### Resource exhaustion
 
 - WebView controls are created lazily on first tab activation.
@@ -93,9 +118,10 @@ It must never contain URLs, search terms, page titles, page content, cookies, re
 The following require separate designs before code is accepted:
 
 - passwords, passkeys, payment and autofill data;
-- downloads and dangerous-file classification;
+- full download manager and dangerous-file classification;
 - persistent per-site permission management and screen-capture policy;
-- certificate errors and HTTP authentication;
+- certificate exception policy (the current implementation always blocks);
+- credential storage and password management (the current implementation never stores credentials);
 - private-profile verification under crash, update, and multi-instance conditions;
 - content blocking and remotely updated rules;
 - extension installation and permissions;

@@ -117,4 +117,52 @@
   <data name="PermissionOther" xml:space="preserve">
     <value>یک قابلیت محافظت‌شده</value>
   </data>
+  <data name="ExternalProtocolDialogTitle" xml:space="preserve">
+    <value>برنامه دیگری باز شود؟</value>
+  </data>
+  <data name="ExternalProtocolRequestFormat" xml:space="preserve">
+    <value>این صفحه می‌خواهد پروتکل «{0}» را در برنامه دیگری باز کند. ادامه می‌دهید؟</value>
+  </data>
+  <data name="ExternalProtocolOpen" xml:space="preserve">
+    <value>باز کردن برنامه</value>
+  </data>
+  <data name="ExternalProtocolCancel" xml:space="preserve">
+    <value>انصراف</value>
+  </data>
+  <data name="DownloadDialogTitle" xml:space="preserve">
+    <value>فایل دانلود شود؟</value>
+  </data>
+  <data name="DownloadRequestFormat" xml:space="preserve">
+    <value>به این صفحه اجازه دانلود «{0}» داده شود؟ پنجره دانلود WebView2 مقصد را برای بررسی نمایش می‌دهد.</value>
+  </data>
+  <data name="PrivateDownloadRequestFormat" xml:space="preserve">
+    <value>به این صفحه خصوصی اجازه دانلود «{0}» داده شود؟ فایل دانلودشده پس از بستن پنجره خصوصی روی دستگاه باقی می‌ماند.</value>
+  </data>
+  <data name="DownloadAllow" xml:space="preserve">
+    <value>ادامه</value>
+  </data>
+  <data name="DownloadCancel" xml:space="preserve">
+    <value>انصراف</value>
+  </data>
+  <data name="AuthenticationDialogTitle" xml:space="preserve">
+    <value>ورود به سایت</value>
+  </data>
+  <data name="AuthenticationRequestFormat" xml:space="preserve">
+    <value>سایت امن {0} احراز هویت HTTP درخواست کرده است. اطلاعات فقط برای این درخواست استفاده می‌شود و هکسورا آن را ذخیره نمی‌کند.</value>
+  </data>
+  <data name="AuthenticationUserName" xml:space="preserve">
+    <value>نام کاربری</value>
+  </data>
+  <data name="AuthenticationPassword" xml:space="preserve">
+    <value>رمز عبور</value>
+  </data>
+  <data name="AuthenticationContinue" xml:space="preserve">
+    <value>ورود</value>
+  </data>
+  <data name="AuthenticationCancel" xml:space="preserve">
+    <value>انصراف</value>
+  </data>
+  <data name="CertificateErrorFormat" xml:space="preserve">
+    <value>اتصال مسدود شد، چون گواهی سایت معتبر نیست: {0}</value>
+  </data>
 </root>
