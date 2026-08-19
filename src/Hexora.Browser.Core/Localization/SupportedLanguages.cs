@@ -12,6 +12,41 @@ public static class SupportedLanguages
         Array.AsReadOnly([English, Persian, Arabic]);
 
     public static SupportedLanguage GetOrDefault(string? languageTag) =>
-        All.FirstOrDefault(language =>
-            string.Equals(language.Tag, languageTag, StringComparison.OrdinalIgnoreCase)) ?? English;
+        Find(languageTag) ?? English;
+
+    public static SupportedLanguage GetBestMatch(IEnumerable<string> preferredLanguageTags)
+    {
+        ArgumentNullException.ThrowIfNull(preferredLanguageTags);
+
+        foreach (var languageTag in preferredLanguageTags)
+        {
+            var language = Find(languageTag);
+            if (language is not null)
+            {
+                return language;
+            }
+        }
+
+        return English;
+    }
+
+    public static SupportedLanguage? Find(string? languageTag)
+    {
+        if (string.IsNullOrWhiteSpace(languageTag))
+        {
+            return null;
+        }
+
+        var exact = All.FirstOrDefault(language =>
+            string.Equals(language.Tag, languageTag, StringComparison.OrdinalIgnoreCase));
+        if (exact is not null)
+        {
+            return exact;
+        }
+
+        var separatorIndex = languageTag.IndexOf('-');
+        var neutralTag = separatorIndex < 0 ? languageTag : languageTag[..separatorIndex];
+        return All.FirstOrDefault(language =>
+            language.Tag.StartsWith($"{neutralTag}-", StringComparison.OrdinalIgnoreCase));
+    }
 }

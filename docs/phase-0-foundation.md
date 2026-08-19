@@ -25,9 +25,10 @@ This checklist tracks the foundation exit gate defined in the [product roadmap](
 - [ ] Add dependency injection at the composition root without service-location in views.
 - [x] Define the initial tab/session state model.
 - [ ] Define window and WebView profile lifecycle models.
-- [ ] Implement runtime language selection, persistence, and complete RTL layout mirroring.
+- [x] Implement runtime language selection, persistence, and immediate RTL/LTR switching.
+- [ ] Complete RTL visual validation at all target display scales.
 - [ ] Add pseudo-localization and automated resource-key parity checks.
-- [ ] Replace temporary diagnostic strings with localized error codes/messages.
+- [x] Replace current dynamic diagnostic strings with localized messages.
 - [ ] Add privacy-safe structured local logging with bounded retention.
 - [ ] Add global crash boundaries and a local crash-recovery marker.
 - [ ] Create the WebView2 baseline/performance harness on the reference device.

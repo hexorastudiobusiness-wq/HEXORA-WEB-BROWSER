@@ -7,7 +7,8 @@ public sealed class MainWindowViewModel : ObservableObject
 {
     private readonly INavigationInputParser _navigationInputParser;
     private string _address = string.Empty;
-    private string _pageTitle = "New tab";
+    private string _pageTitle = string.Empty;
+    private string _newTabTitle = string.Empty;
     private bool _isLoading;
     private bool _canGoBack;
     private bool _canGoForward;
@@ -79,13 +80,24 @@ public sealed class MainWindowViewModel : ObservableObject
         NavigationRequested?.Invoke(this, new NavigationRequestedEventArgs(request));
     }
 
+    public void SetNewTabTitle(string title)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        var isShowingDefaultTitle = string.IsNullOrEmpty(PageTitle) || PageTitle == _newTabTitle;
+        _newTabTitle = title;
+        if (isShowingDefaultTitle)
+        {
+            PageTitle = title;
+        }
+    }
+
     public void UpdateNavigationState(Uri? source, string? title, bool isLoading, bool canGoBack, bool canGoForward)
     {
         Address = source is not null && source.Scheme is "http" or "https"
             ? source.AbsoluteUri
             : string.Empty;
 
-        PageTitle = string.IsNullOrWhiteSpace(title) ? "New tab" : title;
+        PageTitle = string.IsNullOrWhiteSpace(title) ? _newTabTitle : title;
         IsLoading = isLoading;
         CanGoBack = canGoBack;
         CanGoForward = canGoForward;

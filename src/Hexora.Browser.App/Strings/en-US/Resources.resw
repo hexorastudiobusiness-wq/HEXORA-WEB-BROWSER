@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <root>
   <resheader name="resmimetype">
     <value>text/microsoft-resx</value>
@@ -32,5 +32,47 @@
   </data>
   <data name="StatusBar.Title" xml:space="preserve">
     <value>HEXORA BROWSER</value>
+  </data>
+  <data name="AppTitle" xml:space="preserve">
+    <value>HEXORA BROWSER</value>
+  </data>
+  <data name="NewTabTitle" xml:space="preserve">
+    <value>New tab</value>
+  </data>
+  <data name="AddressPlaceholder" xml:space="preserve">
+    <value>Search or enter an address</value>
+  </data>
+  <data name="BackButtonName" xml:space="preserve">
+    <value>Back</value>
+  </data>
+  <data name="ForwardButtonName" xml:space="preserve">
+    <value>Forward</value>
+  </data>
+  <data name="ReloadButtonName" xml:space="preserve">
+    <value>Reload or stop</value>
+  </data>
+  <data name="MenuButtonName" xml:space="preserve">
+    <value>Settings and more</value>
+  </data>
+  <data name="StatusTitle" xml:space="preserve">
+    <value>HEXORA BROWSER</value>
+  </data>
+  <data name="LanguageMenuHeader" xml:space="preserve">
+    <value>Language</value>
+  </data>
+  <data name="InvalidAddressInput" xml:space="preserve">
+    <value>Enter an address or search term.</value>
+  </data>
+  <data name="InitializationFailedFormat" xml:space="preserve">
+    <value>The browser engine could not start: {0}</value>
+  </data>
+  <data name="NavigationFailedFormat" xml:space="preserve">
+    <value>Navigation failed: {0}</value>
+  </data>
+  <data name="WebContentProcessFailedFormat" xml:space="preserve">
+    <value>A web content process failed: {0}</value>
+  </data>
+  <data name="SettingsSaveFailed" xml:space="preserve">
+    <value>The language preference could not be saved.</value>
   </data>
 </root>

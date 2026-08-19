@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <root>
   <resheader name="resmimetype">
     <value>text/microsoft-resx</value>
@@ -32,5 +32,47 @@
   </data>
   <data name="StatusBar.Title" xml:space="preserve">
     <value>مرورگر هکسورا</value>
+  </data>
+  <data name="AppTitle" xml:space="preserve">
+    <value>مرورگر هکسورا</value>
+  </data>
+  <data name="NewTabTitle" xml:space="preserve">
+    <value>زبانه جدید</value>
+  </data>
+  <data name="AddressPlaceholder" xml:space="preserve">
+    <value>جست‌وجو یا وارد کردن نشانی</value>
+  </data>
+  <data name="BackButtonName" xml:space="preserve">
+    <value>بازگشت</value>
+  </data>
+  <data name="ForwardButtonName" xml:space="preserve">
+    <value>جلو</value>
+  </data>
+  <data name="ReloadButtonName" xml:space="preserve">
+    <value>بارگذاری مجدد یا توقف</value>
+  </data>
+  <data name="MenuButtonName" xml:space="preserve">
+    <value>تنظیمات و موارد بیشتر</value>
+  </data>
+  <data name="StatusTitle" xml:space="preserve">
+    <value>مرورگر هکسورا</value>
+  </data>
+  <data name="LanguageMenuHeader" xml:space="preserve">
+    <value>زبان</value>
+  </data>
+  <data name="InvalidAddressInput" xml:space="preserve">
+    <value>یک نشانی یا عبارت جست‌وجو وارد کنید.</value>
+  </data>
+  <data name="InitializationFailedFormat" xml:space="preserve">
+    <value>موتور مرورگر راه‌اندازی نشد: {0}</value>
+  </data>
+  <data name="NavigationFailedFormat" xml:space="preserve">
+    <value>باز کردن صفحه ناموفق بود: {0}</value>
+  </data>
+  <data name="WebContentProcessFailedFormat" xml:space="preserve">
+    <value>یکی از پردازش‌های محتوای وب متوقف شد: {0}</value>
+  </data>
+  <data name="SettingsSaveFailed" xml:space="preserve">
+    <value>ذخیره زبان انتخاب‌شده امکان‌پذیر نبود.</value>
   </data>
 </root>

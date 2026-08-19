@@ -1,30 +1,48 @@
+using System.Text.Json;
+using Hexora.Browser.App.Localization;
 using Hexora.Browser.App.ViewModels;
 using Hexora.Browser.Core.Browsing;
+using Hexora.Browser.Core.Localization;
 using Hexora.Browser.Core.Navigation;
+using Hexora.Browser.Core.Settings;
+using Hexora.Browser.Infrastructure.Settings;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
+using Windows.Globalization;
 using WebViewControl = Microsoft.UI.Xaml.Controls.WebView2;
 
 namespace Hexora.Browser.App;
 
 public sealed partial class MainWindow : Window
 {
-    private const string NewTabTitle = "New tab";
-
     private readonly BrowserSession _session = new();
+    private readonly BrowserSettingsRepository _settingsRepository;
+    private readonly AppLocalizer _localizer;
     private readonly Dictionary<BrowserTabId, TabRuntime> _tabsById = [];
     private readonly Dictionary<WebViewControl, TabRuntime> _tabsByView = [];
     private readonly Dictionary<CoreWebView2, TabRuntime> _tabsByCore = [];
+    private BrowserSettings _settings;
+    private SupportedLanguage _language;
     private bool _isRootLoaded;
 
     public MainWindowViewModel ViewModel { get; } = new(new NavigationInputParser());
 
-    public MainWindow()
+    public MainWindow(
+        BrowserSettingsRepository settingsRepository,
+        BrowserSettings settings,
+        SupportedLanguage language)
     {
+        _settingsRepository = settingsRepository;
+        _settings = settings;
+        _language = language;
+        _localizer = new AppLocalizer(language.Tag);
+
         InitializeComponent();
         SystemBackdrop = new MicaBackdrop();
+        ApplyLocalization();
 
         ViewModel.NavigationRequested += OnNavigationRequested;
         ViewModel.CommandRequested += OnCommandRequested;
@@ -95,7 +113,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            ShowError(exception.Message);
+            ShowError(_localizer.Format("InitializationFailedFormat", exception.Message));
         }
     }
 
@@ -173,9 +191,9 @@ public sealed partial class MainWindow : Window
         {
             ViewModel.NavigateFromInput(input);
         }
-        catch (ArgumentException exception)
+        catch (ArgumentException)
         {
-            ShowError(exception.Message);
+            ShowError(_localizer.GetString("InvalidAddressInput"));
         }
     }
 
@@ -240,7 +258,7 @@ public sealed partial class MainWindow : Window
         UpdateRuntimeState(runtime, isLoading: false);
         if (!args.IsSuccess && runtime.Id == _session.ActiveTab.Id)
         {
-            ShowError($"Navigation failed: {args.WebErrorStatus}");
+            ShowError(_localizer.Format("NavigationFailedFormat", args.WebErrorStatus));
         }
     }
 
@@ -264,7 +282,7 @@ public sealed partial class MainWindow : Window
     {
         if (_tabsByCore.TryGetValue(sender, out var runtime) && runtime.Id == _session.ActiveTab.Id)
         {
-            ShowError($"Web content process failed: {args.ProcessFailedKind}");
+            ShowError(_localizer.Format("WebContentProcessFailedFormat", args.ProcessFailedKind));
         }
     }
 
@@ -291,6 +309,84 @@ public sealed partial class MainWindow : Window
         {
             CloseTab(id);
         }
+    }
+
+    private async void OnLanguageItemClick(object sender, RoutedEventArgs args)
+    {
+        var selectedLanguage = sender switch
+        {
+            _ when ReferenceEquals(sender, EnglishLanguageItem) => SupportedLanguages.English,
+            _ when ReferenceEquals(sender, PersianLanguageItem) => SupportedLanguages.Persian,
+            _ when ReferenceEquals(sender, ArabicLanguageItem) => SupportedLanguages.Arabic,
+            _ => null,
+        };
+        if (selectedLanguage is null)
+        {
+            return;
+        }
+        if (selectedLanguage == _language)
+        {
+            UpdateLanguageChecks();
+            return;
+        }
+
+        try
+        {
+            var settings = _settings with { LanguageTag = selectedLanguage.Tag };
+            await _settingsRepository.SaveAsync(settings);
+
+            _settings = settings;
+            _language = selectedLanguage;
+            ApplicationLanguages.PrimaryLanguageOverride = selectedLanguage.Tag;
+            App.ApplyCulture(selectedLanguage.Tag);
+            _localizer.SetLanguage(selectedLanguage.Tag);
+            ApplyLocalization();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            ShowError(_localizer.GetString("SettingsSaveFailed"));
+            UpdateLanguageChecks();
+        }
+    }
+
+    private void ApplyLocalization()
+    {
+        Title = _localizer.GetString("AppTitle");
+        RootLayout.Language = _language.Tag;
+        RootLayout.FlowDirection = _language.IsRightToLeft
+            ? FlowDirection.RightToLeft
+            : FlowDirection.LeftToRight;
+
+        // Web content and URL input keep their natural left-to-right coordinate system.
+        BrowserHost.FlowDirection = FlowDirection.LeftToRight;
+        AddressBox.FlowDirection = FlowDirection.LeftToRight;
+        AddressBox.PlaceholderText = _localizer.GetString("AddressPlaceholder");
+        StatusBar.Title = _localizer.GetString("StatusTitle");
+        LanguageMenuItem.Text = _localizer.GetString("LanguageMenuHeader");
+
+        AutomationProperties.SetName(BackButton, _localizer.GetString("BackButtonName"));
+        AutomationProperties.SetName(ForwardButton, _localizer.GetString("ForwardButtonName"));
+        AutomationProperties.SetName(ReloadButton, _localizer.GetString("ReloadButtonName"));
+        AutomationProperties.SetName(MenuButton, _localizer.GetString("MenuButtonName"));
+
+        ViewModel.SetNewTabTitle(_localizer.GetString("NewTabTitle"));
+        foreach (var runtime in _tabsById.Values)
+        {
+            var state = FindState(runtime.Id);
+            if (string.IsNullOrWhiteSpace(state?.Title))
+            {
+                runtime.Item.Header = GetDisplayTitle(null);
+            }
+        }
+
+        UpdateLanguageChecks();
+    }
+
+    private void UpdateLanguageChecks()
+    {
+        EnglishLanguageItem.IsChecked = _language == SupportedLanguages.English;
+        PersianLanguageItem.IsChecked = _language == SupportedLanguages.Persian;
+        ArabicLanguageItem.IsChecked = _language == SupportedLanguages.Arabic;
     }
 
     private void UpdateRuntimeState(TabRuntime runtime, bool? isLoading = null)
@@ -325,8 +421,8 @@ public sealed partial class MainWindow : Window
     private TabRuntime? GetActiveRuntime() =>
         _tabsById.GetValueOrDefault(_session.ActiveTab.Id);
 
-    private static string GetDisplayTitle(string? title) =>
-        string.IsNullOrWhiteSpace(title) ? NewTabTitle : title;
+    private string GetDisplayTitle(string? title) =>
+        string.IsNullOrWhiteSpace(title) ? _localizer.GetString("NewTabTitle") : title;
 
     private void ShowError(string message)
     {

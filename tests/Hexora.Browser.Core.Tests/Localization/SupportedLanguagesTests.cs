@@ -27,4 +27,25 @@ public sealed class SupportedLanguagesTests
     {
         Assert.Equal(SupportedLanguages.English, SupportedLanguages.GetOrDefault("de-DE"));
     }
+
+    [Theory]
+    [InlineData("fa", "fa-IR")]
+    [InlineData("fa-AF", "fa-IR")]
+    [InlineData("ar-EG", "ar-SA")]
+    [InlineData("en-GB", "en-US")]
+    public void FindMatchesSupportedLanguageFamily(string requestedTag, string expectedTag)
+    {
+        Assert.Equal(expectedTag, SupportedLanguages.Find(requestedTag)?.Tag);
+    }
+
+    [Fact]
+    public void GetBestMatchUsesPreferenceOrderAndFallsBackToEnglish()
+    {
+        Assert.Equal(
+            SupportedLanguages.Arabic,
+            SupportedLanguages.GetBestMatch(["de-DE", "ar-EG", "fa-IR"]));
+        Assert.Equal(
+            SupportedLanguages.English,
+            SupportedLanguages.GetBestMatch(["de-DE", "nl-NL"]));
+    }
 }

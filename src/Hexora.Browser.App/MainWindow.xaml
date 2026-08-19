@@ -86,6 +86,24 @@
           Grid.Column="4"
           Width="36"
           Height="36">
+          <Button.Flyout>
+            <MenuFlyout>
+              <MenuFlyoutSubItem x:Name="LanguageMenuItem">
+                <ToggleMenuFlyoutItem
+                  x:Name="EnglishLanguageItem"
+                  Text="English"
+                  Click="OnLanguageItemClick" />
+                <ToggleMenuFlyoutItem
+                  x:Name="PersianLanguageItem"
+                  Text="فارسی"
+                  Click="OnLanguageItemClick" />
+                <ToggleMenuFlyoutItem
+                  x:Name="ArabicLanguageItem"
+                  Text="العربية"
+                  Click="OnLanguageItemClick" />
+              </MenuFlyoutSubItem>
+            </MenuFlyout>
+          </Button.Flyout>
           <FontIcon FontSize="16" Glyph="&#xE712;" />
         </Button>
       </Grid>
