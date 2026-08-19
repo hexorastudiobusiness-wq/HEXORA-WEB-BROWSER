@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Hexora.Browser.App/Hexora.Browser.App.csproj" />
+    <Project Path="src/Hexora.Browser.Core/Hexora.Browser.Core.csproj" />
+    <Project Path="src/Hexora.Browser.Infrastructure/Hexora.Browser.Infrastructure.csproj" />
+    <Project Path="src/Hexora.Browser.WebView2/Hexora.Browser.WebView2.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Hexora.Browser.Core.Tests/Hexora.Browser.Core.Tests.csproj" />
+  </Folder>
+</Solution>

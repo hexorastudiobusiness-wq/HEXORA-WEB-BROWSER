@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data name="ActiveTab.Header" xml:space="preserve">
+    <value>زبانه جدید</value>
+  </data>
+  <data name="AddressBox.PlaceholderText" xml:space="preserve">
+    <value>جست‌وجو یا وارد کردن نشانی</value>
+  </data>
+  <data name="BackButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>بازگشت</value>
+  </data>
+  <data name="ForwardButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>جلو</value>
+  </data>
+  <data name="ReloadButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>بارگذاری مجدد یا توقف</value>
+  </data>
+  <data name="MenuButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>تنظیمات و موارد بیشتر</value>
+  </data>
+  <data name="StatusBar.Title" xml:space="preserve">
+    <value>مرورگر هکسورا</value>
+  </data>
+</root>

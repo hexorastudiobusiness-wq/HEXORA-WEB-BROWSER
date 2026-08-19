@@ -4,7 +4,7 @@
 
 The initial interface languages are **Persian**, **English**, and **Arabic**, with runtime language switching and complete RTL/LTR support.
 
-> Status: architecture and product planning.
+> Status: Phase 0 foundation is in progress. The repository now contains the first WinUI 3/WebView2 vertical slice, modular projects, localization resources, tests, and Windows CI.
 
 ## Why this stack?
 
@@ -65,6 +65,14 @@ Core browser behavior should remain independent of WinUI and WebView2 where prac
 - **Phase 5 — Stable release:** independent security review, signed packages, staged updates, localization review, and release certification.
 
 See the detailed [product roadmap](docs/product-roadmap.md) for scope, performance budgets, exit gates, version milestones, and open product decisions.
+
+## Development
+
+- [Development and build guide](docs/development.md)
+- [Phase 0 foundation tracker](docs/phase-0-foundation.md)
+- [Detailed product roadmap](docs/product-roadmap.md)
+
+The WinUI shell must be built on Windows. Core logic and tests remain cross-platform by design.
 
 ## Architecture decisions
 
