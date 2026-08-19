@@ -31,7 +31,7 @@ public sealed class AppLocalizer
     {
         LanguageTag = languageTag;
         var context = _resourceManager.CreateResourceContext();
-        context.Languages = [languageTag];
+        context.QualifierValues["Language"] = languageTag;
         return context;
     }
 }
