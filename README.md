@@ -1,8 +1,10 @@
 # HEXORA Web Browser
 
-A Windows-first desktop web browser built with **C#**, **.NET**, **WinUI 3**, and **Microsoft WebView2**.
+**HEXORA BROWSER** is a simple, elegant, resource-conscious Windows desktop browser built with **C#**, **.NET**, **WinUI 3**, and **Microsoft WebView2**.
 
-> Status: architecture and MVP planning.
+The initial interface languages are **Persian**, **English**, and **Arabic**, with runtime language switching and complete RTL/LTR support.
+
+> Status: architecture and product planning.
 
 ## Why this stack?
 
@@ -55,10 +57,14 @@ Core browser behavior should remain independent of WinUI and WebView2 where prac
 
 ## Delivery plan
 
-- **Phase 0 — Foundation:** solution scaffold, dependency injection, logging, test projects, and CI.
-- **Phase 1 — Browsing:** native shell, WebView2 lifecycle, navigation, tabs, and shortcuts.
-- **Phase 2 — User data:** profiles, history, bookmarks, settings, downloads, and private windows.
-- **Phase 3 — Hardening:** permissions, process-failure recovery, accessibility, performance, packaging, and updates.
+- **Phase 0 — Foundation:** measurable performance budgets, solution scaffold, localization, security model, tests, and CI.
+- **Phase 1 — Browsing MVP:** localized native shell, WebView2 lifecycle, navigation, tabs, errors, and shortcuts.
+- **Phase 2 — Daily-driver essentials:** profiles, private mode, history, bookmarks, settings, downloads, and session restore.
+- **Phase 3 — Efficiency and polish:** sleeping tabs, memory-pressure handling, privacy controls, accessibility, and compatibility hardening.
+- **Phase 4 — Modern capabilities:** selectively add vertical tabs, workspaces, split view, web-app integration, or extensions only when each passes value, security, and resource gates.
+- **Phase 5 — Stable release:** independent security review, signed packages, staged updates, localization review, and release certification.
+
+See the detailed [product roadmap](docs/product-roadmap.md) for scope, performance budgets, exit gates, version milestones, and open product decisions.
 
 ## Architecture decisions
 
