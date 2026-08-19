@@ -1,8 +1,8 @@
 using Hexora.Browser.App.ViewModels;
 using Hexora.Browser.Core.Navigation;
-using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using WebViewControl = Microsoft.UI.Xaml.Controls.WebView2;
 
