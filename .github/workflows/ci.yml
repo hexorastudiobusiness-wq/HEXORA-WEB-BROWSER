@@ -64,7 +64,7 @@ jobs:
           cache-dependency-path: Directory.Packages.props
 
       - name: Restore solution
-        run: dotnet restore HEXORA.slnx -p:Platform=x64
+        run: dotnet restore HEXORA.slnx
 
       - name: Build solution
-        run: dotnet build HEXORA.slnx --configuration Release --no-restore -p:Platform=x64
+        run: dotnet build HEXORA.slnx --configuration Release --no-restore
