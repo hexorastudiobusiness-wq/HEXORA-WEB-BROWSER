@@ -142,11 +142,18 @@ downloads are re-fetched by `DownloadManager` (no cookie/auth carry-over).
 
 ## Development
 
-Requirements: JDK 17 and Android SDK platform 36. Toolchain versions are
-pinned centrally in `gradle/libs.versions.toml` (Gradle 8.13, AGP 8.13.2,
-Kotlin 2.2.0). The pinned GeckoView artifact is the latest stable release
+Requirements: JDK 17 and Android SDK platform 37 (GeckoView 158 requires
+compileSdk 37). Toolchain versions are pinned centrally in
+`gradle/libs.versions.toml` (Gradle 9.3.1, AGP 9.1.1 with built-in Kotlin,
+targeting SDK 37). The pinned GeckoView artifact is the latest stable release
 build from https://maven.mozilla.org/maven2/org/mozilla/geckoview/geckoview —
 bump its version there to upgrade.
+
+Every push to the working branch also builds the debug APK on GitHub
+Actions (`.github/workflows/build-debug-apk.yml`) and publishes it to a
+GitHub prerelease, e.g. `releases/tag/debug-52232e0`. The debug APK is a
+universal build containing all GeckoView ABIs (~520 MB); release builds
+should use ABI splits.
 
 Open the project in Android Studio and let Gradle synchronize dependencies.
 
