@@ -21,8 +21,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -31,7 +29,6 @@ import kotlinx.coroutines.launch
  * Owns all tabs and coordinates between the [BrowserEngine], repositories and
  * the UI. Business logic lives here — never in Composables (ARCHITECTURE.md §14/§24).
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class BrowserViewModel(
     private val engineFactory: (javaScriptEnabled: Boolean) -> BrowserEngine,
     private val historyRepository: HistoryRepository,
@@ -124,15 +121,21 @@ class BrowserViewModel(
             }
         }
         viewModelScope.launch {
+            var bookmarkJob: Job? = null
             combine(_activeTabId, _pageStates) { activeId, states ->
                 activeId?.let { states[it]?.url }
-            }.flatMapLatest { url ->
-                if (url.isNullOrBlank()) {
-                    flowOf(false)
+            }.collect { url ->
+                bookmarkJob?.cancel()
+                bookmarkJob = if (url.isNullOrBlank()) {
+                    _isCurrentBookmarked.value = false
+                    null
                 } else {
-                    bookmarkRepository.observeIsBookmarked(url)
+                    launch {
+                        bookmarkRepository.observeIsBookmarked(url)
+                            .collect { bookmarked -> _isCurrentBookmarked.value = bookmarked }
+                    }
                 }
-            }.collect { bookmarked -> _isCurrentBookmarked.value = bookmarked }
+            }
         }
     }
 

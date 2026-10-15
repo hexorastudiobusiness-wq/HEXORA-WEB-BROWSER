@@ -18,7 +18,7 @@ import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
-import org.mozilla.geckoview.PermissionDelegate
+import org.mozilla.geckoview.GeckoSession.PermissionDelegate
 import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.WebResponse
 import com.example.browser.download.DownloadFileName
@@ -112,12 +112,6 @@ internal class GeckoBrowserSession(
 
     @Volatile
     private var closed = false
-
-    init {
-        geckoSession.setNavigationDelegate(navigationDelegate)
-        geckoSession.setProgressDelegate(progressDelegate)
-        geckoSession.setContentDelegate(contentDelegate)
-    }
 
     /** Opens the session against the shared runtime if it is not open yet. */
     internal fun ensureOpen() {
@@ -278,6 +272,12 @@ internal class GeckoBrowserSession(
                 Log.w(TAG, "Failed to close download response stream", e)
             }
         }
+    }
+
+    init {
+        geckoSession.setNavigationDelegate(navigationDelegate)
+        geckoSession.setProgressDelegate(progressDelegate)
+        geckoSession.setContentDelegate(contentDelegate)
     }
 
     private companion object {
