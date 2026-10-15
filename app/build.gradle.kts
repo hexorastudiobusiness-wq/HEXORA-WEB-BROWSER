@@ -23,6 +23,18 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // One APK per CPU architecture instead of a universal APK that bundles
+    // the GeckoView engine for every ABI (~130 MB each). Most phones from
+    // the last years are arm64-v8a; x86_64 is for emulators.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = false
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
