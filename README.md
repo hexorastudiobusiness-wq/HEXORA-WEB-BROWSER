@@ -151,9 +151,10 @@ bump its version there to upgrade.
 
 Every push to the working branch also builds the debug APK on GitHub
 Actions (`.github/workflows/build-debug-apk.yml`) and publishes it to a
-GitHub prerelease, e.g. `releases/tag/debug-52232e0`. The debug APK is a
-universal build containing all GeckoView ABIs (~520 MB); release builds
-should use ABI splits.
+GitHub prerelease, e.g. `releases/tag/debug-ada0c82`. Debug APKs are split
+per CPU architecture (arm64-v8a for most modern phones, armeabi-v7a for old
+32-bit phones, x86_64 for emulators) instead of one universal build that
+bundles the GeckoView engine for every ABI (~520 MB).
 
 Open the project in Android Studio and let Gradle synchronize dependencies.
 
