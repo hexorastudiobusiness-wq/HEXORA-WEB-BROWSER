@@ -84,7 +84,7 @@ fun TabsScreen(
                     }
                 },
                 actions = {
-                    if (state.tabs.size > 1) {
+                    if (state.tabs.isNotEmpty()) {
                         TextButton(
                             onClick = { viewModel.onAction(BrowserAction.CloseAllTabs) },
                         ) {
@@ -100,7 +100,34 @@ fun TabsScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            LazyVerticalGrid(
+            if (state.tabs.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Language,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.tabs_empty),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = stringResource(R.string.tabs_empty_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 160.dp),
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(12.dp),
@@ -118,6 +145,7 @@ fun TabsScreen(
                         },
                         onClose = { viewModel.onAction(BrowserAction.CloseTab(tab.id)) },
                     )
+                }
                 }
             }
 

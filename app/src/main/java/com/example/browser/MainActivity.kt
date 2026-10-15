@@ -32,6 +32,8 @@ import com.example.browser.ui.downloads.DownloadsScreen
 import com.example.browser.ui.downloads.DownloadsViewModel
 import com.example.browser.ui.history.HistoryScreen
 import com.example.browser.ui.history.HistoryViewModel
+import com.example.browser.ui.passwords.PasswordsScreen
+import com.example.browser.ui.passwords.PasswordsViewModel
 import com.example.browser.ui.settings.SettingsScreen
 import com.example.browser.ui.settings.SettingsViewModel
 import com.example.browser.ui.tabs.TabsScreen
@@ -45,6 +47,7 @@ private object Routes {
     const val HISTORY = "history"
     const val DOWNLOADS = "downloads"
     const val SETTINGS = "settings"
+    const val PASSWORDS = "passwords"
 }
 
 class MainActivity : ComponentActivity() {
@@ -61,6 +64,7 @@ class MainActivity : ComponentActivity() {
                     },
                     historyRepository = container.historyRepository,
                     bookmarkRepository = container.bookmarkRepository,
+                    credentialRepository = container.credentialRepository,
                     settingsRepository = container.settingsRepository,
                     thumbnailStore = container.tabThumbnailStore,
                 )
@@ -92,6 +96,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val passwordsViewModel: PasswordsViewModel by viewModels {
+        viewModelFactory {
+            initializer { PasswordsViewModel(container.credentialRepository) }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Draw behind system bars; content keeps clear via WindowInsets
         // padding in the screens (see BrowserScreen).
@@ -114,6 +124,7 @@ class MainActivity : ComponentActivity() {
                         historyViewModel = historyViewModel,
                         downloadsViewModel = downloadsViewModel,
                         settingsViewModel = settingsViewModel,
+                        passwordsViewModel = passwordsViewModel,
                         thumbnailStore = container.tabThumbnailStore,
                         downloadHandler = container.downloadHandler,
                     )
@@ -188,6 +199,7 @@ private fun HexoraNavHost(
     historyViewModel: HistoryViewModel,
     downloadsViewModel: DownloadsViewModel,
     settingsViewModel: SettingsViewModel,
+    passwordsViewModel: PasswordsViewModel,
     thumbnailStore: com.example.browser.util.TabThumbnailStore,
     downloadHandler: com.example.browser.download.DownloadHandler,
 ) {
@@ -238,11 +250,18 @@ private fun HexoraNavHost(
                 onBack = { navController.popBackStack() },
             )
         }
+        composable(Routes.PASSWORDS) {
+            PasswordsScreen(
+                viewModel = passwordsViewModel,
+                onBack = { navController.popBackStack() },
+            )
+        }
         composable(Routes.SETTINGS) {
             SettingsScreen(
                 viewModel = settingsViewModel,
                 onBack = { navController.popBackStack() },
                 onClearBrowsingData = { browserViewModel.clearBrowsingData() },
+                onOpenPasswords = { navController.navigate(Routes.PASSWORDS) },
             )
         }
     }

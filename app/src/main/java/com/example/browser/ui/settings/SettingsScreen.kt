@@ -14,7 +14,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -22,7 +21,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
@@ -33,7 +31,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,11 +49,11 @@ fun SettingsScreen(
     viewModel: SettingsViewModel,
     onBack: () -> Unit,
     onClearBrowsingData: () -> Unit,
+    onOpenPasswords: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val settings by viewModel.settings.collectAsState()
     val context = LocalContext.current
-    var homepageText by remember(settings.homepage) { mutableStateOf(settings.homepage) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -88,34 +85,6 @@ fun SettingsScreen(
                     selected = settings.searchEngine == engine,
                     onClick = { viewModel.setSearchEngine(engine) },
                 )
-            }
-
-            Spacer(Modifier.height(16.dp))
-            SettingsSectionTitle(stringResource(R.string.settings_homepage))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = homepageText,
-                    onValueChange = { homepageText = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text(stringResource(R.string.settings_homepage_hint)) },
-                    singleLine = true,
-                )
-                Button(
-                    onClick = {
-                        viewModel.setHomepage(homepageText)
-                        Toast.makeText(
-                            context,
-                            R.string.settings_saved,
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    },
-                    modifier = Modifier.padding(start = 12.dp),
-                ) {
-                    Text(stringResource(R.string.settings_save))
-                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -155,6 +124,18 @@ fun SettingsScreen(
                 checked = settings.cookiesEnabled,
                 onCheckedChange = { viewModel.setCookiesEnabled(it) },
             )
+            SwitchRow(
+                label = stringResource(R.string.settings_password_manager),
+                summary = stringResource(R.string.settings_password_manager_summary),
+                checked = settings.passwordManagerEnabled,
+                onCheckedChange = { viewModel.setPasswordManagerEnabled(it) },
+            )
+            OutlinedButton(
+                onClick = onOpenPasswords,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.passwords_manage))
+            }
             SwitchRow(
                 label = stringResource(R.string.settings_desktop_mode),
                 summary = stringResource(R.string.settings_desktop_mode_summary),

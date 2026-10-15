@@ -9,4 +9,6 @@ data class HistoryEntity(
     val url: String,
     val title: String,
     val timestamp: Long,
+    /** Number of recorded visits, used by the Start Page top sites. */
+    val visitCount: Int = 1,
 )

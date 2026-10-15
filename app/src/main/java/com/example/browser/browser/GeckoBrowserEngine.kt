@@ -3,6 +3,7 @@ package com.example.browser.browser
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import android.util.SparseArray
 import android.view.View
 import java.io.IOException
 import java.util.UUID
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import org.mozilla.geckoview.Autofill
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
@@ -91,6 +93,60 @@ class GeckoBrowserEngine(
         runtimeOrNull?.storageController?.clearData(StorageController.ClearFlags.ALL)
     }
 
+    // GeckoView is designed to paint sessions through one attached view:
+    // tabs are switched by replacing the session on that view (the model
+    // used by Mozilla's own Android Components). A separate GeckoView per
+    // tab leaves detached SurfaceViews behind and previously shown tabs can
+    // return white/black even though their GeckoSession is still alive.
+    private var sharedContentView: GeckoView? = null
+    private var renderedSession: GeckoBrowserSession? = null
+
+    internal fun obtainContentView(
+        session: GeckoBrowserSession,
+        context: Context,
+    ): View {
+        val existing = sharedContentView
+        val view = if (existing == null || existing.context !== context) {
+            existing?.releaseSession()
+            renderedSession?.contentView = null
+            renderedSession = null
+            GeckoView(context).also { sharedContentView = it }
+        } else {
+            existing
+        }
+        bindContentView(session, view)
+        return view
+    }
+
+    internal fun bindContentView(session: GeckoBrowserSession, view: View) {
+        if (view !== sharedContentView) return
+        val geckoView = view as GeckoView
+        if (renderedSession !== session) {
+            renderedSession?.contentView = null
+        }
+        if (geckoView.session !== session.geckoSession) {
+            // Hexora provides its own offline credential vault through the
+            // session Autofill.Delegate. Disable GeckoView's Android
+            // Autofill bridge so it does not replace that delegate.
+            geckoView.setAutofillEnabled(false)
+            if (geckoView.session != null) geckoView.releaseSession()
+            geckoView.setSession(session.geckoSession)
+            session.installAutofillDelegate()
+        }
+        renderedSession = session
+        session.contentView = geckoView
+    }
+
+    internal fun releaseContentView(session: GeckoBrowserSession, view: View) {
+        if (view !== sharedContentView) return
+        val geckoView = view as GeckoView
+        if (geckoView.session === session.geckoSession) {
+            geckoView.releaseSession()
+        }
+        if (renderedSession === session) renderedSession = null
+        if (session.contentView === geckoView) session.contentView = null
+    }
+
     internal fun createSessionInternal(
         config: BrowserSessionConfig,
         pendingRestore: SavedTabState? = null,
@@ -151,7 +207,7 @@ internal class GeckoBrowserSession(
     private val _events = MutableSharedFlow<BrowserSessionEvent>(extraBufferCapacity = 8)
     override val events: SharedFlow<BrowserSessionEvent> = _events.asSharedFlow()
 
-    private var contentView: GeckoView? = null
+    internal var contentView: GeckoView? = null
 
     @Volatile
     private var closed = false
@@ -160,6 +216,10 @@ internal class GeckoBrowserSession(
     internal fun ensureOpen() {
         if (!closed && !geckoSession.isOpen) {
             geckoSession.open(engine.runtime)
+            // Live (not suspended) tabs are intentionally kept high priority
+            // so Gecko preserves their page/compositor state. Suspension,
+            // not background-tab priority demotion, is our memory control.
+            geckoSession.setPriorityHint(GeckoSession.PRIORITY_HIGH)
             pendingRestore?.let { saved ->
                 pendingRestore = null
                 GeckoSession.SessionState.fromString(saved.serialized)
@@ -268,53 +328,152 @@ internal class GeckoBrowserSession(
 
     override fun setActive(active: Boolean) {
         if (!closed && geckoSession.isOpen) {
-            // The visible tab gets high priority so Gecko preserves its
-            // compositor/page state as long as possible; hidden tabs use
-            // the default priority and may discard rendering surfaces.
-            geckoSession.setPriorityHint(
-                if (active) {
-                    GeckoSession.PRIORITY_HIGH
-                } else {
-                    GeckoSession.PRIORITY_DEFAULT
-                },
-            )
+            if (active) geckoSession.setPriorityHint(GeckoSession.PRIORITY_HIGH)
             geckoSession.setActive(active)
         }
     }
 
-    override fun createContentView(context: Context): View {
-        // Never resurrect a previously detached GeckoView. Its SurfaceView
-        // can retain a destroyed surface and present black after the tab is
-        // shown again. A fresh view forces GeckoView to acquire a fresh
-        // GeckoDisplay and repaint the still-live session.
-        contentView?.let { previous ->
-            if (previous.session === geckoSession) previous.releaseSession()
-        }
-        val view = GeckoView(context)
-        view.setSession(geckoSession)
-        contentView = view
-        return view
+    override fun createContentView(context: Context): View =
+        engine.obtainContentView(this, context)
+
+    override fun renderContentView(view: View) {
+        engine.bindContentView(this, view)
     }
 
     override fun releaseContentView(view: View) {
-        val geckoView = view as? GeckoView ?: return
-        if (geckoView.session === geckoSession) {
-            geckoView.releaseSession()
-        }
-        if (contentView === geckoView) {
-            contentView = null
-        }
+        engine.releaseContentView(this, view)
+    }
+
+    override fun setAutofillCredential(credential: AutofillCredential?) {
+        autofillCredential = credential
+    }
+
+    internal fun installAutofillDelegate() {
+        if (!closed) geckoSession.setAutofillDelegate(autofillDelegate)
     }
 
     override fun close() {
         if (closed) return
         closed = true
+        autofillCredential = null
         geckoSession.setNavigationDelegate(null)
         geckoSession.setProgressDelegate(null)
         geckoSession.setContentDelegate(null)
-        contentView?.releaseSession()
-        contentView = null
+        geckoSession.setAutofillDelegate(null)
+        contentView?.let { releaseContentView(it) }
         if (geckoSession.isOpen) geckoSession.close()
+    }
+
+    @Volatile
+    private var autofillCredential: AutofillCredential? = null
+
+    private val autofillDelegate = object : Autofill.Delegate {
+        override fun onSessionCommit(
+            session: GeckoSession,
+            node: Autofill.Node,
+            data: Autofill.NodeData,
+        ) {
+            captureSubmittedCredential(session)
+        }
+
+        override fun onNodeFocus(
+            session: GeckoSession,
+            focused: Autofill.Node,
+            data: Autofill.NodeData,
+        ) {
+            fillSavedCredential(session, focused)
+        }
+    }
+
+    private fun nodeMatchesCurrentPage(node: Autofill.Node): Boolean {
+        val pageHost = runCatching {
+            android.net.Uri.parse(_state.value.url).host
+        }.getOrNull()?.lowercase()?.removePrefix("www.") ?: return false
+        val nodeDomain = node.domain.trim().lowercase()
+        if (nodeDomain.isBlank()) return false
+        val nodeHost = runCatching {
+            android.net.Uri.parse(
+                if ("://" in nodeDomain) nodeDomain else "https://$nodeDomain",
+            ).host
+        }.getOrNull()?.lowercase()?.removePrefix("www.") ?: nodeDomain.removePrefix("www.")
+        return nodeHost == pageHost
+    }
+
+    private fun captureSubmittedCredential(session: GeckoSession) {
+        if (closed || config.isPrivate) return
+        val autofillSession = session.getAutofillSession()
+        val nodes = mutableListOf<Autofill.Node>()
+        fun visit(node: Autofill.Node) {
+            nodes += node
+            node.children.forEach(::visit)
+        }
+        visit(autofillSession.root)
+
+        fun valueOf(node: Autofill.Node, trim: Boolean): String? =
+            runCatching { autofillSession.dataFor(node).value }
+                .getOrNull()
+                ?.let { if (trim) it.trim() else it }
+                ?.takeIf { it.isNotEmpty() }
+
+        val username = nodes.firstOrNull { node ->
+            nodeMatchesCurrentPage(node) &&
+                (node.hint == Autofill.Hint.USERNAME ||
+                    node.hint == Autofill.Hint.EMAIL_ADDRESS) &&
+                valueOf(node, trim = true) != null
+        }?.let { valueOf(it, trim = true) }
+        val password = nodes.firstOrNull { node ->
+            nodeMatchesCurrentPage(node) &&
+                node.hint == Autofill.Hint.PASSWORD &&
+                valueOf(node, trim = false) != null
+        }?.let { valueOf(it, trim = false) }
+
+        if (!username.isNullOrEmpty() && !password.isNullOrEmpty()) {
+            _events.tryEmit(
+                BrowserSessionEvent.CredentialSubmitted(
+                    sessionId = id,
+                    pageUrl = _state.value.url,
+                    username = username,
+                    password = password,
+                ),
+            )
+        }
+    }
+
+    private fun fillSavedCredential(session: GeckoSession, focused: Autofill.Node) {
+        val credential = autofillCredential ?: return
+        if (closed || config.isPrivate) return
+        if (focused.hint != Autofill.Hint.USERNAME &&
+            focused.hint != Autofill.Hint.EMAIL_ADDRESS &&
+            focused.hint != Autofill.Hint.PASSWORD
+        ) {
+            return
+        }
+        val autofillSession = session.getAutofillSession()
+        val nodes = mutableListOf<Autofill.Node>()
+        fun visit(node: Autofill.Node) {
+            nodes += node
+            node.children.forEach(::visit)
+        }
+        visit(autofillSession.root)
+
+        val values = SparseArray<CharSequence>()
+        nodes.firstOrNull { node ->
+            nodeMatchesCurrentPage(node) &&
+                (node.hint == Autofill.Hint.USERNAME ||
+                    node.hint == Autofill.Hint.EMAIL_ADDRESS)
+        }?.let { node ->
+            runCatching { autofillSession.dataFor(node).id }
+                .getOrNull()
+                ?.let { values.put(it, credential.username) }
+        }
+        nodes.firstOrNull { node ->
+            nodeMatchesCurrentPage(node) && node.hint == Autofill.Hint.PASSWORD
+        }?.let { node ->
+                runCatching { autofillSession.dataFor(node).id }
+                    .getOrNull()
+                    ?.let { values.put(it, credential.password) }
+            }
+        if (values.size() > 0) autofillSession.autofill(values)
     }
 
     // ---- GeckoView delegates -------------------------------------------------
@@ -439,6 +598,7 @@ internal class GeckoBrowserSession(
         geckoSession.setNavigationDelegate(navigationDelegate)
         geckoSession.setProgressDelegate(progressDelegate)
         geckoSession.setContentDelegate(contentDelegate)
+        geckoSession.setAutofillDelegate(autofillDelegate)
     }
 
     private companion object {

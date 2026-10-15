@@ -2,6 +2,7 @@ package com.example.browser.ui.browser
 
 import android.app.Activity
 import android.content.res.Configuration
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,12 +44,16 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
@@ -61,11 +67,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -111,14 +117,68 @@ fun BrowserScreen(
 
     // System back: exit fullscreen first, then navigate web history, and
     // only when neither applies does it leave the app.
-    BackHandler(enabled = state.canGoBack) {
+    BackHandler(enabled = state.canGoBack && !state.showStartPage) {
         viewModel.onAction(BrowserAction.GoBack)
     }
     BackHandler(enabled = state.isFullscreen) {
         viewModel.onAction(BrowserAction.ExitFullscreen)
     }
 
+    BackHandler(enabled = state.showStartPage && state.hasWebPage) {
+        viewModel.onAction(BrowserAction.HideStartPage)
+    }
+
     ImmersiveSystemBars(enabled = state.isFullscreen)
+
+    state.pendingCredentialSave?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { viewModel.onAction(BrowserAction.DismissPendingCredential) },
+            title = {
+                Text(
+                    stringResource(
+                        if (prompt.isUpdate) {
+                            R.string.password_update_title
+                        } else {
+                            R.string.password_save_title
+                        },
+                    ),
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        stringResource(
+                            if (prompt.isUpdate) {
+                                R.string.password_update_message
+                            } else {
+                                R.string.password_save_message
+                            },
+                            prompt.origin,
+                        ),
+                    )
+                    Text(
+                        text = stringResource(R.string.password_username, prompt.username),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { viewModel.onAction(BrowserAction.SavePendingCredential) },
+                ) {
+                    Text(stringResource(R.string.action_save))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.onAction(BrowserAction.DismissPendingCredential) },
+                ) {
+                    Text(stringResource(R.string.action_not_now))
+                }
+            },
+        )
+    }
 
     if (liquidGlass && !state.isFullscreen) {
         // Liquid Glass browsing layout: the page fills the whole window and
@@ -128,6 +188,7 @@ fun BrowserScreen(
             BrowserPageContent(
                 state = state,
                 onAction = viewModel::onAction,
+                onOpenUrl = { url -> viewModel.onAction(BrowserAction.OpenUrl(url)) },
                 modifier = Modifier.fillMaxSize(),
             )
             Column(
@@ -245,6 +306,7 @@ fun BrowserScreen(
         BrowserPageContent(
             state = state,
             onAction = viewModel::onAction,
+            onOpenUrl = { url -> viewModel.onAction(BrowserAction.OpenUrl(url)) },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
@@ -280,23 +342,30 @@ fun BrowserScreen(
 private fun BrowserPageContent(
     state: BrowserUiState,
     onAction: (BrowserAction) -> Unit,
+    onOpenUrl: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
+        if (state.showStartPage) {
+            StartPage(
+                state = state,
+                onOpenUrl = onOpenUrl,
+                modifier = Modifier.fillMaxSize(),
+            )
+            return
+        }
+
         val session = state.activeSession
-        val activeTabId = state.activeTabId
-        if (session != null && activeTabId != null) {
-            // One native engine view per tab; switching tabs swaps it.
-            // onRelease is essential: GeckoView's surface must be detached
-            // when hidden and rebound to a fresh view when the tab is shown
-            // again, otherwise it can come back black.
-            key(activeTabId) {
-                AndroidView(
-                    factory = { ctx -> session.createContentView(ctx) },
-                    onRelease = { view -> session.releaseContentView(view) },
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
+        if (session != null) {
+            // One shared GeckoView stays attached while browsing. Tabs are
+            // switched with renderContentView(), matching GeckoView's
+            // intended session-swap model instead of swapping surfaces.
+            AndroidView(
+                factory = { ctx -> session.createContentView(ctx) },
+                update = { view -> session.renderContentView(view) },
+                onRelease = { view -> session.releaseContentView(view) },
+                modifier = Modifier.fillMaxSize(),
+            )
         }
 
         if (state.loadFailed && session != null && !state.isFullscreen) {
@@ -349,6 +418,192 @@ private fun BrowserPageContent(
                     contentDescription = stringResource(R.string.action_exit_fullscreen),
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun StartPage(
+    state: BrowserUiState,
+    onOpenUrl: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 36.dp, bottom = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(64.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Filled.Language,
+                            contentDescription = null,
+                            modifier = Modifier.size(34.dp),
+                        )
+                    }
+                }
+                Text(
+                    text = stringResource(R.string.start_title),
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.padding(top = 14.dp),
+                )
+                Text(
+                    text = stringResource(R.string.start_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    text = stringResource(R.string.address_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+            }
+        }
+
+        if (state.topSites.isEmpty() && state.startBookmarks.isEmpty()) {
+            item {
+                Text(
+                    text = stringResource(R.string.start_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 18.dp),
+                )
+            }
+        }
+
+        if (state.topSites.isNotEmpty()) {
+            item {
+                Text(
+                    text = stringResource(R.string.start_top_sites),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            items(state.topSites.chunked(4)) { rowSites ->
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    rowSites.forEach { site ->
+                        StartSiteTile(
+                            site = site,
+                            onClick = { onOpenUrl(site.url) },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    repeat(4 - rowSites.size) {
+                        Box(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        if (state.startBookmarks.isNotEmpty()) {
+            item {
+                Text(
+                    text = stringResource(R.string.start_bookmarks),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            items(state.startBookmarks) { site ->
+                Card(
+                    onClick = { onOpenUrl(site.url) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Bookmark,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = site.title.ifBlank { site.url },
+                                style = MaterialTheme.typography.bodyLarge,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = site.url,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Box(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun StartSiteTile(
+    site: StartPageSite,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val host = remember(site.url) {
+        runCatching { Uri.parse(site.url).host }
+            .getOrNull()
+            ?.removePrefix("www.")
+            ?.ifBlank { site.url }
+            ?: site.url
+    }
+    val label = site.title.ifBlank { host }
+    Card(
+        onClick = onClick,
+        modifier = modifier.height(96.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.size(38.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = label.firstOrNull()?.uppercase() ?: "?",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                }
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.padding(top = 7.dp),
+            )
+            Text(
+                text = host,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -510,7 +765,7 @@ private fun BrowserBottomBar(
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(
+            IconButton(modifier = Modifier.size(42.dp),
                 onClick = { onAction(BrowserAction.GoBack) },
                 enabled = state.canGoBack,
             ) {
@@ -519,7 +774,7 @@ private fun BrowserBottomBar(
                     contentDescription = stringResource(R.string.action_back),
                 )
             }
-            IconButton(
+            IconButton(modifier = Modifier.size(42.dp),
                 onClick = { onAction(BrowserAction.GoForward) },
                 enabled = state.canGoForward,
             ) {
@@ -528,7 +783,7 @@ private fun BrowserBottomBar(
                     contentDescription = stringResource(R.string.action_forward),
                 )
             }
-            IconButton(
+            IconButton(modifier = Modifier.size(42.dp),
                 onClick = {
                     onAction(
                         if (state.isLoading) BrowserAction.StopLoading else BrowserAction.Reload,
@@ -542,13 +797,13 @@ private fun BrowserBottomBar(
                     ),
                 )
             }
-            IconButton(onClick = { onAction(BrowserAction.LoadHome) }) {
+            IconButton(modifier = Modifier.size(42.dp), onClick = { onAction(BrowserAction.LoadHome) }) {
                 Icon(
                     imageVector = Icons.Filled.Home,
                     contentDescription = stringResource(R.string.action_home),
                 )
             }
-            IconButton(onClick = { onAction(BrowserAction.ToggleFullscreen) }) {
+            IconButton(modifier = Modifier.size(42.dp), onClick = { onAction(BrowserAction.ToggleFullscreen) }) {
                 Icon(
                     imageVector = Icons.Filled.Fullscreen,
                     contentDescription = stringResource(R.string.menu_fullscreen),
@@ -556,7 +811,7 @@ private fun BrowserBottomBar(
             }
 
             // Tabs button with a Firefox-style tab counter.
-            IconButton(onClick = onOpenTabs) {
+            IconButton(modifier = Modifier.size(42.dp), onClick = onOpenTabs) {
                 Box(
                     modifier = Modifier
                         .size(26.dp)
@@ -574,8 +829,15 @@ private fun BrowserBottomBar(
                 }
             }
 
+            IconButton(modifier = Modifier.size(42.dp), onClick = { onAction(BrowserAction.NewTab) }) {
+                Icon(
+                    imageVector = Icons.Filled.Add,
+                    contentDescription = stringResource(R.string.tab_new),
+                )
+            }
+
             Box {
-                IconButton(onClick = { menuExpanded = true }) {
+                IconButton(modifier = Modifier.size(42.dp), onClick = { menuExpanded = true }) {
                     Icon(
                         imageVector = Icons.Filled.MoreVert,
                         contentDescription = stringResource(R.string.action_menu),

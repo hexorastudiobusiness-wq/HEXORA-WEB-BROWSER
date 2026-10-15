@@ -6,8 +6,10 @@ import com.example.browser.browser.BrowserEngine
 import com.example.browser.browser.GeckoBrowserEngine
 import com.example.browser.data.database.AppDatabase
 import com.example.browser.data.repository.BookmarkRepository
+import com.example.browser.data.repository.CredentialRepository
 import com.example.browser.data.repository.DownloadRepository
 import com.example.browser.data.repository.HistoryRepository
+import com.example.browser.data.security.CredentialCipher
 import com.example.browser.util.TabThumbnailStore
 import com.example.browser.data.settings.SettingsRepository
 import com.example.browser.download.DownloadHandler
@@ -50,6 +52,10 @@ class AppContainer(context: Context) {
 
     val tabThumbnailStore: TabThumbnailStore by lazy {
         TabThumbnailStore(appContext)
+    }
+
+    val credentialRepository: CredentialRepository by lazy {
+        CredentialRepository(database.credentialDao(), CredentialCipher())
     }
 
     /**

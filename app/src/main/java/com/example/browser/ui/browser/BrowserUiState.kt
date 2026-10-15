@@ -14,6 +14,20 @@ data class TabUiItem(
     val isSuspended: Boolean = false,
 )
 
+/** One shortcut shown on the Hexora Start Page. */
+data class StartPageSite(
+    val title: String,
+    val url: String,
+    val visitCount: Int = 0,
+)
+
+/** A pending "save this login?" prompt. The password never enters UI state. */
+data class CredentialSavePrompt(
+    val origin: String,
+    val username: String,
+    val isUpdate: Boolean,
+)
+
 /** Everything [BrowserScreen] needs to render. Produced by [BrowserViewModel]. */
 data class BrowserUiState(
     val tabs: List<TabUiItem> = emptyList(),
@@ -43,6 +57,13 @@ data class BrowserUiState(
     val errorMessage: String? = null,
     /** Engine session of the active tab; used only to create its native view. */
     val activeSession: BrowserSession? = null,
+    /** True when the Chrome-like Hexora Start Page covers the web content. */
+    val showStartPage: Boolean = true,
+    /** True when a real web page exists underneath the Start Page. */
+    val hasWebPage: Boolean = false,
+    val topSites: List<StartPageSite> = emptyList(),
+    val startBookmarks: List<StartPageSite> = emptyList(),
+    val pendingCredentialSave: CredentialSavePrompt? = null,
 )
 
 /** Explicit user actions sent from the UI to [BrowserViewModel] (ARCHITECTURE.md §14). */
@@ -53,6 +74,8 @@ sealed interface BrowserAction {
     data object GoBack : BrowserAction
     data object GoForward : BrowserAction
     data object LoadHome : BrowserAction
+    data class OpenUrl(val url: String) : BrowserAction
+    data object HideStartPage : BrowserAction
     data object NewTab : BrowserAction
     data object NewPrivateTab : BrowserAction
     data class SwitchTab(val tabId: String) : BrowserAction
@@ -71,4 +94,6 @@ sealed interface BrowserAction {
     data class SwitchAdjacentTab(val delta: Int) : BrowserAction
     data object CloseAllTabs : BrowserAction
     data object UndoCloseAllTabs : BrowserAction
+    data object SavePendingCredential : BrowserAction
+    data object DismissPendingCredential : BrowserAction
 }

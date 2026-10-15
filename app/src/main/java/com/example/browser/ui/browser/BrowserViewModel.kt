@@ -7,12 +7,15 @@ import com.example.browser.browser.BrowserEngine
 import com.example.browser.browser.BrowserSession
 import com.example.browser.browser.BrowserSessionConfig
 import com.example.browser.browser.BrowserSessionEvent
+import com.example.browser.browser.AutofillCredential
 import com.example.browser.browser.SavedTabState
 import com.example.browser.browser.SessionPageState
 import com.example.browser.data.repository.BookmarkRepository
+import com.example.browser.data.repository.CredentialRepository
 import com.example.browser.data.repository.HistoryRepository
 import com.example.browser.data.settings.BrowserSettingsState
 import com.example.browser.data.settings.SettingsRepository
+import com.example.browser.util.CredentialOrigin
 import com.example.browser.util.TabThumbnailStore
 import com.example.browser.util.UrlUtils
 import java.util.UUID
@@ -46,6 +49,7 @@ class BrowserViewModel(
     private val bookmarkRepository: BookmarkRepository,
     private val settingsRepository: SettingsRepository,
     private val thumbnailStore: TabThumbnailStore,
+    private val credentialRepository: CredentialRepository,
 ) : ViewModel() {
 
     private var engine: BrowserEngine? = null
@@ -58,6 +62,7 @@ class BrowserViewModel(
         var lastUrl: String = "",
         var lastTitle: String = "",
         var savedState: SavedTabState? = null,
+        var showStartPage: Boolean = false,
     )
 
     private data class ClosedTabInfo(
@@ -76,6 +81,16 @@ class BrowserViewModel(
     private val _findVisible = MutableStateFlow(false)
     private val _userFullscreen = MutableStateFlow(false)
     private val _recentlyClosed = MutableStateFlow<List<ClosedTabInfo>>(emptyList())
+    private val _pendingCredentialPrompt = MutableStateFlow<CredentialSavePrompt?>(null)
+
+    private data class PendingCredential(
+        val origin: String,
+        val username: String,
+        val password: String,
+        val isUpdate: Boolean,
+    )
+
+    private var pendingCredential: PendingCredential? = null
 
     /** Tab ids ordered by last activation; last element = most recently used. */
     private val lruOrder = mutableListOf<String>()
@@ -103,17 +118,43 @@ class BrowserViewModel(
         TabsSlice(tabs, activeId, states, thumbs)
     }
 
-    private val chromeSlice = combine(_findVisible, _userFullscreen, _recentlyClosed) { find, fs, closed ->
-        ChromeSlice(find, fs, closed.size)
+    private val chromeSlice = combine(
+        _findVisible,
+        _userFullscreen,
+        _recentlyClosed,
+        _pendingCredentialPrompt,
+    ) { find, fs, closed, prompt ->
+        ChromeSlice(find, fs, closed.size, prompt)
+    }
+
+    private val homeSlice = combine(
+        chromeSlice,
+        historyRepository.history,
+        bookmarkRepository.bookmarks,
+    ) { chrome, history, bookmarks ->
+        HomeSlice(
+            chrome = chrome,
+            topSites = history
+                .filter { UrlUtils.isHttpUrl(it.url) }
+                .sortedWith(
+                    compareByDescending<com.example.browser.data.database.HistoryEntity> { it.visitCount }
+                        .thenByDescending { it.timestamp },
+                )
+                .take(8)
+                .map { StartPageSite(it.title, it.url, it.visitCount) },
+            bookmarks = bookmarks.take(12).map {
+                StartPageSite(it.title, it.url)
+            },
+        )
     }
 
     val uiState: StateFlow<BrowserUiState> = combine(
         tabsSlice,
         _isCurrentBookmarked,
         _engineError,
-        chromeSlice,
+        homeSlice,
         settings,
-    ) { slice, bookmarked, error, chrome, currentSettings ->
+    ) { slice, bookmarked, error, home, currentSettings ->
         val activeEntry = slice.tabs.firstOrNull { it.tabId == slice.activeId }
         val activeState = slice.activeId?.let { slice.states[it] }
             ?: SessionPageState()
@@ -133,8 +174,16 @@ class BrowserViewModel(
                 )
             },
             activeTabId = slice.activeId,
-            currentUrl = activeState.url.ifBlank { activeEntry?.lastUrl ?: "" },
-            pageTitle = activeState.title,
+            currentUrl = if (activeEntry?.showStartPage == true) {
+                ""
+            } else {
+                activeState.url.ifBlank { activeEntry?.lastUrl ?: "" }
+            },
+            pageTitle = if (activeEntry?.showStartPage == true) {
+                "Hexora"
+            } else {
+                activeState.title
+            },
             isLoading = activeState.isLoading,
             progress = activeState.progress,
             canGoBack = activeState.canGoBack,
@@ -144,14 +193,24 @@ class BrowserViewModel(
             loadFailed = activeState.loadFailed,
             isBookmarked = bookmarked,
             isDesktopMode = activeEntry?.desktopMode ?: false,
-            isFullscreen = chrome.userFullscreen || activeState.isPageFullscreen,
-            findVisible = chrome.findVisible,
+            isFullscreen = home.chrome.userFullscreen || activeState.isPageFullscreen,
+            findVisible = home.chrome.findVisible,
             findResult = activeState.findResult,
             textZoomPercent = currentSettings.textZoomPercent,
-            recentlyClosedCount = chrome.recentlyClosedCount,
+            recentlyClosedCount = home.chrome.recentlyClosedCount,
             thumbnailVersions = slice.thumbnails,
             errorMessage = error,
             activeSession = activeEntry?.session,
+            showStartPage = activeEntry?.showStartPage ?: slice.tabs.isEmpty(),
+            hasWebPage = activeState.url.isNotBlank() ||
+                (activeEntry?.lastUrl?.isNotBlank() == true),
+            topSites = if (activeEntry?.isPrivate == true) emptyList() else home.topSites,
+            startBookmarks = if (activeEntry?.isPrivate == true) {
+                emptyList()
+            } else {
+                home.bookmarks
+            },
+            pendingCredentialSave = home.chrome.pendingCredentialSave,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowserUiState())
 
@@ -177,9 +236,10 @@ class BrowserViewModel(
                 activateTab(entry.tabId)
             }
             createTab(
-                url = initialSettings.homepage,
+                url = null,
                 isPrivate = false,
                 desktopMode = initialSettings.desktopMode,
+                startPage = true,
             )
             pendingExternalUrl?.let { url ->
                 pendingExternalUrl = null
@@ -187,9 +247,38 @@ class BrowserViewModel(
             }
         }
         // Keep the engine's text zoom in sync with the persisted setting.
+        // Also react immediately when the local password vault is toggled:
+        // disabling it must remove credentials already offered to pages.
         viewModelScope.launch {
+            var lastPasswordManagerEnabled: Boolean? = null
             settings.collect { current ->
                 engine?.setTextZoomPercent(current.textZoomPercent)
+                if (lastPasswordManagerEnabled != current.passwordManagerEnabled) {
+                    lastPasswordManagerEnabled = current.passwordManagerEnabled
+                    if (!current.passwordManagerEnabled) {
+                        dismissPendingCredential()
+                        _tabs.value.forEach { entry ->
+                            entry.session?.setAutofillCredential(null)
+                        }
+                    } else {
+                        _tabs.value.filterNot { it.isPrivate }.forEach { entry ->
+                            val session = entry.session ?: return@forEach
+                            val origin = CredentialOrigin.fromUrl(entry.lastUrl)
+                                ?: return@forEach
+                            launch {
+                                val saved = credentialRepository.findForOrigin(origin)
+                                    .firstOrNull()
+                                if (entry.session === session) {
+                                    session.setAutofillCredential(
+                                        saved?.let {
+                                            AutofillCredential(it.username, it.password)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
         viewModelScope.launch {
@@ -216,17 +305,32 @@ class BrowserViewModel(
     fun onAction(action: BrowserAction) {
         when (action) {
             is BrowserAction.LoadInput -> {
-                activeSession()?.loadUrl(
-                    UrlUtils.resolveInput(action.input, settings.value.searchEngine),
-                )
+                val entry = activeEntry()
+                if (entry == null) {
+                    createTab(
+                        url = action.input,
+                        isPrivate = false,
+                        desktopMode = settings.value.desktopMode,
+                    )
+                } else {
+                    setShowStartPage(entry, false)
+                    if (entry.session == null) restoreTab(entry)
+                    entry.session?.loadUrl(
+                        UrlUtils.resolveInput(action.input, settings.value.searchEngine),
+                    )
+                }
             }
             BrowserAction.Reload -> activeSession()?.reload()
             BrowserAction.StopLoading -> activeSession()?.stopLoading()
             BrowserAction.GoBack -> activeSession()?.goBack()
             BrowserAction.GoForward -> activeSession()?.goForward()
-            BrowserAction.LoadHome -> activeSession()?.loadUrl(
-                UrlUtils.resolveInput(settings.value.homepage, settings.value.searchEngine),
-            )
+            BrowserAction.LoadHome -> showStartPage()
+            is BrowserAction.OpenUrl -> openUrl(action.url)
+            BrowserAction.HideStartPage -> {
+                activeEntry()?.let { entry ->
+                    if (entry.lastUrl.isNotBlank()) setShowStartPage(entry, false)
+                }
+            }
             BrowserAction.NewTab -> openNewTab(isPrivate = false)
             BrowserAction.NewPrivateTab -> openNewTab(isPrivate = true)
             is BrowserAction.SwitchTab -> switchTab(action.tabId)
@@ -251,6 +355,8 @@ class BrowserViewModel(
             is BrowserAction.SwitchAdjacentTab -> switchAdjacentTab(action.delta)
             BrowserAction.CloseAllTabs -> closeAllTabs()
             BrowserAction.UndoCloseAllTabs -> undoCloseAllTabs()
+            BrowserAction.SavePendingCredential -> savePendingCredential()
+            BrowserAction.DismissPendingCredential -> dismissPendingCredential()
         }
     }
 
@@ -259,6 +365,7 @@ class BrowserViewModel(
             url = url,
             isPrivate = isPrivate,
             desktopMode = settings.value.desktopMode,
+            startPage = url.isNullOrBlank(),
         )
     }
 
@@ -282,10 +389,9 @@ class BrowserViewModel(
         viewModelScope.launch(Dispatchers.IO) { thumbnailStore.delete(tabId) }
 
         when {
-            _tabs.value.isEmpty() -> {
-                _activeTabId.value = null
-                openNewTab(isPrivate = false)
-            }
+            // Chrome-like behavior: the last tab really closes. The app
+            // then shows the Hexora Start Page with no live tab selected.
+            _tabs.value.isEmpty() -> _activeTabId.value = null
             wasActive -> {
                 val next = _tabs.value.lastOrNull { it.tabId != tabId } ?: _tabs.value.first()
                 switchTab(next.tabId)
@@ -293,14 +399,20 @@ class BrowserViewModel(
         }
     }
 
-    /** Opens [url] (from bookmarks/history/downloads/another app) in the active tab. */
+    /** Opens [url] (from Start Page/bookmarks/history/another app). */
     fun openUrl(url: String) {
-        val session = activeSession()
-        if (session == null) {
-            openNewTab(url = url, isPrivate = false)
-        } else {
-            session.loadUrl(url)
+        val entry = activeEntry()
+        if (entry == null) {
+            createTab(
+                url = url,
+                isPrivate = false,
+                desktopMode = settings.value.desktopMode,
+            )
+            return
         }
+        setShowStartPage(entry, false)
+        if (entry.session == null) restoreTab(entry)
+        entry.session?.loadUrl(url)
     }
 
     /** Handles ACTION_VIEW intents; safe to call before the engine is ready. */
@@ -315,6 +427,69 @@ class BrowserViewModel(
     fun clearBrowsingData() {
         engine?.clearBrowsingData()
         viewModelScope.launch { historyRepository.clearAll() }
+    }
+
+    private fun showStartPage() {
+        val entry = activeEntry() ?: return
+        setShowStartPage(entry, true)
+        _findVisible.value = false
+    }
+
+    private fun setShowStartPage(entry: TabEntry, show: Boolean) {
+        if (entry.showStartPage == show) return
+        entry.showStartPage = show
+        _tabs.update { it.toList() }
+    }
+
+    private fun savePendingCredential() {
+        val pending = pendingCredential ?: return
+        pendingCredential = null
+        _pendingCredentialPrompt.value = null
+        viewModelScope.launch {
+            credentialRepository.save(
+                origin = pending.origin,
+                username = pending.username,
+                password = pending.password,
+            )
+            // Offer the just-saved login to the still-open login page.
+            val entry = activeEntry() ?: return@launch
+            if (CredentialOrigin.fromUrl(entry.lastUrl) == pending.origin) {
+                entry.session?.setAutofillCredential(
+                    AutofillCredential(pending.username, pending.password),
+                )
+            }
+        }
+    }
+
+    private fun dismissPendingCredential() {
+        pendingCredential = null
+        _pendingCredentialPrompt.value = null
+    }
+
+    private fun handleCredentialSubmitted(
+        entry: TabEntry,
+        event: BrowserSessionEvent.CredentialSubmitted,
+    ) {
+        if (entry.isPrivate || !settings.value.passwordManagerEnabled) return
+        val origin = CredentialOrigin.fromUrl(event.pageUrl)
+            ?: CredentialOrigin.fromUrl(entry.lastUrl)
+            ?: return
+        viewModelScope.launch {
+            val existing = credentialRepository.findForOrigin(origin)
+                .firstOrNull { it.username == event.username }
+            if (existing?.password == event.password) return@launch
+            pendingCredential = PendingCredential(
+                origin = origin,
+                username = event.username,
+                password = event.password,
+                isUpdate = existing != null,
+            )
+            _pendingCredentialPrompt.value = CredentialSavePrompt(
+                origin = origin,
+                username = event.username,
+                isUpdate = existing != null,
+            )
+        }
     }
 
     /** Called by the Activity on memory pressure: free every inactive session. */
@@ -379,12 +554,11 @@ class BrowserViewModel(
         lastThumbnailUrl.clear()
         _activeTabId.value = null
         _recentlyClosed.value = closed
+        _findVisible.value = false
+        _userFullscreen.value = false
         viewModelScope.launch(Dispatchers.IO) { thumbnailStore.clearAll() }
-        createTab(
-            url = settings.value.homepage,
-            isPrivate = false,
-            desktopMode = settings.value.desktopMode,
-        )
+        // No replacement tab: zero tabs is a valid state. BrowserScreen
+        // shows the Start Page until the user opens a site or a new tab.
     }
 
     private fun undoCloseAllTabs() {
@@ -410,6 +584,7 @@ class BrowserViewModel(
         isPrivate: Boolean,
         desktopMode: Boolean,
         makeActive: Boolean = true,
+        startPage: Boolean = false,
     ): String? {
         val currentEngine = engine ?: return null
         val session = try {
@@ -426,14 +601,17 @@ class BrowserViewModel(
             session = session,
             isPrivate = isPrivate,
             desktopMode = desktopMode,
+            showStartPage = startPage || url.isNullOrBlank(),
         )
         _tabs.update { it + entry }
         touchLru(entry.tabId)
         attachSession(entry, session)
         if (makeActive) activateTab(entry.tabId)
-        val target = url ?: settings.value.homepage
-        if (target.isNotBlank()) {
-            session.loadUrl(UrlUtils.resolveInput(target, settings.value.searchEngine))
+        if (!entry.showStartPage) {
+            val target = url.orEmpty()
+            if (target.isNotBlank()) {
+                session.loadUrl(UrlUtils.resolveInput(target, settings.value.searchEngine))
+            }
         }
         enforceSuspension()
         return entry.tabId
@@ -506,10 +684,32 @@ class BrowserViewModel(
         sessionJobs[entry.tabId] = viewModelScope.launch {
             launch {
                 var wasLoading = false
+                var autofillOrigin: String? = null
                 session.state.collect { state ->
                     _pageStates.update { it + (entry.tabId to state) }
                     if (state.url.isNotBlank()) entry.lastUrl = state.url
                     if (state.title.isNotBlank()) entry.lastTitle = state.title
+                    val newOrigin = CredentialOrigin.fromUrl(state.url)
+                    if (newOrigin != autofillOrigin) {
+                        autofillOrigin = newOrigin
+                        if (newOrigin == null || entry.isPrivate ||
+                            !settings.value.passwordManagerEnabled
+                        ) {
+                            session.setAutofillCredential(null)
+                        } else {
+                            viewModelScope.launch {
+                                val saved = credentialRepository.findForOrigin(newOrigin)
+                                    .firstOrNull()
+                                if (entry.session === session) {
+                                    session.setAutofillCredential(
+                                        saved?.let {
+                                            AutofillCredential(it.username, it.password)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
                     val finishedLoad = wasLoading && !state.isLoading
                     wasLoading = state.isLoading
                     if (finishedLoad && !state.loadFailed) {
@@ -530,6 +730,8 @@ class BrowserViewModel(
                     when (event) {
                         is BrowserSessionEvent.DownloadRequested ->
                             _downloadEvents.tryEmit(event)
+                        is BrowserSessionEvent.CredentialSubmitted ->
+                            handleCredentialSubmitted(entry, event)
                         is BrowserSessionEvent.CloseRequested ->
                             closeTab(event.sessionId.toTabId())
                     }
@@ -591,6 +793,13 @@ class BrowserViewModel(
         val findVisible: Boolean,
         val userFullscreen: Boolean,
         val recentlyClosedCount: Int,
+        val pendingCredentialSave: CredentialSavePrompt?,
+    )
+
+    private data class HomeSlice(
+        val chrome: ChromeSlice,
+        val topSites: List<StartPageSite>,
+        val bookmarks: List<StartPageSite>,
     )
 
     companion object {

@@ -25,8 +25,8 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setSearchEngine(engine) }
     }
 
-    fun setHomepage(homepage: String) {
-        viewModelScope.launch { repository.setHomepage(homepage) }
+    fun setPasswordManagerEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setPasswordManagerEnabled(enabled) }
     }
 
     fun setThemeMode(mode: ThemeMode) {

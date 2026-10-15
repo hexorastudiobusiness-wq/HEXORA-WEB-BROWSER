@@ -66,7 +66,11 @@ Use the current stable GeckoView APIs available at implementation time. Do not i
 
 ## 4. Browser Sessions
 
-Each tab owns its own browser session.
+Each tab owns its own browser session. Rendering uses one shared,
+attached GeckoView owned by the engine layer: switching tabs replaces the
+session bound to that view (`renderContentView`) instead of creating a new
+surface-backed view per tab. Live sessions are kept at high priority;
+suspension (below) — not priority demotion — is the memory control.
 
 A browser tab should contain:
 
@@ -87,7 +91,8 @@ Do not use one global browser session for all tabs.
 The browser must support:
 
 - New tab
-- Close tab
+- Close tab (including the last tab; zero tabs is valid and shows the
+  Start Page)
 - Switch tab
 - Reload tab
 
@@ -162,6 +167,7 @@ HistoryEntity
 - url
 - title
 - timestamp
+- visitCount (drives the Start Page's most-visited sites)
 ```
 
 Record successful navigation.
@@ -203,7 +209,6 @@ Use DataStore Preferences for simple settings.
 Initial settings:
 
 - Default search engine
-- Homepage
 - JavaScript enabled
 - Cookies enabled
 - Dark mode
@@ -211,6 +216,17 @@ Initial settings:
 - Desktop site
 
 Settings should be isolated from UI implementation.
+
+The Start Page replaces a configurable homepage: it shows most-visited
+sites (history `visitCount`) and bookmarked sites, and appears for new
+tabs, when the Home action is used, and when no tab is open.
+
+Saved logins are an optional, offline-only vault. GeckoView autofill
+events surface credential submissions to the ViewModel, which asks for
+explicit consent before `CredentialRepository` stores username/password
+as Android Keystore-backed AES-GCM ciphertext in Room (exact-origin
+matching; private tabs excluded). Passwords are never synced, transmitted,
+or shown in the management UI.
 
 ## 11. Downloads
 
@@ -289,6 +305,8 @@ browser
 tabs
 bookmarks
 history
+downloads
+passwords
 settings
 ```
 
@@ -375,10 +393,13 @@ com.example.browser
 │   │   ├── BookmarkDao.kt
 │   │   ├── HistoryDao.kt
 │   │   ├── BookmarkEntity.kt
+│   │   ├── CredentialDao.kt
+│   │   ├── CredentialEntity.kt
 │   │   └── HistoryEntity.kt
 │   │
 │   └── repository/
 │       ├── BookmarkRepository.kt
+│       ├── CredentialRepository.kt
 │       └── HistoryRepository.kt
 │
 ├── ui/

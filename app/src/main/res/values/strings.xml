@@ -49,10 +49,6 @@
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_search_engine">Search engine</string>
-    <string name="settings_homepage">Homepage</string>
-    <string name="settings_homepage_hint">https://example.com</string>
-    <string name="settings_save">Save</string>
-    <string name="settings_saved">Saved</string>
     <string name="settings_theme">Theme</string>
     <string name="theme_system">System default</string>
     <string name="theme_light">Light</string>
@@ -101,4 +97,25 @@
     <string name="download_status_unknown">Unknown</string>
     <string name="settings_text_zoom">Text size</string>
     <string name="settings_text_zoom_summary">Scales text on pages; applied on next page load</string>
+    <string name="settings_password_manager">Save and autofill passwords</string>
+    <string name="settings_password_manager_summary">Stored encrypted on this device only; Hexora never sends them anywhere</string>
+    <string name="passwords_manage">Manage saved logins</string>
+    <string name="passwords_title">Saved logins</string>
+    <string name="passwords_empty">No saved logins yet.</string>
+    <string name="passwords_delete_all">Delete all</string>
+    <string name="passwords_local_only_note">Saved on this device only, encrypted with Android Keystore. Passwords are never shown here or sent anywhere.</string>
+    <string name="password_save_title">Save password?</string>
+    <string name="password_update_title">Update password?</string>
+    <string name="password_save_message">Save this login for %1$s? It stays encrypted on this device only.</string>
+    <string name="password_update_message">Update the saved login for %1$s? It stays encrypted on this device only.</string>
+    <string name="password_username">Username: %1$s</string>
+    <string name="action_save">Save</string>
+    <string name="action_not_now">Not now</string>
+    <string name="start_title">Hexora</string>
+    <string name="start_subtitle">Fast, private, yours</string>
+    <string name="start_top_sites">Most visited</string>
+    <string name="start_bookmarks">Bookmarks</string>
+    <string name="start_empty">Visit or bookmark sites and they will appear here.</string>
+    <string name="tabs_empty">No open tabs</string>
+    <string name="tabs_empty_hint">Open a new tab or restore the tabs you closed.</string>
 </resources>

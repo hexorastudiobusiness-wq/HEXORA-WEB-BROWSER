@@ -39,6 +39,12 @@ data class FindResultUi(
  */
 class SavedTabState internal constructor(internal val serialized: String)
 
+/** A locally saved login offered to a page by the in-app password vault. */
+data class AutofillCredential(
+    val username: String,
+    val password: String,
+)
+
 /** One-time events coming out of a session (not part of persistent state). */
 sealed interface BrowserSessionEvent {
     val sessionId: String
@@ -49,6 +55,14 @@ sealed interface BrowserSessionEvent {
         val url: String,
         val fileName: String,
         val mimeType: String?,
+    ) : BrowserSessionEvent
+
+    /** A login form was submitted; the app may ask whether to save it. */
+    data class CredentialSubmitted(
+        override val sessionId: String,
+        val pageUrl: String,
+        val username: String,
+        val password: String,
     ) : BrowserSessionEvent
 
     /** The page asked to close its own tab (window.close()). */
@@ -95,19 +109,22 @@ interface BrowserSession {
     fun setActive(active: Boolean)
 
     /**
-     * Creates a fresh native view rendering this session.
-     *
-     * A new view is intentionally returned for every display period: browser
-     * engine surfaces must be detached when hidden and rebound when shown.
-     * Reusing a detached surface-backed view can leave a tab black even
-     * though its session and page are still alive. The caller must pass the
-     * returned view to [releaseContentView] when it leaves the hierarchy.
-     * Typed as a plain [View] so no engine type leaks into the UI layer.
+     * Returns the browser's single shared native content view and binds this
+     * session to it. GeckoView tab switching is designed around one attached
+     * GeckoView whose session is replaced; creating a separate surface-backed
+     * view per tab can leave previously shown tabs white/black. Typed as a
+     * plain [View] so no engine type leaks into the UI layer.
      */
     fun createContentView(context: Context): View
 
+    /** Binds this session to the already-created shared content [view]. */
+    fun renderContentView(view: View)
+
     /** Detaches [view] from this session without closing the session. */
     fun releaseContentView(view: View)
+
+    /** Supplies (or clears) the locally saved login to offer on this page. */
+    fun setAutofillCredential(credential: AutofillCredential?)
 
     /** Releases the session and its view. The session cannot be reused afterwards. */
     fun close()

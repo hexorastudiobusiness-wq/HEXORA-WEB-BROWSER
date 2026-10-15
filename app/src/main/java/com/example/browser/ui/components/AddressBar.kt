@@ -35,7 +35,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.browser.R
@@ -61,12 +63,19 @@ fun AddressBar(
     glass: Boolean = false,
 ) {
     val focusManager = LocalFocusManager.current
-    var text by remember { mutableStateOf("") }
+    var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
     var isEditing by remember { mutableStateOf(false) }
+    var selectAllOnFocus by remember { mutableStateOf(false) }
+    val text = fieldValue.text
+
+    fun selectAll(value: TextFieldValue): TextFieldValue =
+        value.copy(selection = TextRange(0, value.text.length))
 
     // Keep the field in sync with the loaded page while the user isn't typing.
     LaunchedEffect(url, isEditing) {
-        if (!isEditing) text = url
+        if (!isEditing) {
+            fieldValue = TextFieldValue(url)
+        }
     }
 
     Surface(
@@ -91,11 +100,34 @@ fun AddressBar(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextField(
-                    value = text,
-                    onValueChange = { text = it },
+                    value = fieldValue,
+                    onValueChange = { newValue ->
+                        fieldValue = if (selectAllOnFocus && newValue.text == text) {
+                            // The first tap after focus may move the cursor
+                            // as part of the same click. Convert that first
+                            // interaction into select-all, like other browsers.
+                            selectAllOnFocus = false
+                            selectAll(newValue)
+                        } else {
+                            if (newValue.text != text) selectAllOnFocus = false
+                            newValue
+                        }
+                    },
                     modifier = Modifier
                         .weight(1f)
-                        .onFocusChanged { isEditing = it.isFocused },
+                        .onFocusChanged { focusState ->
+                            val wasEditing = isEditing
+                            isEditing = focusState.isFocused
+                            if (focusState.isFocused && !wasEditing) {
+                                selectAllOnFocus = true
+                                if (fieldValue.text.isNotEmpty()) {
+                                    fieldValue = selectAll(fieldValue)
+                                }
+                            }
+                            if (!focusState.isFocused) {
+                                selectAllOnFocus = false
+                            }
+                        },
                     placeholder = { Text(stringResource(R.string.address_hint)) },
                     leadingIcon = {
                         Icon(
@@ -108,7 +140,9 @@ fun AddressBar(
                     },
                     trailingIcon = {
                         if (isEditing && text.isNotEmpty()) {
-                            IconButton(onClick = { text = "" }) {
+                            IconButton(
+                                onClick = { fieldValue = TextFieldValue("") },
+                            ) {
                                 Icon(
                                     imageVector = Icons.Filled.Close,
                                     contentDescription = stringResource(R.string.action_clear_input),

@@ -10,6 +10,8 @@ A modern Android web browser built with **Kotlin**, **Jetpack Compose**, and **M
 - Private browsing
 - Downloads
 - Modern Material 3 UI, including an optional translucent Liquid Glass appearance
+- Chrome-like Start Page with most-visited sites and bookmarks
+- Optional offline saved-login vault (encrypted on-device, no sync)
 - Clean, modular architecture
 - Easy future expansion for privacy and advanced browser features
 
@@ -64,10 +66,13 @@ app/src/main/java/com/example/browser/
 │   │   ├── BookmarkDao.kt
 │   │   ├── HistoryDao.kt
 │   │   ├── BookmarkEntity.kt
+│   │   ├── CredentialDao.kt
+│   │   ├── CredentialEntity.kt
 │   │   └── HistoryEntity.kt
 │   │
 │   └── repository/
 │       ├── BookmarkRepository.kt
+│       ├── CredentialRepository.kt
 │       └── HistoryRepository.kt
 │
 ├── ui/
@@ -75,6 +80,7 @@ app/src/main/java/com/example/browser/
 │   ├── tabs/
 │   ├── bookmarks/
 │   ├── history/
+│   ├── passwords/
 │   ├── settings/
 │   └── components/
 │
@@ -101,7 +107,7 @@ app/src/main/java/com/example/browser/
 - Settings
 - Dark mode
 - Desktop site
-- Homepage
+- Start Page (most-visited sites + bookmarks)
 
 ### Phase 3
 
@@ -130,15 +136,34 @@ Phase 1 MVP and the core of Phase 2 are implemented:
 - Multiple tabs (new / switch / close), one `GeckoSession` per tab
 - `window.open` opens a real new tab; private tabs use GeckoView private sessions
 - Room history (private tabs are never recorded) and bookmarks
-- DataStore settings: search engine, homepage, JavaScript, desktop mode,
-  theme (system/light/dark), open-links-in-new-tab
+- DataStore settings: search engine, JavaScript, desktop mode,
+  theme (system/light/dark/Liquid Glass), open-links-in-new-tab, and the
+  local password-manager master switch
 - Downloads delegated to Android `DownloadManager` (Downloads folder)
 - `ACTION_VIEW` intents open http(s) links in a new tab
+- Quick new-tab (`+`) button beside the tab switcher; the address bar selects
+  its whole contents on first focus
+- Closing the last tab is allowed: zero tabs is a valid state and shows the
+  Hexora Start Page (most-visited sites from local history + bookmarks)
+- Tabs render through one shared GeckoView whose session is swapped, while
+  inactive live sessions are kept high priority; LRU suspension/restore is
+  still the memory control for long tab lists
+- Local password manager: after a login form is submitted, Hexora can ask to
+  save it. Usernames/passwords are stored only as Android Keystore-backed
+  AES-GCM ciphertext in the on-device Room database, are never transmitted,
+  and can be deleted from Settings → Saved logins. Saved credentials can be
+  offered back to login forms on the same exact origin (private tabs are
+  excluded)
 
 Known MVP limitations: site permission prompts (camera/mic/location) are not
 wired yet, the JavaScript toggle applies from the next app start, cookie
 toggling is stored but per-site cookie controls are planned for Phase 3, and
 downloads are re-fetched by `DownloadManager` (no cookie/auth carry-over).
+Saved-login autofill depends on sites exposing recognizable username/password
+fields to GeckoView's autofill tree; when several usernames exist for one
+origin, the most recently saved/updated one is offered first. Passwords are
+never displayed in the saved-login manager. Runtime behavior of each release
+still needs on-device verification.
 
 ## Development
 

@@ -3,6 +3,7 @@ package com.example.browser.data.database
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -13,6 +14,12 @@ interface HistoryDao {
 
     @Insert
     suspend fun insert(entry: HistoryEntity)
+
+    @Query("SELECT * FROM history WHERE url = :url LIMIT 1")
+    suspend fun getByUrl(url: String): HistoryEntity?
+
+    @Update
+    suspend fun update(entry: HistoryEntity)
 
     @Query("DELETE FROM history WHERE url = :url")
     suspend fun deleteByUrl(url: String)

@@ -9,16 +9,28 @@ class HistoryRepository(private val dao: HistoryDao) {
 
     val history: Flow<List<HistoryEntity>> = dao.observeAll()
 
-    /** Records a finished page visit; re-visiting a URL moves it to the top. */
+    /** Records a finished page visit and increments its top-sites count. */
     suspend fun recordVisit(url: String, title: String) {
-        dao.deleteByUrl(url)
-        dao.insert(
-            HistoryEntity(
-                url = url,
-                title = title.ifBlank { url },
-                timestamp = System.currentTimeMillis(),
-            ),
-        )
+        val now = System.currentTimeMillis()
+        val existing = dao.getByUrl(url)
+        if (existing == null) {
+            dao.insert(
+                HistoryEntity(
+                    url = url,
+                    title = title.ifBlank { url },
+                    timestamp = now,
+                    visitCount = 1,
+                ),
+            )
+        } else {
+            dao.update(
+                existing.copy(
+                    title = title.ifBlank { existing.title },
+                    timestamp = now,
+                    visitCount = existing.visitCount + 1,
+                ),
+            )
+        }
     }
 
     suspend fun deleteEntry(id: Long) = dao.deleteById(id)
