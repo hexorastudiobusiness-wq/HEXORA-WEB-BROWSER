@@ -1,6 +1,10 @@
 package com.example.browser.ui.browser
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,7 +68,19 @@ fun BrowserScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
 
-    Column(modifier = modifier.fillMaxSize()) {
+    // System back navigates web history first; only when there is no page
+    // to go back to does it fall through to leaving the app.
+    BackHandler(enabled = state.canGoBack) {
+        viewModel.onAction(BrowserAction.GoBack)
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            // Keep the address bar and bottom bar clear of the status bar,
+            // camera cutout and gesture/navigation bar (edge-to-edge).
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+    ) {
         AddressBar(
             url = state.currentUrl,
             isSecure = state.isSecure,

@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
@@ -81,6 +82,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Draw behind system bars; content keeps clear via WindowInsets
+        // padding in the screens (see BrowserScreen).
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         handleViewIntent(intent)
