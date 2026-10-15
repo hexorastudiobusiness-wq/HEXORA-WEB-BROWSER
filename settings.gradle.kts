@@ -1,4 +1,4 @@
-# Hexora Browser
+// Hexora Browser
 rootProject.name = "HexoraBrowser"
 
 pluginManagement {
