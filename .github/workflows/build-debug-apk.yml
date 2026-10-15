@@ -21,21 +21,22 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Install Android SDK platform 36
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace 2>&1 | tee gradle.log
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee -a gradle.log
 
       - name: Upload APK as workflow artifact
         uses: actions/upload-artifact@v4
@@ -54,3 +55,21 @@ jobs:
             --title "Hexora Browser — debug build ${GITHUB_SHA::7}" \
             --notes "Automated debug build of commit ${GITHUB_SHA}. Not for production use." \
             --prerelease
+
+      # Log download hosts are unreachable from the dev sandbox, so on
+      # failure the tail of the Gradle log is mirrored into an issue.
+      - name: Report failure log in an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Build failed for commit $GITHUB_SHA (run $GITHUB_RUN_ID)."
+            echo
+            echo '```text'
+            tail -n 350 gradle.log 2>/dev/null || echo "(no gradle log captured)"
+            echo '```'
+          } > failure-report.md
+          gh issue create \
+            --title "CI build failure ${GITHUB_SHA::7}" \
+            --body-file failure-report.md
