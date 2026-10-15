@@ -26,6 +26,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Keep ONE debug signing key across CI runs. Each runner would
+      # otherwise mint a fresh debug.keystore, and Android refuses to
+      # install an update whose signature differs from the installed app.
+      - name: Restore stable debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: hexora-debug-keystore-v1
+
       - name: Install Android SDK platform 37
         run: |
           set -o pipefail
