@@ -3,9 +3,8 @@ package com.example.browser.util
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Canvas
+import android.graphics.BitmapFactory
 import android.net.Uri
-import androidx.core.content.ContextCompat
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
@@ -40,15 +39,7 @@ object HomeScreenShortcut {
         }.getOrDefault(false)
     }
 
-    private fun appIconBitmap(context: Context): Bitmap {
-        val size = 192
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val drawable = ContextCompat.getDrawable(context, R.drawable.ic_launcher)
-        if (drawable != null) {
-            val canvas = Canvas(bitmap)
-            drawable.setBounds(0, 0, size, size)
-            drawable.draw(canvas)
-        }
-        return bitmap
-    }
+    private fun appIconBitmap(context: Context): Bitmap =
+        BitmapFactory.decodeResource(context.resources, R.mipmap.ic_launcher)
+            ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
 }

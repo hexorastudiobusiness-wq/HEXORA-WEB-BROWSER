@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.res.Configuration
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -15,9 +16,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -81,6 +84,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.browser.R
 import com.example.browser.ui.components.AddressBar
+import com.example.browser.ui.theme.LocalLiquidGlass
 import com.example.browser.util.HomeScreenShortcut
 import kotlin.math.roundToInt
 
@@ -103,6 +107,7 @@ fun BrowserScreen(
     val context = LocalContext.current
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val liquidGlass = LocalLiquidGlass.current
 
     // System back: exit fullscreen first, then navigate web history, and
     // only when neither applies does it leave the app.
@@ -114,6 +119,91 @@ fun BrowserScreen(
     }
 
     ImmersiveSystemBars(enabled = state.isFullscreen)
+
+    if (liquidGlass && !state.isFullscreen) {
+        // Liquid Glass browsing layout: the page fills the whole window and
+        // translucent chrome floats above it, so content stays faintly
+        // visible behind the address and bottom bars.
+        Box(modifier = modifier.fillMaxSize()) {
+            BrowserPageContent(
+                state = state,
+                onAction = viewModel::onAction,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
+                        ),
+                    ),
+            ) {
+                SwipeToSwitchTabBox(
+                    tabCount = state.tabs.size,
+                    onSwipe = { delta ->
+                        viewModel.onAction(BrowserAction.SwitchAdjacentTab(delta))
+                    },
+                ) {
+                    AddressBar(
+                        url = state.currentUrl,
+                        isSecure = state.isSecure,
+                        isLoading = state.isLoading,
+                        progress = state.progress,
+                        isBookmarked = state.isBookmarked,
+                        compact = landscape,
+                        glass = true,
+                        onSubmit = { viewModel.onAction(BrowserAction.LoadInput(it)) },
+                        onOpenDownloads = onOpenDownloads,
+                        onToggleBookmark = {
+                            viewModel.onAction(BrowserAction.ToggleBookmark)
+                        },
+                    )
+                }
+                if (state.findVisible) {
+                    FindBar(
+                        result = state.findResult,
+                        onQueryNext = { viewModel.onAction(BrowserAction.FindNext(it)) },
+                        onPrevious = { query ->
+                            viewModel.onAction(BrowserAction.FindPrevious(query))
+                        },
+                        onClose = { viewModel.onAction(BrowserAction.CloseFind) },
+                    )
+                }
+            }
+            BrowserBottomBar(
+                state = state,
+                onAction = viewModel::onAction,
+                onOpenTabs = onOpenTabs,
+                onOpenBookmarks = onOpenBookmarks,
+                onOpenHistory = onOpenHistory,
+                onOpenDownloads = onOpenDownloads,
+                onOpenSettings = onOpenSettings,
+                onAddToHomeScreen = {
+                    val added = HomeScreenShortcut.add(context, state.pageTitle, state.currentUrl)
+                    Toast.makeText(
+                        context,
+                        if (added) R.string.home_shortcut_added else R.string.home_shortcut_failed,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                },
+                onSiteDataCleared = {
+                    Toast.makeText(context, R.string.site_data_cleared, Toast.LENGTH_SHORT)
+                        .show()
+                },
+                glass = true,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal,
+                        ),
+                    ),
+            )
+        }
+        return
+    }
 
     Column(
         modifier = modifier
@@ -135,11 +225,7 @@ fun BrowserScreen(
                     isBookmarked = state.isBookmarked,
                     compact = landscape,
                     onSubmit = { viewModel.onAction(BrowserAction.LoadInput(it)) },
-                    onReloadOrStop = {
-                        viewModel.onAction(
-                            if (state.isLoading) BrowserAction.StopLoading else BrowserAction.Reload,
-                        )
-                    },
+                    onOpenDownloads = onOpenDownloads,
                     onToggleBookmark = { viewModel.onAction(BrowserAction.ToggleBookmark) },
                 )
             }
@@ -156,75 +242,13 @@ fun BrowserScreen(
             }
         }
 
-        Box(
+        BrowserPageContent(
+            state = state,
+            onAction = viewModel::onAction,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-        ) {
-            val session = state.activeSession
-            val activeTabId = state.activeTabId
-            if (session != null && activeTabId != null) {
-                // One native engine view per tab; switching tabs swaps it.
-                key(activeTabId) {
-                    AndroidView(
-                        factory = { ctx -> session.createContentView(ctx) },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
-
-            if (state.loadFailed && session != null && !state.isFullscreen) {
-                Card(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(16.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.page_load_failed),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Button(onClick = { viewModel.onAction(BrowserAction.Reload) }) {
-                            Text(stringResource(R.string.action_retry))
-                        }
-                    }
-                }
-            }
-
-            val error = state.errorMessage
-            if (error != null && state.tabs.isEmpty()) {
-                Text(
-                    text = error,
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(24.dp),
-                    color = MaterialTheme.colorScheme.error,
-                    textAlign = TextAlign.Center,
-                )
-            }
-
-            if (state.isFullscreen) {
-                IconButton(
-                    onClick = { viewModel.onAction(BrowserAction.ExitFullscreen) },
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(20.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
-                            shape = CircleShape,
-                        ),
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.FullscreenExit,
-                        contentDescription = stringResource(R.string.action_exit_fullscreen),
-                    )
-                }
-            }
-        }
+        )
 
         if (!state.isFullscreen) {
             BrowserBottomBar(
@@ -248,6 +272,83 @@ fun BrowserScreen(
                         .show()
                 },
             )
+        }
+    }
+}
+
+@Composable
+private fun BrowserPageContent(
+    state: BrowserUiState,
+    onAction: (BrowserAction) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier) {
+        val session = state.activeSession
+        val activeTabId = state.activeTabId
+        if (session != null && activeTabId != null) {
+            // One native engine view per tab; switching tabs swaps it.
+            // onRelease is essential: GeckoView's surface must be detached
+            // when hidden and rebound to a fresh view when the tab is shown
+            // again, otherwise it can come back black.
+            key(activeTabId) {
+                AndroidView(
+                    factory = { ctx -> session.createContentView(ctx) },
+                    onRelease = { view -> session.releaseContentView(view) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        if (state.loadFailed && session != null && !state.isFullscreen) {
+            Card(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.page_load_failed),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Button(onClick = { onAction(BrowserAction.Reload) }) {
+                        Text(stringResource(R.string.action_retry))
+                    }
+                }
+            }
+        }
+
+        val error = state.errorMessage
+        if (error != null && state.tabs.isEmpty()) {
+            Text(
+                text = error,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp),
+                color = MaterialTheme.colorScheme.error,
+                textAlign = TextAlign.Center,
+            )
+        }
+
+        if (state.isFullscreen) {
+            IconButton(
+                onClick = { onAction(BrowserAction.ExitFullscreen) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(20.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                        shape = CircleShape,
+                    ),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.FullscreenExit,
+                    contentDescription = stringResource(R.string.action_exit_fullscreen),
+                )
+            }
         }
     }
 }
@@ -312,7 +413,15 @@ private fun FindBar(
     onClose: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    Surface(shadowElevation = 2.dp) {
+    val glass = LocalLiquidGlass.current
+    Surface(
+        color = if (glass) {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        shadowElevation = if (glass) 0.dp else 2.dp,
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -375,12 +484,24 @@ private fun BrowserBottomBar(
     onOpenSettings: () -> Unit,
     onAddToHomeScreen: () -> Unit,
     onSiteDataCleared: () -> Unit,
+    glass: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 4.dp,
+        modifier = modifier,
+        color = if (glass) {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        shadowElevation = if (glass) 0.dp else 4.dp,
+        border = if (glass) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f))
+        } else {
+            null
+        },
     ) {
         Row(
             modifier = Modifier

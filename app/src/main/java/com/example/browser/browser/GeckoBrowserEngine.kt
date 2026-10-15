@@ -267,15 +267,43 @@ internal class GeckoBrowserSession(
     }
 
     override fun setActive(active: Boolean) {
-        if (!closed && geckoSession.isOpen) geckoSession.setActive(active)
+        if (!closed && geckoSession.isOpen) {
+            // The visible tab gets high priority so Gecko preserves its
+            // compositor/page state as long as possible; hidden tabs use
+            // the default priority and may discard rendering surfaces.
+            geckoSession.setPriorityHint(
+                if (active) {
+                    GeckoSession.PRIORITY_HIGH
+                } else {
+                    GeckoSession.PRIORITY_DEFAULT
+                },
+            )
+            geckoSession.setActive(active)
+        }
     }
 
     override fun createContentView(context: Context): View {
-        contentView?.let { return it }
+        // Never resurrect a previously detached GeckoView. Its SurfaceView
+        // can retain a destroyed surface and present black after the tab is
+        // shown again. A fresh view forces GeckoView to acquire a fresh
+        // GeckoDisplay and repaint the still-live session.
+        contentView?.let { previous ->
+            if (previous.session === geckoSession) previous.releaseSession()
+        }
         val view = GeckoView(context)
         view.setSession(geckoSession)
         contentView = view
         return view
+    }
+
+    override fun releaseContentView(view: View) {
+        val geckoView = view as? GeckoView ?: return
+        if (geckoView.session === geckoSession) {
+            geckoView.releaseSession()
+        }
+        if (contentView === geckoView) {
+            contentView = null
+        }
     }
 
     override fun close() {

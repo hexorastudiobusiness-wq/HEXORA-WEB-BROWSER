@@ -95,10 +95,19 @@ interface BrowserSession {
     fun setActive(active: Boolean)
 
     /**
-     * Creates (once) and returns the native view rendering this session.
+     * Creates a fresh native view rendering this session.
+     *
+     * A new view is intentionally returned for every display period: browser
+     * engine surfaces must be detached when hidden and rebound when shown.
+     * Reusing a detached surface-backed view can leave a tab black even
+     * though its session and page are still alive. The caller must pass the
+     * returned view to [releaseContentView] when it leaves the hierarchy.
      * Typed as a plain [View] so no engine type leaks into the UI layer.
      */
     fun createContentView(context: Context): View
+
+    /** Detaches [view] from this session without closing the session. */
+    fun releaseContentView(view: View)
 
     /** Releases the session and its view. The session cannot be reused afterwards. */
     fun close()

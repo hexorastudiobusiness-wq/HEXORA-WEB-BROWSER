@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -11,7 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Icon
@@ -41,8 +42,9 @@ import com.example.browser.R
 
 /**
  * Address/search bar (ARCHITECTURE.md §6): URL or search input, security
- * indicator, clear action while editing, reload/stop and bookmark toggle,
- * plus the loading progress line.
+ * indicator, clear action while editing, recent-downloads shortcut and
+ * bookmark toggle, plus the loading progress line. Reload/stop deliberately
+ * lives only in the bottom browser bar.
  */
 @Composable
 fun AddressBar(
@@ -52,10 +54,11 @@ fun AddressBar(
     progress: Float,
     isBookmarked: Boolean,
     onSubmit: (String) -> Unit,
-    onReloadOrStop: () -> Unit,
+    onOpenDownloads: () -> Unit,
     onToggleBookmark: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    glass: Boolean = false,
 ) {
     val focusManager = LocalFocusManager.current
     var text by remember { mutableStateOf("") }
@@ -68,8 +71,17 @@ fun AddressBar(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 2.dp,
+        color = if (glass) {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        shadowElevation = if (glass) 0.dp else 2.dp,
+        border = if (glass) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f))
+        } else {
+            null
+        },
     ) {
         Column {
             Row(
@@ -109,8 +121,16 @@ fun AddressBar(
                     colors = TextFieldDefaults.colors(
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        focusedContainerColor = if (glass) {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        unfocusedContainerColor = if (glass) {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
+                        },
                     ),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Uri,
@@ -125,12 +145,10 @@ fun AddressBar(
                     ),
                 )
 
-                IconButton(onClick = onReloadOrStop) {
+                IconButton(onClick = onOpenDownloads) {
                     Icon(
-                        imageVector = if (isLoading) Icons.Filled.Close else Icons.Filled.Refresh,
-                        contentDescription = stringResource(
-                            if (isLoading) R.string.action_stop else R.string.action_reload,
-                        ),
+                        imageVector = Icons.Filled.Download,
+                        contentDescription = stringResource(R.string.menu_downloads),
                     )
                 }
                 IconButton(onClick = onToggleBookmark) {

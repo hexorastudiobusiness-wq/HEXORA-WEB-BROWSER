@@ -135,6 +135,11 @@ fun SettingsScreen(
                 selected = settings.themeMode == ThemeMode.DARK,
                 onClick = { viewModel.setThemeMode(ThemeMode.DARK) },
             )
+            RadioRow(
+                label = stringResource(R.string.theme_glass),
+                selected = settings.themeMode == ThemeMode.GLASS,
+                onClick = { viewModel.setThemeMode(ThemeMode.GLASS) },
+            )
 
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()

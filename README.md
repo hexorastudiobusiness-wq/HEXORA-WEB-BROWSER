@@ -9,7 +9,7 @@ A modern Android web browser built with **Kotlin**, **Jetpack Compose**, and **M
 - Bookmarks and history
 - Private browsing
 - Downloads
-- Modern Material 3 UI
+- Modern Material 3 UI, including an optional translucent Liquid Glass appearance
 - Clean, modular architecture
 - Easy future expansion for privacy and advanced browser features
 

@@ -57,6 +57,7 @@
     <string name="theme_system">System default</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
+    <string name="theme_glass">Liquid Glass</string>
     <string name="settings_javascript">JavaScript</string>
     <string name="settings_javascript_summary">Applies to new browsing sessions after restart</string>
     <string name="settings_cookies">Cookies</string>
