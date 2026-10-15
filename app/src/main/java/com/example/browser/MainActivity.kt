@@ -28,6 +28,8 @@ import com.example.browser.ui.bookmarks.BookmarksScreen
 import com.example.browser.ui.bookmarks.BookmarksViewModel
 import com.example.browser.ui.browser.BrowserScreen
 import com.example.browser.ui.browser.BrowserViewModel
+import com.example.browser.ui.downloads.DownloadsScreen
+import com.example.browser.ui.downloads.DownloadsViewModel
 import com.example.browser.ui.history.HistoryScreen
 import com.example.browser.ui.history.HistoryViewModel
 import com.example.browser.ui.settings.SettingsScreen
@@ -60,6 +62,7 @@ class MainActivity : ComponentActivity() {
                     historyRepository = container.historyRepository,
                     bookmarkRepository = container.bookmarkRepository,
                     settingsRepository = container.settingsRepository,
+                    thumbnailStore = container.tabThumbnailStore,
                 )
             }
         }
@@ -78,7 +81,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private val downloadsViewModel: DownloadsViewModel by viewModels {
-        viewModelFactory { DownloadsViewModel(container.downloadRepository) }
+        viewModelFactory {
+            initializer { DownloadsViewModel(container.downloadRepository) }
+        }
     }
 
     private val settingsViewModel: SettingsViewModel by viewModels {
@@ -145,11 +150,22 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 browserViewModel.downloadEvents.collect { event ->
-                    val started = container.downloadHandler.download(
+                    val downloadId = container.downloadHandler.download(
                         url = event.url,
                         fileName = event.fileName,
                         mimeType = event.mimeType,
                     )
+                    val started = downloadId >= 0
+                    if (started) {
+                        launch {
+                            container.downloadRepository.record(
+                                downloadManagerId = downloadId,
+                                url = event.url,
+                                fileName = event.fileName,
+                                mimeType = event.mimeType,
+                            )
+                        }
+                    }
                     Toast.makeText(
                         this@MainActivity,
                         if (started) {
