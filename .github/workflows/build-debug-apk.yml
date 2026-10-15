@@ -32,7 +32,11 @@ jobs:
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           "$SDKMANAGER" --version 2>&1 | tee setup.log
           yes | "$SDKMANAGER" --licenses >> setup.log 2>&1 || true
-          "$SDKMANAGER" "platforms;android-37" "build-tools;37.0.0" 2>&1 | tee -a setup.log
+          "$SDKMANAGER" --list 2>/dev/null | grep -E "platforms;android-3[567]" >> setup.log || true
+          PLATFORM_PKG=$("$SDKMANAGER" --list 2>/dev/null | grep -oE "platforms;android-37[0-9.]*" | sort -Vu | tail -1 || true)
+          echo "PLATFORM_PKG=$PLATFORM_PKG" | tee -a setup.log
+          test -n "$PLATFORM_PKG"
+          "$SDKMANAGER" "$PLATFORM_PKG" "build-tools;37.0.0" 2>&1 | tee -a setup.log
 
       - name: Build debug APK
         run: |
