@@ -58,6 +58,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            // Compress native libraries inside the APK (they are extracted
+            // on install). Without this, debug APKs store the huge Gecko
+            // engine .so files uncompressed.
+            useLegacyPackaging = true
+        }
     }
 }
 
