@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.util.Log
 import android.util.SparseArray
 import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -99,6 +101,7 @@ class GeckoBrowserEngine(
     // tab leaves detached SurfaceViews behind and previously shown tabs can
     // return white/black even though their GeckoSession is still alive.
     private var sharedContentView: GeckoView? = null
+    private var sharedContentHost: FrameLayout? = null
     private var renderedSession: GeckoBrowserSession? = null
 
     internal fun obtainContentView(
@@ -106,21 +109,34 @@ class GeckoBrowserEngine(
         context: Context,
     ): View {
         val existing = sharedContentView
-        val view = if (existing == null || existing.context !== context) {
-            existing?.releaseSession()
+        val geckoView = if (existing == null || existing.context !== context) {
+            existing?.let { oldView ->
+                (oldView.parent as? ViewGroup)?.removeView(oldView)
+                oldView.releaseSession()
+            }
             renderedSession?.contentView = null
             renderedSession = null
             GeckoView(context).also { sharedContentView = it }
         } else {
             existing
         }
-        bindContentView(session, view)
-        return view
+
+        // AndroidView receives a fresh lightweight host. The real GeckoView
+        // is moved into that host by the engine, so a Compose branch change
+        // (for example entering fullscreen) can never try to add a GeckoView
+        // that still has another parent.
+        val host = FrameLayout(context)
+        sharedContentHost = host
+        attachToHost(geckoView, host)
+        bindContentView(session, host)
+        return host
     }
 
     internal fun bindContentView(session: GeckoBrowserSession, view: View) {
-        if (view !== sharedContentView) return
-        val geckoView = view as GeckoView
+        val geckoView = sharedContentView ?: return
+        val host = sharedContentHost ?: return
+        if (view !== host) return
+        attachToHost(geckoView, host)
         if (renderedSession !== session) {
             renderedSession?.contentView = null
         }
@@ -138,13 +154,29 @@ class GeckoBrowserEngine(
     }
 
     internal fun releaseContentView(session: GeckoBrowserSession, view: View) {
-        if (view !== sharedContentView) return
-        val geckoView = view as GeckoView
+        val geckoView = sharedContentView ?: return
+        // The UI passes the host; session.close() passes the GeckoView.
+        if (view !== sharedContentHost && view !== geckoView) return
+        (geckoView.parent as? ViewGroup)?.removeView(geckoView)
         if (geckoView.session === session.geckoSession) {
             geckoView.releaseSession()
         }
+        sharedContentHost = null
         if (renderedSession === session) renderedSession = null
         if (session.contentView === geckoView) session.contentView = null
+    }
+
+    private fun attachToHost(geckoView: GeckoView, host: FrameLayout) {
+        if (geckoView.parent === host) return
+        (geckoView.parent as? ViewGroup)?.removeView(geckoView)
+        host.removeAllViews()
+        host.addView(
+            geckoView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
     }
 
     internal fun createSessionInternal(
