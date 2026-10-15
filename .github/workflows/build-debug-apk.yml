@@ -28,9 +28,11 @@ jobs:
 
       - name: Install Android SDK platform 37
         run: |
+          set -o pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-          "$SDKMANAGER" "platforms;android-37" "build-tools;37.0.0"
+          "$SDKMANAGER" --version 2>&1 | tee setup.log
+          yes | "$SDKMANAGER" --licenses >> setup.log 2>&1 || true
+          "$SDKMANAGER" "platforms;android-37" "build-tools;37.0.0" 2>&1 | tee -a setup.log
 
       - name: Build debug APK
         run: |
@@ -71,7 +73,7 @@ jobs:
             echo "Build failed for commit $GITHUB_SHA (run $GITHUB_RUN_ID)."
             echo
             echo '```text'
-            tail -n 350 gradle.log 2>/dev/null || echo "(no gradle log captured)"
+            cat setup.log gradle.log 2>/dev/null | tail -n 350; test -f setup.log -o -f gradle.log || echo "(no logs captured)"
             echo '```'
           } > failure-report.md
           gh issue create \
