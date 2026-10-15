@@ -68,4 +68,36 @@
     <!-- Downloads -->
     <string name="download_started">Downloading %1$s</string>
     <string name="download_failed">Download could not be started</string>
+    <string name="action_remove">Remove</string>
+    <string name="action_undo">Undo</string>
+    <string name="action_exit_fullscreen">Exit fullscreen</string>
+    <string name="action_find_next">Next match</string>
+    <string name="action_find_previous">Previous match</string>
+    <string name="action_close_find">Close find bar</string>
+    <string name="menu_desktop_site">Desktop site</string>
+    <string name="menu_find_in_page">Find in page</string>
+    <string name="menu_fullscreen">Fullscreen</string>
+    <string name="menu_zoom">Text size</string>
+    <string name="menu_add_to_home">Add to Home screen</string>
+    <string name="menu_downloads">Downloads</string>
+    <string name="menu_clear_site_data">Clear site data</string>
+    <string name="find_hint">Find in page</string>
+    <string name="find_not_found">No results</string>
+    <string name="site_data_cleared">Site data cleared</string>
+    <string name="home_shortcut_added">Shortcut added to Home screen</string>
+    <string name="home_shortcut_failed">Could not add shortcut</string>
+    <string name="tabs_close_all">Close all</string>
+    <string name="tabs_closed_message">All tabs were closed</string>
+    <string name="tab_sleeping">Sleeping</string>
+    <string name="downloads_title">Downloads</string>
+    <string name="downloads_empty">No downloads yet. Files you download appear here.</string>
+    <string name="downloads_clear_all">Clear list</string>
+    <string name="download_status_running">Downloading</string>
+    <string name="download_status_paused">Paused</string>
+    <string name="download_status_pending">Waiting</string>
+    <string name="download_status_completed">Completed</string>
+    <string name="download_status_failed">Failed</string>
+    <string name="download_status_unknown">Unknown</string>
+    <string name="settings_text_zoom">Text size</string>
+    <string name="settings_text_zoom_summary">Scales text on pages; applied on next page load</string>
 </resources>

@@ -1,6 +1,7 @@
 package com.example.browser.browser
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.view.View
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,7 +20,24 @@ data class SessionPageState(
     val canGoForward: Boolean = false,
     val isSecure: Boolean = false,
     val loadFailed: Boolean = false,
+    val isDesktopMode: Boolean = false,
+    /** The page itself requested fullscreen (e.g. a video player). */
+    val isPageFullscreen: Boolean = false,
+    val findResult: FindResultUi = FindResultUi(),
 )
+
+/** Result of an in-page text search (Find in page). */
+data class FindResultUi(
+    val current: Int = 0,
+    val total: Int = 0,
+    val found: Boolean = false,
+)
+
+/**
+ * Opaque saved state of a suspended tab (engine-serialized navigation
+ * history, scroll position and form data). Kept in memory only.
+ */
+class SavedTabState internal constructor(internal val serialized: String)
 
 /** One-time events coming out of a session (not part of persistent state). */
 sealed interface BrowserSessionEvent {
@@ -51,6 +69,21 @@ interface BrowserSession {
     val isPrivate: Boolean
     val state: StateFlow<SessionPageState>
     val events: SharedFlow<BrowserSessionEvent>
+
+    /** Latest saved state for suspending this tab, if the engine has one. */
+    fun latestSavedState(): SavedTabState?
+
+    /** Switches desktop/mobile rendering for this tab and reloads the page. */
+    fun setDesktopMode(enabled: Boolean)
+
+    /** Finds [query] in the page; [forward] = false searches backwards. */
+    fun findText(query: String, forward: Boolean)
+
+    /** Clears the current in-page search highlights. */
+    fun clearFind()
+
+    /** Captures a small snapshot of the visible page for tab previews. */
+    fun captureThumbnail(onCaptured: (Bitmap?) -> Unit)
 
     fun loadUrl(url: String)
     fun reload()

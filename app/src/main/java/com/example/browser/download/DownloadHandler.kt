@@ -20,12 +20,12 @@ class DownloadHandler(context: Context) {
     private val downloadManager =
         appContext.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
 
-    /** @return true when the download was enqueued successfully. */
-    fun download(url: String, fileName: String, mimeType: String?): Boolean {
+    /** @return the DownloadManager id, or -1 when enqueueing failed. */
+    fun download(url: String, fileName: String, mimeType: String?): Long {
         if (!url.startsWith("http", ignoreCase = true)) {
             // DownloadManager only supports http(s); anything else is rejected.
             Log.w(TAG, "Unsupported download URL scheme: $url")
-            return false
+            return -1L
         }
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle(fileName)
@@ -37,8 +37,27 @@ class DownloadHandler(context: Context) {
             .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
         return runCatching { downloadManager.enqueue(request) }
             .onFailure { Log.e(TAG, "Failed to enqueue download for $url", it) }
-            .isSuccess
+            .getOrDefault(-1L)
     }
+
+    /** Current DownloadManager status (STATUS_*) for [downloadId], if known. */
+    fun statusFor(downloadId: Long): Int? {
+        if (downloadId < 0) return null
+        return runCatching {
+            downloadManager.query(DownloadManager.Query().setFilterById(downloadId))
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    } else {
+                        null
+                    }
+                }
+        }.getOrNull()
+    }
+
+    /** Content URI of the finished file so it can be opened with other apps. */
+    fun uriFor(downloadId: Long): Uri? =
+        runCatching { downloadManager.getUriForDownloadedFile(downloadId) }.getOrNull()
 
     private companion object {
         const val TAG = "DownloadHandler"

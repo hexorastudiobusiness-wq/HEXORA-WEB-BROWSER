@@ -19,6 +19,18 @@ interface BrowserEngine {
     /** Creates a new, independent session. Not thread-confined, but cheap. */
     fun createSession(config: BrowserSessionConfig): BrowserSession
 
+    /** Recreates a suspended tab's session from its [SavedTabState]. */
+    fun restoreSession(config: BrowserSessionConfig, savedState: SavedTabState): BrowserSession
+
+    /**
+     * Sets the global text zoom (50..200 percent). Implemented with the
+     * engine's supported text-scaling setting; pages pick it up on reload.
+     */
+    fun setTextZoomPercent(percent: Int)
+
+    /** Clears cookies/cache/storage belonging to one [host] only. */
+    fun clearSiteData(host: String)
+
     /** Clears cookies, cache, site data etc. via the engine. Fire-and-forget. */
     fun clearBrowsingData()
 }

@@ -2,6 +2,7 @@ package com.example.browser.data.settings
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -27,6 +28,8 @@ data class BrowserSettingsState(
     val cookiesEnabled: Boolean = true,
     val desktopMode: Boolean = false,
     val openLinksInNewTab: Boolean = true,
+    /** Global text zoom in percent (50..200). */
+    val textZoomPercent: Int = 100,
 ) {
     companion object {
         const val DEFAULT_HOMEPAGE = "https://www.google.com"
@@ -53,6 +56,7 @@ class SettingsRepository(context: Context) {
             cookiesEnabled = prefs[KEY_COOKIES] ?: true,
             desktopMode = prefs[KEY_DESKTOP_MODE] ?: false,
             openLinksInNewTab = prefs[KEY_OPEN_LINKS_NEW_TAB] ?: true,
+            textZoomPercent = (prefs[KEY_TEXT_ZOOM] ?: 100).coerceIn(50, 200),
         )
     }
 
@@ -83,6 +87,10 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[KEY_DESKTOP_MODE] = enabled }
     }
 
+    suspend fun setTextZoomPercent(percent: Int) {
+        dataStore.edit { it[KEY_TEXT_ZOOM] = percent.coerceIn(50, 200) }
+    }
+
     suspend fun setOpenLinksInNewTab(enabled: Boolean) {
         dataStore.edit { it[KEY_OPEN_LINKS_NEW_TAB] = enabled }
     }
@@ -95,5 +103,6 @@ class SettingsRepository(context: Context) {
         val KEY_COOKIES = booleanPreferencesKey("cookies_enabled")
         val KEY_DESKTOP_MODE = booleanPreferencesKey("desktop_mode")
         val KEY_OPEN_LINKS_NEW_TAB = booleanPreferencesKey("open_links_in_new_tab")
+        val KEY_TEXT_ZOOM = intPreferencesKey("text_zoom_percent")
     }
 }

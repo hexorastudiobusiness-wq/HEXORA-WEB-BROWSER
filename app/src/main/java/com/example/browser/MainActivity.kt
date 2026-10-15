@@ -1,5 +1,6 @@
 package com.example.browser
 
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -40,6 +41,7 @@ private object Routes {
     const val TABS = "tabs"
     const val BOOKMARKS = "bookmarks"
     const val HISTORY = "history"
+    const val DOWNLOADS = "downloads"
     const val SETTINGS = "settings"
 }
 
@@ -75,6 +77,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val downloadsViewModel: DownloadsViewModel by viewModels {
+        viewModelFactory { DownloadsViewModel(container.downloadRepository) }
+    }
+
     private val settingsViewModel: SettingsViewModel by viewModels {
         viewModelFactory {
             initializer { SettingsViewModel(container.settingsRepository) }
@@ -101,10 +107,22 @@ class MainActivity : ComponentActivity() {
                         browserViewModel = browserViewModel,
                         bookmarksViewModel = bookmarksViewModel,
                         historyViewModel = historyViewModel,
+                        downloadsViewModel = downloadsViewModel,
                         settingsViewModel = settingsViewModel,
+                        thumbnailStore = container.tabThumbnailStore,
+                        downloadHandler = container.downloadHandler,
                     )
                 }
             }
+        }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // Memory pressure: release every inactive tab's engine session.
+        // Tabs keep their saved state + thumbnail and restore on selection.
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            browserViewModel.suspendAllInactiveTabs()
         }
     }
 
@@ -152,7 +170,10 @@ private fun HexoraNavHost(
     browserViewModel: BrowserViewModel,
     bookmarksViewModel: BookmarksViewModel,
     historyViewModel: HistoryViewModel,
+    downloadsViewModel: DownloadsViewModel,
     settingsViewModel: SettingsViewModel,
+    thumbnailStore: com.example.browser.util.TabThumbnailStore,
+    downloadHandler: com.example.browser.download.DownloadHandler,
 ) {
     val navController = rememberNavController()
 
@@ -168,11 +189,13 @@ private fun HexoraNavHost(
                 onOpenTabs = { navController.navigate(Routes.TABS) },
                 onOpenBookmarks = { navController.navigate(Routes.BOOKMARKS) },
                 onOpenHistory = { navController.navigate(Routes.HISTORY) },
+                onOpenDownloads = { navController.navigate(Routes.DOWNLOADS) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
             )
         }
         composable(Routes.TABS) {
             TabsScreen(
+                thumbnailStore = thumbnailStore,
                 viewModel = browserViewModel,
                 onNavigateToBrowser = { navController.navigateToBrowser() },
                 onBack = { navController.popBackStack() },
@@ -182,6 +205,13 @@ private fun HexoraNavHost(
             BookmarksScreen(
                 viewModel = bookmarksViewModel,
                 onOpenUrl = { url -> openInBrowser(url) },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Routes.DOWNLOADS) {
+            DownloadsScreen(
+                viewModel = downloadsViewModel,
+                downloadHandler = downloadHandler,
                 onBack = { navController.popBackStack() },
             )
         }

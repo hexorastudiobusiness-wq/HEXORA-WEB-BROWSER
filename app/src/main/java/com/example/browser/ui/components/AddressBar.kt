@@ -55,6 +55,7 @@ fun AddressBar(
     onReloadOrStop: () -> Unit,
     onToggleBookmark: () -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val focusManager = LocalFocusManager.current
     var text by remember { mutableStateOf("") }
@@ -74,7 +75,7 @@ fun AddressBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 8.dp, vertical = if (compact) 2.dp else 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextField(

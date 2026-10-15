@@ -1,6 +1,7 @@
 package com.example.browser.browser
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.util.Log
 import android.view.View
 import java.io.IOException
@@ -44,17 +45,45 @@ class GeckoBrowserEngine(
 
     private var runtimeOrNull: GeckoRuntime? = null
 
+    @Volatile
+    private var textZoomPercent: Int = 100
+
     /** Lazily creates the process-wide runtime on first use (main thread). */
     internal val runtime: GeckoRuntime
         get() = runtimeOrNull ?: GeckoRuntime.create(
             appContext,
             GeckoRuntimeSettings.Builder()
                 .javaScriptEnabled(javaScriptEnabled)
+                // Text zoom is user-controlled; font inflation must not
+                // fight it (setFontSizeFactor throws while it is enabled).
+                .automaticFontSizeAdjustment(false)
+                .fontSizeFactor(textZoomPercent / 100f)
                 .build(),
         ).also { runtimeOrNull = it }
 
     override fun createSession(config: BrowserSessionConfig): BrowserSession =
         createSessionInternal(config).also { it.ensureOpen() }
+
+    override fun restoreSession(
+        config: BrowserSessionConfig,
+        savedState: SavedTabState,
+    ): BrowserSession =
+        createSessionInternal(config, pendingRestore = savedState).also { it.ensureOpen() }
+
+    override fun setTextZoomPercent(percent: Int) {
+        textZoomPercent = percent.coerceIn(50, 200)
+        // Takes effect on each session's next reload/navigation.
+        runtimeOrNull?.settings?.let { settings ->
+            settings.setAutomaticFontSizeAdjustment(false)
+            settings.setFontSizeFactor(textZoomPercent / 100f)
+        }
+    }
+
+    override fun clearSiteData(host: String) {
+        if (host.isBlank()) return
+        runtimeOrNull?.storageController
+            ?.clearDataFromHost(host, StorageController.ClearFlags.ALL)
+    }
 
     override fun clearBrowsingData() {
         // Only touch the runtime if it already exists; clearing data must
@@ -62,7 +91,10 @@ class GeckoBrowserEngine(
         runtimeOrNull?.storageController?.clearData(StorageController.ClearFlags.ALL)
     }
 
-    internal fun createSessionInternal(config: BrowserSessionConfig): GeckoBrowserSession {
+    internal fun createSessionInternal(
+        config: BrowserSessionConfig,
+        pendingRestore: SavedTabState? = null,
+    ): GeckoBrowserSession {
         val settings = GeckoSessionSettings.Builder()
             .usePrivateMode(config.isPrivate)
             .useTrackingProtection(true)
@@ -81,7 +113,12 @@ class GeckoBrowserEngine(
                 },
             )
             .build()
-        return GeckoBrowserSession(engine = this, geckoSession = GeckoSession(settings), config = config)
+        return GeckoBrowserSession(
+            engine = this,
+            geckoSession = GeckoSession(settings),
+            config = config,
+            pendingRestore = pendingRestore,
+        )
     }
 
     internal fun notifyNewSessionCreated(session: BrowserSession) {
@@ -97,12 +134,18 @@ internal class GeckoBrowserSession(
     private val engine: GeckoBrowserEngine,
     internal val geckoSession: GeckoSession,
     private val config: BrowserSessionConfig,
+    private var pendingRestore: SavedTabState? = null,
 ) : BrowserSession {
 
     override val id: String = UUID.randomUUID().toString()
     override val isPrivate: Boolean = config.isPrivate
 
-    private val _state = MutableStateFlow(SessionPageState())
+    private val _state = MutableStateFlow(
+        SessionPageState(isDesktopMode = config.desktopMode),
+    )
+
+    @Volatile
+    private var latestStateString: String? = null
     override val state: StateFlow<SessionPageState> = _state.asStateFlow()
 
     private val _events = MutableSharedFlow<BrowserSessionEvent>(extraBufferCapacity = 8)
@@ -117,7 +160,79 @@ internal class GeckoBrowserSession(
     internal fun ensureOpen() {
         if (!closed && !geckoSession.isOpen) {
             geckoSession.open(engine.runtime)
+            pendingRestore?.let { saved ->
+                pendingRestore = null
+                GeckoSession.SessionState.fromString(saved.serialized)
+                    ?.let { restored -> geckoSession.restoreState(restored) }
+            }
         }
+    }
+
+    override fun latestSavedState(): SavedTabState? =
+        latestStateString?.let { SavedTabState(it) }
+
+    override fun setDesktopMode(enabled: Boolean) {
+        if (closed || _state.value.isDesktopMode == enabled) return
+        _state.update { it.copy(isDesktopMode = enabled) }
+        if (geckoSession.isOpen) {
+            geckoSession.settings.setUserAgentMode(
+                if (enabled) {
+                    GeckoSessionSettings.USER_AGENT_MODE_DESKTOP
+                } else {
+                    GeckoSessionSettings.USER_AGENT_MODE_MOBILE
+                },
+            )
+            geckoSession.settings.setViewportMode(
+                if (enabled) {
+                    GeckoSessionSettings.VIEWPORT_MODE_DESKTOP
+                } else {
+                    GeckoSessionSettings.VIEWPORT_MODE_MOBILE
+                },
+            )
+            geckoSession.reload()
+        }
+    }
+
+    override fun findText(query: String, forward: Boolean) {
+        if (closed || !geckoSession.isOpen || query.isBlank()) return
+        val flags = if (forward) {
+            GeckoSession.FINDER_FIND_FORWARD
+        } else {
+            GeckoSession.FINDER_FIND_BACKWARDS
+        }
+        geckoSession.finder.find(query, flags).accept(
+            { result ->
+                if (result != null && !closed) {
+                    _state.update {
+                        it.copy(
+                            findResult = FindResultUi(
+                                current = result.current,
+                                total = result.total.coerceAtLeast(0),
+                                found = result.found,
+                            ),
+                        )
+                    }
+                }
+            },
+            { _state.update { it.copy(findResult = FindResultUi()) } },
+        )
+    }
+
+    override fun clearFind() {
+        if (!closed && geckoSession.isOpen) geckoSession.finder.clear()
+        _state.update { it.copy(findResult = FindResultUi()) }
+    }
+
+    override fun captureThumbnail(onCaptured: (Bitmap?) -> Unit) {
+        val view = contentView
+        if (closed || view == null) {
+            onCaptured(null)
+            return
+        }
+        view.capturePixels().accept(
+            { bitmap -> onCaptured(bitmap) },
+            { onCaptured(null) },
+        )
     }
 
     override fun loadUrl(url: String) {
@@ -205,7 +320,21 @@ internal class GeckoBrowserSession(
         }
     }
 
+    init {
+        runCatching {
+            geckoSession.finder.setDisplayFlags(GeckoSession.FINDER_DISPLAY_HIGHLIGHT_ALL)
+        }
+    }
+
     private val progressDelegate = object : GeckoSession.ProgressDelegate {
+        override fun onSessionStateChange(
+            session: GeckoSession,
+            sessionState: GeckoSession.SessionState,
+        ) {
+            // Continuously kept so the tab can be suspended at any moment.
+            latestStateString = sessionState.toString()
+        }
+
         override fun onPageStart(session: GeckoSession, url: String) {
             _state.update {
                 it.copy(url = url, isLoading = true, loadFailed = false, progress = 0f)
@@ -237,6 +366,10 @@ internal class GeckoBrowserSession(
     private val contentDelegate = object : GeckoSession.ContentDelegate {
         override fun onTitleChange(session: GeckoSession, title: String?) {
             _state.update { it.copy(title = title.orEmpty()) }
+        }
+
+        override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
+            _state.update { it.copy(isPageFullscreen = fullScreen) }
         }
 
         override fun onCloseRequest(session: GeckoSession) {

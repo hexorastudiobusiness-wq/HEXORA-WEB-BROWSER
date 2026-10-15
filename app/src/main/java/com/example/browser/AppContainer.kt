@@ -6,7 +6,9 @@ import com.example.browser.browser.BrowserEngine
 import com.example.browser.browser.GeckoBrowserEngine
 import com.example.browser.data.database.AppDatabase
 import com.example.browser.data.repository.BookmarkRepository
+import com.example.browser.data.repository.DownloadRepository
 import com.example.browser.data.repository.HistoryRepository
+import com.example.browser.util.TabThumbnailStore
 import com.example.browser.data.settings.SettingsRepository
 import com.example.browser.download.DownloadHandler
 
@@ -21,6 +23,8 @@ class AppContainer(context: Context) {
 
     private val database: AppDatabase by lazy {
         Room.databaseBuilder(appContext, AppDatabase::class.java, "hexora-browser.db")
+            // Dev-stage database: schema changes simply reset local data.
+            .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
     }
 
@@ -38,6 +42,14 @@ class AppContainer(context: Context) {
 
     val downloadHandler: DownloadHandler by lazy {
         DownloadHandler(appContext)
+    }
+
+    val downloadRepository: DownloadRepository by lazy {
+        DownloadRepository(database.downloadDao())
+    }
+
+    val tabThumbnailStore: TabThumbnailStore by lazy {
+        TabThumbnailStore(appContext)
     }
 
     /**
