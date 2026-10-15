@@ -1,0 +1,22 @@
+# Gradle / build outputs
+.gradle/
+build/
+*/build/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+local.properties
+
+# Generated / machine-local files
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Secrets & signing — never commit
+*.jks
+*.keystore
+keystore.properties
+
+# OS files
+.DS_Store

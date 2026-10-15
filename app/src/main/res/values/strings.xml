@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hexora Browser</string>
+
+    <!-- Browser chrome -->
+    <string name="address_hint">Search or enter address</string>
+    <string name="action_back">Back</string>
+    <string name="action_forward">Forward</string>
+    <string name="action_home">Home</string>
+    <string name="action_reload">Reload</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_tabs">Tabs</string>
+    <string name="action_menu">Menu</string>
+    <string name="action_clear_input">Clear</string>
+    <string name="action_add_bookmark">Add bookmark</string>
+    <string name="action_remove_bookmark">Remove bookmark</string>
+    <string name="secure_connection">Secure connection</string>
+    <string name="insecure_connection">Connection is not secure</string>
+    <string name="page_load_failed">This page could not be loaded.</string>
+    <string name="action_retry">Retry</string>
+
+    <!-- Menu -->
+    <string name="menu_new_tab">New tab</string>
+    <string name="menu_new_private_tab">New private tab</string>
+    <string name="menu_bookmarks">Bookmarks</string>
+    <string name="menu_history">History</string>
+    <string name="menu_settings">Settings</string>
+    <string name="menu_clear_data">Clear browsing data</string>
+    <string name="browsing_data_cleared">Browsing data cleared</string>
+
+    <!-- Tabs -->
+    <string name="tabs_title">Tabs</string>
+    <string name="tab_close">Close tab</string>
+    <string name="tab_new">New tab</string>
+    <string name="tab_private">Private</string>
+    <string name="tab_new_page">New tab page</string>
+
+    <!-- Bookmarks -->
+    <string name="bookmarks_title">Bookmarks</string>
+    <string name="bookmarks_empty">No bookmarks yet. Tap the star to save this page.</string>
+    <string name="bookmark_delete">Delete bookmark</string>
+
+    <!-- History -->
+    <string name="history_title">History</string>
+    <string name="history_empty">No browsing history yet.</string>
+    <string name="history_delete_entry">Delete from history</string>
+    <string name="history_clear_all">Clear history</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_search_engine">Search engine</string>
+    <string name="settings_homepage">Homepage</string>
+    <string name="settings_homepage_hint">https://example.com</string>
+    <string name="settings_save">Save</string>
+    <string name="settings_saved">Saved</string>
+    <string name="settings_theme">Theme</string>
+    <string name="theme_system">System default</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="settings_javascript">JavaScript</string>
+    <string name="settings_javascript_summary">Applies to new browsing sessions after restart</string>
+    <string name="settings_cookies">Cookies</string>
+    <string name="settings_cookies_summary">Stored preference — per-site cookie controls are planned</string>
+    <string name="settings_desktop_mode">Desktop site by default</string>
+    <string name="settings_desktop_mode_summary">Applies to new tabs</string>
+    <string name="settings_open_links_new_tab">Open links in a new tab</string>
+
+    <!-- Downloads -->
+    <string name="download_started">Downloading %1$s</string>
+    <string name="download_failed">Download could not be started</string>
+</resources>
