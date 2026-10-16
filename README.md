@@ -1,36 +1,96 @@
-# Android Browser
+# Hexora Browser
 
-A modern Android web browser built with **Kotlin**, **Jetpack Compose**, and **Mozilla GeckoView**.
+A fast, simple, and secure personal Android web browser built with
+**Kotlin**, **Jetpack Compose**, and **Mozilla GeckoView**.
 
-## Goals
+Current version: **0.3.3** (`versionCode` 9) — see
+[Releases](https://github.com/hexorastudiobusiness-wq/HEXORA-WEB-BROWSER/releases).
 
-- Fast and reliable browsing
-- Multiple tabs
-- Bookmarks and history
-- Private browsing
-- Downloads
-- Modern Material 3 UI with System, Light, Dark, and solid Hexora Mode themes
-- Start Page with up to ten user-created shortcuts
-- Optional offline saved-login vault (encrypted on-device, no sync)
-- Clean, modular architecture
-- Easy future expansion for privacy and advanced browser features
+## Guiding principles
 
-## Tech Stack
+Hexora is a personal browser designed around heavy daily use. Three
+principles are non-negotiable, and no feature may sacrifice any of them:
 
-- Kotlin
-- Android
-- Jetpack Compose
-- Material 3
-- Mozilla GeckoView
-- Room
-- DataStore
-- Kotlin Coroutines
-- StateFlow
-- Jetpack Navigation
+1. **Secure**
+2. **Simple**
+3. **Fast**
+
+## Features
+
+- GeckoView engine behind a `BrowserEngine` abstraction (never WebView)
+- Address bar with URL/search resolution and a configurable search engine
+- Back / forward / reload / stop, loading progress, secure-connection indicator
+- Multiple tabs, one `GeckoSession` per tab, rendered through a single
+  shared `GeckoView`; inactive tabs are suspended (LRU) to save memory
+- `window.open` / `target=_blank` opens a real tab; system Back at that
+  tab's root closes it and returns to the tab that opened it
+- Private tabs using GeckoView private sessions: no history, no persisted
+  tab screenshot, no in-app download history
+- Chrome-like Start Page with **only user-created shortcuts** (maximum 10,
+  round “+” tile, long-press Edit/Delete, cached site favicons)
+- Find in Page that searches while you type (debounced, stale-result safe)
+- Slim text-zoom slider (50–200%) with a reset-to-100% button, in the
+  browser menu and in Settings
+- Themes: System, plain-white Light, Dark, and opaque Hexora Mode
+  (`#E77E3D` on `#100B0F`). The theme also sets GeckoView's official
+  `preferredColorScheme`, so websites that ship their own dark theme via
+  `prefers-color-scheme` follow it
+- Room history (never for private tabs) and bookmarks
+- Downloads through Android `DownloadManager` into the Downloads folder
+- Offline password vault: logins are stored only as Android
+  Keystore-backed AES-GCM ciphertext, never transmitted, never displayed,
+  and can be offered back on the exact same origin (private tabs excluded)
+
+## Download and install
+
+Signed release builds are published on the
+[Releases page](https://github.com/hexorastudiobusiness-wq/HEXORA-WEB-BROWSER/releases/tag/v0.3.3).
+
+Pick the APK for your device:
+
+| File | For |
+| --- | --- |
+| `app-arm64-v8a-release.apk` | Most modern phones |
+| `app-armeabi-v7a-release.apk` | Old 32-bit phones |
+| `app-x86_64-release.apk` | Emulators |
+| `app-release.aab` | Google Play upload (cannot be installed directly) |
+
+Debug builds (for testing the latest changes) are published as
+`debug-<commit>` prereleases with the same three APK splits.
+
+### Why does Android still warn during installation?
+
+The release APK **is signed** — with Hexora's dedicated release key.
+Signing proves the file was not modified since it was built and that
+future updates really come from the same key. That is all a signature
+does.
+
+The "install unknown apps" (and occasionally Play Protect) warning is
+about the **installation source**, not the signature. Android trusts
+apps installed from Google Play or another managed/trusted source; an
+APK downloaded with a browser or opened from a file manager is treated
+as untrusted no matter how it is signed. This warning appears for every
+sideloaded app, including correctly signed ones.
+
+- To install anyway: allow "Install unknown apps" **only for the app you
+  opened the APK with** (e.g. your browser or file manager). You can turn
+  it off again afterwards.
+- The warning only disappears completely when Hexora is installed from
+  **Google Play**. That is what the signed `app-release.aab` is for:
+  upload it to Play Console and let users install from the Play Store.
+
+### Release vs. debug builds
+
+Release and debug builds use **different signatures**, so Android
+refuses to install one over the other. Uninstall the debug build before
+installing the release build (and vice versa). Release builds are signed
+in CI; the signing key is never stored in this repository — see
+[`signing/README.md`](signing/README.md).
 
 ## Architecture
 
-The application follows an MVVM + Repository architecture.
+MVVM + Repository pattern. Compose UI observes `StateFlow`, sends actions
+to ViewModels, and never talks to GeckoView or the database directly:
 
 ```text
 UI (Compose)
@@ -44,173 +104,39 @@ GeckoBrowserEngine
 GeckoView / GeckoSession
 ```
 
-The UI must never communicate directly with GeckoView APIs.
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full specification and
+[`AGENTS.md`](AGENTS.md) for the developer/agent guide, including the
+release-signing rules that must never be broken.
 
-## Project Structure
+## Project structure
 
 ```text
 app/src/main/java/com/example/browser/
-
-├── MainActivity.kt
-├── BrowserApplication.kt
-│
-├── browser/
-│   ├── BrowserEngine.kt
-│   ├── GeckoBrowserEngine.kt
-│   ├── BrowserSession.kt
-│   └── BrowserSettings.kt
-│
-├── data/
-│   ├── database/
-│   │   ├── AppDatabase.kt
-│   │   ├── BookmarkDao.kt
-│   │   ├── HistoryDao.kt
-│   │   ├── BookmarkEntity.kt
-│   │   ├── CredentialDao.kt
-│   │   ├── CredentialEntity.kt
-│   │   └── HistoryEntity.kt
-│   │
-│   └── repository/
-│       ├── BookmarkRepository.kt
-│       ├── CredentialRepository.kt
-│       └── HistoryRepository.kt
-│
-├── ui/
-│   ├── browser/
-│   ├── tabs/
-│   ├── bookmarks/
-│   ├── history/
-│   ├── passwords/
-│   ├── settings/
-│   └── components/
-│
-└── util/
+├── MainActivity.kt / BrowserApplication.kt / AppContainer.kt
+├── browser/        BrowserEngine abstraction + the only GeckoView code
+├── data/           Room database (+ migrations), repositories, settings
+├── download/       DownloadManager bridge and filename handling
+├── ui/             Compose screens and ViewModels (browser, tabs,
+│                   bookmarks, history, downloads, passwords, settings,
+│                   theme, shared components)
+└── util/           URL handling, thumbnail/shortcut-icon stores
+signing/            Release-signing guide (no key material, ever)
+.github/workflows/  Debug CI, signed-release CI, one-time key bootstrap
 ```
-
-## Current Roadmap
-
-### Phase 1 — MVP
-
-- GeckoView integration
-- Address bar
-- URL loading
-- Search
-- Back / Forward / Reload
-- Multiple tabs
-- Basic history
-- Basic bookmarks
-
-### Phase 2
-
-- Downloads
-- Private browsing
-- Settings
-- Dark mode
-- Desktop site
-- Start Page (manual shortcuts)
-
-### Phase 3
-
-- Ad-blocking architecture
-- Custom DNS
-- Advanced privacy controls
-- Cookie management
-- Permission management
-- Find in page
-
-### Phase 4
-
-- Sync
-- Browser profiles
-- Advanced tab management
-- Backup / restore
-- Extension architecture
-
-## Implementation Status
-
-Phase 1 MVP and the core of Phase 2 are implemented:
-
-- GeckoView integration behind the `BrowserEngine` abstraction
-- Address bar with URL/search resolution (configurable search engine)
-- Back / forward / reload / stop, loading progress, security indicator
-- Multiple tabs (new / switch / close), one `GeckoSession` per tab
-- `window.open` opens a real new tab; hardware Back at that tab's root
-  closes it and returns to the tab that opened it. Private tabs use
-  GeckoView private sessions, never record history, never persist a tab
-  screenshot, and their downloads are not written to the in-app download
-  history (the downloaded file itself still exists, as the user requested it)
-- Room history (private tabs are never recorded) and bookmarks
-- DataStore settings: search engine, JavaScript, desktop mode,
-  theme (System/Light/Dark/Hexora Mode), open-links-in-new-tab, and the
-  local password-manager master switch. Light is plain white with neutral
-  surfaces; Hexora Mode is an opaque dark studio theme built from
-  #E77E3D and #100B0F. The theme also sets GeckoView's official
-  `preferredColorScheme`, so sites that provide their own dark theme via
-  `prefers-color-scheme` follow the app theme (Dark and Hexora Mode request
-  the site's dark theme)
-- Downloads delegated to Android `DownloadManager` (Downloads folder)
-- Find in Page searches while typing (debounced) and only reports
-  “No results” after Gecko answers for the exact current text; the slim
-  text-zoom slider (browser menu and Settings) has a reset-to-100% button
-- Address-bar input, external intents, home-screen shortcuts and downloads
-  are restricted to http(s) navigation targets; Android backup is disabled
-  and Room has no destructive-migration fallback
-- `ACTION_VIEW` intents open http(s) links in a new tab
-- Quick new-tab (`+`) button beside the tab switcher; the address bar selects
-  its whole contents on first focus
-- Closing the last tab is allowed: zero tabs is a valid state and shows the
-  Hexora Start Page. The Start Page contains only shortcuts the user creates
-  with its round + action (maximum ten); it never derives sites from history.
-  Long-pressing a shortcut opens a small menu to edit or delete it. Once a
-  shortcut's site has finished loading, its tile caches and shows the site's
-  own favicon instead of the initial-letter placeholder.
-- The Start Page header and Android 12+ system splash use the dedicated
-  Hexora logo artwork rather than the launcher icon. The address bar and
-  tab-tile close controls use compact sizing for faster one-handed use.
-- Tabs render through one shared GeckoView whose session is swapped, while
-  inactive live sessions are kept high priority; LRU suspension/restore is
-  still the memory control for long tab lists
-- The launcher icon uses the complete supplied artwork (including its
-  wordmark), contained without cropping, with Android adaptive-icon masking
-  on modern launchers and pre-rounded legacy icons on older versions.
-- Local password manager: after a login form is submitted, Hexora can ask to
-  save it. Usernames/passwords are stored only as Android Keystore-backed
-  AES-GCM ciphertext in the on-device Room database, are never transmitted,
-  and can be deleted from Settings → Saved logins. Saved credentials can be
-  offered back to login forms on the same exact origin (private tabs are
-  excluded)
-
-Known MVP limitations: site permission prompts (camera/mic/location) are not
-wired yet, the JavaScript toggle applies from the next app start, the cookie
-and open-links-in-new-tab toggles are stored preferences that are not applied
-to the engine yet, and downloads are re-fetched by `DownloadManager`
-(no cookie/auth carry-over). GeckoView's preferred-color-scheme support lets
-sites use their own dark CSS; unlike Chrome it does not algorithmically
-recolor sites that ship no dark theme, so such pages can remain light in
-Dark/Hexora Mode.
-Saved-login autofill depends on sites exposing recognizable username/password
-fields to GeckoView's autofill tree; when several usernames exist for one
-origin, the most recently saved/updated one is offered first. Passwords are
-never displayed in the saved-login manager. Runtime behavior of each release
-still needs on-device verification.
 
 ## Development
 
-Requirements: JDK 17 and Android SDK platform 37 (GeckoView 158 requires
-compileSdk 37). Toolchain versions are pinned centrally in
-`gradle/libs.versions.toml` (Gradle 9.3.1, AGP 9.1.1 with built-in Kotlin,
-targeting SDK 37). The pinned GeckoView artifact is the latest stable release
-build from https://maven.mozilla.org/maven2/org/mozilla/geckoview/geckoview —
-bump its version there to upgrade.
+Requirements: JDK 17 and Android SDK platform 37. Toolchain versions are
+pinned in `gradle/libs.versions.toml` (Gradle 9.3.1, AGP 9.1.1 with
+built-in Kotlin, GeckoView 158, compileSdk/targetSdk 37, minSdk 26).
+Supported focus: Android 12–17 across OEM skins and screen sizes.
 
-Every push to the working branch also builds the debug APK on GitHub
-Actions (`.github/workflows/build-debug-apk.yml`) and publishes it to a
-GitHub prerelease, e.g. `releases/tag/debug-ada0c82`. Debug APKs are split
-per CPU architecture (arm64-v8a for most modern phones, armeabi-v7a for old
-32-bit phones, x86_64 for emulators) instead of one universal build that
-bundles the GeckoView engine for every ABI (~520 MB).
-
-Open the project in Android Studio and let Gradle synchronize dependencies.
+Every push to the working branch builds the debug APK on GitHub Actions
+and publishes it as a `debug-<short-sha>` prerelease. Signed release
+builds are produced by the **Build signed release** workflow; the
+dedicated release key exists only as GitHub Actions secrets — read
+[`signing/README.md`](signing/README.md) before touching anything
+release-related.
 
 Build the debug APK:
 
@@ -224,11 +150,24 @@ Run the unit tests:
 ./gradlew testDebugUnitTest
 ```
 
-Signed release builds use a dedicated release key that is never committed
-to this repository. The keystore lives only in GitHub Actions secrets; run
-the **Build signed release** workflow to produce signed release APKs and an
-AAB published to a GitHub Release. See `signing/README.md` for the secret
-names and the one-time owner checklist.
+## Known limitations
+
+- Site permission prompts (camera/microphone/location) are not wired yet.
+- The JavaScript toggle applies from the next app start. The Cookies and
+  Open-links-in-new-tab toggles are stored preferences that do not change
+  engine behavior yet (their Settings summaries say so honestly).
+- GeckoView lets sites use their own dark CSS through
+  `prefers-color-scheme`, but — unlike Chrome — it does not
+  algorithmically recolor sites that ship no dark theme, so such pages
+  can remain light in Dark/Hexora Mode.
+- Downloads are re-fetched by `DownloadManager` (no cookie/auth
+  carry-over from the browsing session).
+- Saved-login autofill depends on sites exposing recognizable
+  username/password fields to GeckoView; with several logins for one
+  origin, the most recently saved/updated one is offered first.
+- Runtime behavior of each build still needs on-device verification by
+  the owner; CI verifies compilation and unit tests, not real-device
+  rendering.
 
 ## License
 

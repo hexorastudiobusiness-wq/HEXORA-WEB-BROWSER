@@ -71,11 +71,11 @@ jobs:
           1. Open keystore-base64.txt, select all and copy.
              In the GitHub repository: Settings -> Secrets and variables ->
              Actions -> New repository secret.
-             Name:  HEXORA_RELEASE_KEYSTORE_BASE64
+             Name:  HEXORA_WEB_BROWSER_RELEASE_KEYSTORE_BASE64
              Value: paste.
           2. Open password.txt and copy its content.
              Create a second secret.
-             Name:  HEXORA_RELEASE_KEYSTORE_PASSWORD
+             Name:  HEXORA_WEB_BROWSER_RELEASE_KEYSTORE_PASSWORD
              Value: paste.
           3. Tell the assistant "done", then DELETE this workflow run in
              GitHub Actions so the key does not stay on GitHub servers.
