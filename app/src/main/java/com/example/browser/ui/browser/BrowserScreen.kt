@@ -6,6 +6,8 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -68,6 +71,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -83,6 +87,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -90,7 +95,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.browser.R
 import com.example.browser.ui.components.AddressBar
-import com.example.browser.ui.theme.LocalLiquidGlass
 import com.example.browser.util.HomeScreenShortcut
 import kotlin.math.roundToInt
 
@@ -113,7 +117,6 @@ fun BrowserScreen(
     val context = LocalContext.current
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val liquidGlass = LocalLiquidGlass.current
 
     // System back: exit fullscreen first, then navigate web history, and
     // only when neither applies does it leave the app.
@@ -178,92 +181,6 @@ fun BrowserScreen(
                 }
             },
         )
-    }
-
-    if (liquidGlass && !state.isFullscreen) {
-        // Liquid Glass browsing layout: the page fills the whole window and
-        // translucent chrome floats above it, so content stays faintly
-        // visible behind the address and bottom bars.
-        Box(modifier = modifier.fillMaxSize()) {
-            BrowserPageContent(
-                state = state,
-                onAction = viewModel::onAction,
-                onOpenUrl = { url -> viewModel.onAction(BrowserAction.OpenUrl(url)) },
-                modifier = Modifier.fillMaxSize(),
-            )
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(
-                            WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
-                        ),
-                    ),
-            ) {
-                SwipeToSwitchTabBox(
-                    tabCount = state.tabs.size,
-                    onSwipe = { delta ->
-                        viewModel.onAction(BrowserAction.SwitchAdjacentTab(delta))
-                    },
-                ) {
-                    AddressBar(
-                        url = state.currentUrl,
-                        isSecure = state.isSecure,
-                        isLoading = state.isLoading,
-                        progress = state.progress,
-                        isBookmarked = state.isBookmarked,
-                        compact = landscape,
-                        glass = true,
-                        onSubmit = { viewModel.onAction(BrowserAction.LoadInput(it)) },
-                        onOpenDownloads = onOpenDownloads,
-                        onToggleBookmark = {
-                            viewModel.onAction(BrowserAction.ToggleBookmark)
-                        },
-                    )
-                }
-                if (state.findVisible) {
-                    FindBar(
-                        result = state.findResult,
-                        onQueryNext = { viewModel.onAction(BrowserAction.FindNext(it)) },
-                        onPrevious = { query ->
-                            viewModel.onAction(BrowserAction.FindPrevious(query))
-                        },
-                        onClose = { viewModel.onAction(BrowserAction.CloseFind) },
-                    )
-                }
-            }
-            BrowserBottomBar(
-                state = state,
-                onAction = viewModel::onAction,
-                onOpenTabs = onOpenTabs,
-                onOpenBookmarks = onOpenBookmarks,
-                onOpenHistory = onOpenHistory,
-                onOpenDownloads = onOpenDownloads,
-                onOpenSettings = onOpenSettings,
-                onAddToHomeScreen = {
-                    val added = HomeScreenShortcut.add(context, state.pageTitle, state.currentUrl)
-                    Toast.makeText(
-                        context,
-                        if (added) R.string.home_shortcut_added else R.string.home_shortcut_failed,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                },
-                onSiteDataCleared = {
-                    Toast.makeText(context, R.string.site_data_cleared, Toast.LENGTH_SHORT)
-                        .show()
-                },
-                glass = true,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(
-                            WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal,
-                        ),
-                    ),
-            )
-        }
-        return
     }
 
     Column(
@@ -350,6 +267,12 @@ private fun BrowserPageContent(
             StartPage(
                 state = state,
                 onOpenUrl = onOpenUrl,
+                onAddShortcut = { title, url ->
+                    onAction(BrowserAction.AddStartShortcut(title, url))
+                },
+                onDeleteShortcut = { id ->
+                    onAction(BrowserAction.DeleteStartShortcut(id))
+                },
                 modifier = Modifier.fillMaxSize(),
             )
             return
@@ -409,7 +332,7 @@ private fun BrowserPageContent(
                     .align(Alignment.BottomEnd)
                     .padding(20.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                        color = MaterialTheme.colorScheme.surface,
                         shape = CircleShape,
                     ),
             ) {
@@ -426,8 +349,53 @@ private fun BrowserPageContent(
 private fun StartPage(
     state: BrowserUiState,
     onOpenUrl: (String) -> Unit,
+    onAddShortcut: (String, String) -> Unit,
+    onDeleteShortcut: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var addDialogVisible by remember { mutableStateOf(false) }
+    var shortcutPendingDeletion by remember { mutableStateOf<StartShortcut?>(null) }
+
+    if (addDialogVisible) {
+        AddShortcutDialog(
+            onDismiss = { addDialogVisible = false },
+            onSave = { title, url ->
+                onAddShortcut(title, url)
+                addDialogVisible = false
+            },
+        )
+    }
+
+    shortcutPendingDeletion?.let { shortcut ->
+        AlertDialog(
+            onDismissRequest = { shortcutPendingDeletion = null },
+            title = { Text(stringResource(R.string.start_shortcut_remove_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.start_shortcut_remove_message,
+                        shortcut.title,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteShortcut(shortcut.id)
+                        shortcutPendingDeletion = null
+                    },
+                ) {
+                    Text(stringResource(R.string.action_remove))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { shortcutPendingDeletion = null }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
     LazyColumn(
         modifier = modifier.padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -446,7 +414,11 @@ private fun StartPage(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Filled.Language,
+                            imageVector = if (state.isPrivate) {
+                                Icons.Filled.Lock
+                            } else {
+                                Icons.Filled.Language
+                            },
                             contentDescription = null,
                             modifier = Modifier.size(34.dp),
                         )
@@ -471,78 +443,79 @@ private fun StartPage(
             }
         }
 
-        if (state.topSites.isEmpty() && state.startBookmarks.isEmpty()) {
+        if (state.isPrivate) {
             item {
                 Text(
-                    text = stringResource(R.string.start_empty),
+                    text = stringResource(R.string.start_shortcuts_private),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 18.dp),
                 )
             }
-        }
-
-        if (state.topSites.isNotEmpty()) {
+        } else {
             item {
-                Text(
-                    text = stringResource(R.string.start_top_sites),
-                    style = MaterialTheme.typography.titleMedium,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.start_shortcuts),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = stringResource(
+                            R.string.start_shortcuts_count,
+                            state.startShortcuts.size,
+                        ),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            items(state.topSites.chunked(4)) { rowSites ->
+
+            if (state.startShortcuts.isEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.start_shortcut_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            val cells: List<StartShortcut?> = state.startShortcuts +
+                if (state.canAddStartShortcut) listOf(null) else emptyList()
+            items(cells.chunked(4)) { rowShortcuts ->
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    rowSites.forEach { site ->
-                        StartSiteTile(
-                            site = site,
-                            onClick = { onOpenUrl(site.url) },
-                            modifier = Modifier.weight(1f),
-                        )
+                    rowShortcuts.forEach { shortcut ->
+                        if (shortcut == null) {
+                            AddShortcutTile(
+                                onClick = { addDialogVisible = true },
+                                modifier = Modifier.weight(1f),
+                            )
+                        } else {
+                            StartShortcutTile(
+                                shortcut = shortcut,
+                                onClick = { onOpenUrl(shortcut.url) },
+                                onLongClick = { shortcutPendingDeletion = shortcut },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     }
-                    repeat(4 - rowSites.size) {
+                    repeat(4 - rowShortcuts.size) {
                         Box(modifier = Modifier.weight(1f))
                     }
                 }
             }
-        }
 
-        if (state.startBookmarks.isNotEmpty()) {
-            item {
-                Text(
-                    text = stringResource(R.string.start_bookmarks),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-            }
-            items(state.startBookmarks) { site ->
-                Card(
-                    onClick = { onOpenUrl(site.url) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Bookmark,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = site.title.ifBlank { site.url },
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = site.url,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
+            if (state.startShortcuts.isNotEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(R.string.start_shortcut_remove_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -554,22 +527,83 @@ private fun StartPage(
 }
 
 @Composable
-private fun StartSiteTile(
-    site: StartPageSite,
+private fun AddShortcutDialog(
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.start_shortcut_add_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.start_shortcut_name)) },
+                    placeholder = {
+                        Text(stringResource(R.string.start_shortcut_name_hint))
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text(stringResource(R.string.start_shortcut_address)) },
+                    placeholder = {
+                        Text(stringResource(R.string.start_shortcut_address_hint))
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(name, address) },
+                enabled = address.isNotBlank(),
+            ) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun StartShortcutTile(
+    shortcut: StartShortcut,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val host = remember(site.url) {
-        runCatching { Uri.parse(site.url).host }
+    val host = remember(shortcut.url) {
+        runCatching { Uri.parse(shortcut.url).host }
             .getOrNull()
             ?.removePrefix("www.")
-            ?.ifBlank { site.url }
-            ?: site.url
+            ?.ifBlank { shortcut.url }
+            ?: shortcut.url
     }
-    val label = site.title.ifBlank { host }
-    Card(
-        onClick = onClick,
-        modifier = modifier.height(96.dp),
+    val label = shortcut.title.ifBlank { host }
+    Surface(
+        modifier = modifier
+            .height(108.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+        shape = RoundedCornerShape(26.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 1.dp,
     ) {
         Column(
             modifier = Modifier
@@ -580,8 +614,8 @@ private fun StartSiteTile(
         ) {
             Surface(
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                modifier = Modifier.size(38.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(40.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
@@ -603,6 +637,51 @@ private fun StartSiteTile(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AddShortcutTile(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(108.dp),
+        shape = RoundedCornerShape(26.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            1.5.dp,
+            MaterialTheme.colorScheme.primary,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = stringResource(R.string.start_add_shortcut),
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+            }
+            Text(
+                text = stringResource(R.string.start_add_shortcut),
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(top = 8.dp),
             )
         }
     }
@@ -668,14 +747,9 @@ private fun FindBar(
     onClose: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    val glass = LocalLiquidGlass.current
     Surface(
-        color = if (glass) {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
-        shadowElevation = if (glass) 0.dp else 2.dp,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 2.dp,
     ) {
         Row(
             modifier = Modifier
@@ -739,24 +813,14 @@ private fun BrowserBottomBar(
     onOpenSettings: () -> Unit,
     onAddToHomeScreen: () -> Unit,
     onSiteDataCleared: () -> Unit,
-    glass: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
     Surface(
         modifier = modifier,
-        color = if (glass) {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
-        shadowElevation = if (glass) 0.dp else 4.dp,
-        border = if (glass) {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f))
-        } else {
-            null
-        },
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 4.dp,
     ) {
         Row(
             modifier = Modifier

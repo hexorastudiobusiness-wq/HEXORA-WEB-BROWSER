@@ -53,7 +53,7 @@
     <string name="theme_system">System default</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
-    <string name="theme_glass">Liquid Glass</string>
+    <string name="theme_hexora">Hexora Mode</string>
     <string name="settings_javascript">JavaScript</string>
     <string name="settings_javascript_summary">Applies to new browsing sessions after restart</string>
     <string name="settings_cookies">Cookies</string>
@@ -111,11 +111,22 @@
     <string name="password_username">Username: %1$s</string>
     <string name="action_save">Save</string>
     <string name="action_not_now">Not now</string>
+    <string name="action_cancel">Cancel</string>
     <string name="start_title">Hexora</string>
     <string name="start_subtitle">Fast, private, yours</string>
-    <string name="start_top_sites">Most visited</string>
-    <string name="start_bookmarks">Bookmarks</string>
-    <string name="start_empty">Visit or bookmark sites and they will appear here.</string>
+    <string name="start_shortcuts">Shortcuts</string>
+    <string name="start_shortcuts_count">%1$d/10</string>
+    <string name="start_shortcut_empty">No shortcuts yet. Add the sites you want to reach quickly.</string>
+    <string name="start_add_shortcut">Add shortcut</string>
+    <string name="start_shortcut_add_title">Add shortcut</string>
+    <string name="start_shortcut_name">Name</string>
+    <string name="start_shortcut_name_hint">Optional</string>
+    <string name="start_shortcut_address">Address</string>
+    <string name="start_shortcut_address_hint">example.com</string>
+    <string name="start_shortcut_remove_title">Remove shortcut?</string>
+    <string name="start_shortcut_remove_message">Remove %1$s from the Start Page?</string>
+    <string name="start_shortcut_remove_hint">Long-press a shortcut to remove it.</string>
+    <string name="start_shortcuts_private">Your shortcuts are hidden in private tabs.</string>
     <string name="tabs_empty">No open tabs</string>
     <string name="tabs_empty_hint">Open a new tab or restore the tabs you closed.</string>
 </resources>

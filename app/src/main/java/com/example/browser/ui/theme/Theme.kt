@@ -4,45 +4,102 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
 import com.example.browser.data.settings.ThemeMode
 
 private val LightColors = lightColorScheme(
-    primary = HexoraViolet,
-    secondary = HexoraTeal,
+    primary = NeutralPrimary,
+    onPrimary = Color.White,
+    primaryContainer = NeutralContainer,
+    onPrimaryContainer = NeutralPrimary,
+    secondary = NeutralSecondary,
+    onSecondary = Color.White,
+    secondaryContainer = NeutralContainer,
+    onSecondaryContainer = NeutralPrimary,
+    background = Color.White,
+    onBackground = NeutralPrimary,
+    surface = Color.White,
+    onSurface = NeutralPrimary,
+    surfaceVariant = LightSurfaceVariant,
+    onSurfaceVariant = NeutralSecondary,
+    outline = LightOutline,
+    surfaceTint = NeutralPrimary,
+    surfaceDim = LightOutline,
+    surfaceBright = Color.White,
+    surfaceContainerLowest = Color.White,
+    surfaceContainerLow = Color(0xFFF8F9FA),
+    surfaceContainer = LightSurfaceVariant,
+    surfaceContainerHigh = NeutralContainer,
+    surfaceContainerHighest = LightOutline,
+    inverseSurface = NeutralPrimary,
+    inverseOnSurface = Color.White,
+    inversePrimary = NeutralContainer,
+    scrim = Color.Black,
     error = HexoraError,
 )
 
 private val DarkColors = darkColorScheme(
-    primary = HexoraVioletLight,
-    primaryContainer = HexoraVioletDarkContainer,
-    secondary = HexoraTealDark,
+    primary = NeutralPrimaryDark,
+    onPrimary = NeutralPrimary,
+    primaryContainer = NeutralContainerDark,
+    onPrimaryContainer = NeutralPrimaryDark,
+    secondary = NeutralSecondaryDark,
+    secondaryContainer = NeutralContainerDark,
+    background = Color(0xFF121212),
+    onBackground = NeutralPrimaryDark,
+    surface = Color(0xFF1E1E1E),
+    onSurface = NeutralPrimaryDark,
+    surfaceVariant = DarkSurfaceVariant,
+    onSurfaceVariant = NeutralSecondaryDark,
+    outline = DarkOutline,
+    surfaceTint = NeutralPrimaryDark,
+    surfaceDim = Color(0xFF0E0E0E),
+    surfaceBright = Color(0xFF303134),
+    surfaceContainerLowest = Color(0xFF121212),
+    surfaceContainerLow = Color(0xFF1E1E1E),
+    surfaceContainer = Color(0xFF262626),
+    surfaceContainerHigh = DarkSurfaceVariant,
+    surfaceContainerHighest = Color(0xFF3C4043),
+    inverseSurface = NeutralPrimaryDark,
+    inverseOnSurface = NeutralPrimary,
+    inversePrimary = NeutralContainerDark,
+    scrim = Color.Black,
     error = HexoraErrorDark,
 )
 
-private val GlassLightColors = lightColorScheme(
-    primary = HexoraViolet,
-    secondary = HexoraTeal,
-    error = HexoraError,
-    background = GlassLightBackground,
-    surface = GlassLightSurface,
-    surfaceVariant = GlassLightSurfaceVariant,
-)
-
-private val GlassDarkColors = darkColorScheme(
-    primary = HexoraVioletLight,
-    primaryContainer = HexoraVioletDarkContainer,
-    secondary = HexoraTealDark,
+private val HexoraColors = darkColorScheme(
+    primary = HexoraOrange,
+    onPrimary = HexoraInk,
+    primaryContainer = HexoraOrangeDarkContainer,
+    onPrimaryContainer = HexoraOrangeLight,
+    secondary = HexoraOrangeLight,
+    onSecondary = HexoraInk,
+    secondaryContainer = HexoraInkSurfaceVariant,
+    onSecondaryContainer = HexoraInkOnSurface,
+    tertiary = HexoraOrangeLight,
+    onTertiary = HexoraInk,
+    background = HexoraInk,
+    onBackground = HexoraInkOnSurface,
+    surface = HexoraInkSurface,
+    onSurface = HexoraInkOnSurface,
+    surfaceVariant = HexoraInkSurfaceVariant,
+    onSurfaceVariant = HexoraInkMuted,
+    outline = HexoraInkOutline,
+    surfaceTint = HexoraOrange,
+    surfaceDim = HexoraInk,
+    surfaceBright = HexoraInkSurfaceVariant,
+    surfaceContainerLowest = HexoraInk,
+    surfaceContainerLow = HexoraInkSurface,
+    surfaceContainer = HexoraInkSurfaceVariant,
+    surfaceContainerHigh = Color(0xFF38222B),
+    surfaceContainerHighest = Color(0xFF472C33),
+    inverseSurface = HexoraOrangeLight,
+    inverseOnSurface = HexoraInk,
+    inversePrimary = HexoraOrangeDarkContainer,
+    scrim = Color.Black,
     error = HexoraErrorDark,
-    background = GlassDarkBackground,
-    surface = GlassDarkSurface,
-    surfaceVariant = GlassDarkSurfaceVariant,
 )
-
-/** True only while the Liquid Glass appearance is selected. */
-val LocalLiquidGlass = staticCompositionLocalOf { false }
 
 /** Material 3 theme driven by the persisted [ThemeMode] (ARCHITECTURE.md §16). */
 @Composable
@@ -51,22 +108,14 @@ fun HexoraBrowserTheme(
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
-    val useDarkColors = when (themeMode) {
-        ThemeMode.SYSTEM -> systemDark
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        // Glass follows the system brightness for its base tint, while its
-        // surfaces stay translucent in both variants.
-        ThemeMode.GLASS -> systemDark
-    }
     val colors = when (themeMode) {
-        ThemeMode.GLASS -> if (useDarkColors) GlassDarkColors else GlassLightColors
-        else -> if (useDarkColors) DarkColors else LightColors
+        ThemeMode.SYSTEM -> if (systemDark) DarkColors else LightColors
+        ThemeMode.LIGHT -> LightColors
+        ThemeMode.DARK -> DarkColors
+        ThemeMode.HEXORA -> HexoraColors
     }
-    CompositionLocalProvider(LocalLiquidGlass provides (themeMode == ThemeMode.GLASS)) {
-        MaterialTheme(
-            colorScheme = colors,
-            content = content,
-        )
-    }
+    MaterialTheme(
+        colorScheme = colors,
+        content = content,
+    )
 }

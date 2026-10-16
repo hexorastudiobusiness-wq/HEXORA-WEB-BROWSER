@@ -9,7 +9,7 @@ class HistoryRepository(private val dao: HistoryDao) {
 
     val history: Flow<List<HistoryEntity>> = dao.observeAll()
 
-    /** Records a finished page visit and increments its top-sites count. */
+    /** Records a finished page visit; revisiting a URL refreshes its title/time. */
     suspend fun recordVisit(url: String, title: String) {
         val now = System.currentTimeMillis()
         val existing = dao.getByUrl(url)
@@ -19,7 +19,6 @@ class HistoryRepository(private val dao: HistoryDao) {
                     url = url,
                     title = title.ifBlank { url },
                     timestamp = now,
-                    visitCount = 1,
                 ),
             )
         } else {
@@ -27,7 +26,6 @@ class HistoryRepository(private val dao: HistoryDao) {
                 existing.copy(
                     title = title.ifBlank { existing.title },
                     timestamp = now,
-                    visitCount = existing.visitCount + 1,
                 ),
             )
         }

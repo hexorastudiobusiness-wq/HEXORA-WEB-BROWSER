@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -60,7 +59,6 @@ fun AddressBar(
     onToggleBookmark: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
-    glass: Boolean = false,
 ) {
     val focusManager = LocalFocusManager.current
     var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
@@ -80,17 +78,8 @@ fun AddressBar(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = if (glass) {
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
-        shadowElevation = if (glass) 0.dp else 2.dp,
-        border = if (glass) {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f))
-        } else {
-            null
-        },
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 2.dp,
     ) {
         Column {
             Row(
@@ -155,16 +144,8 @@ fun AddressBar(
                     colors = TextFieldDefaults.colors(
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
-                        focusedContainerColor = if (glass) {
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f)
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
-                        unfocusedContainerColor = if (glass) {
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.52f)
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant
-                        },
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                     ),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Uri,

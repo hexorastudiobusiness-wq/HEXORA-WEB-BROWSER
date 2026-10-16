@@ -13,6 +13,7 @@ import com.example.browser.browser.SessionPageState
 import com.example.browser.data.repository.BookmarkRepository
 import com.example.browser.data.repository.CredentialRepository
 import com.example.browser.data.repository.HistoryRepository
+import com.example.browser.data.repository.StartShortcutRepository
 import com.example.browser.data.settings.BrowserSettingsState
 import com.example.browser.data.settings.SettingsRepository
 import com.example.browser.util.CredentialOrigin
@@ -50,6 +51,7 @@ class BrowserViewModel(
     private val settingsRepository: SettingsRepository,
     private val thumbnailStore: TabThumbnailStore,
     private val credentialRepository: CredentialRepository,
+    private val shortcutRepository: StartShortcutRepository,
 ) : ViewModel() {
 
     private var engine: BrowserEngine? = null
@@ -127,24 +129,15 @@ class BrowserViewModel(
         ChromeSlice(find, fs, closed.size, prompt)
     }
 
-    private val homeSlice = combine(
+    private val startSlice = combine(
         chromeSlice,
-        historyRepository.history,
-        bookmarkRepository.bookmarks,
-    ) { chrome, history, bookmarks ->
-        HomeSlice(
+        shortcutRepository.shortcuts,
+    ) { chrome, shortcuts ->
+        StartSlice(
             chrome = chrome,
-            topSites = history
-                .filter { UrlUtils.isHttpUrl(it.url) }
-                .sortedWith(
-                    compareByDescending<com.example.browser.data.database.HistoryEntity> { it.visitCount }
-                        .thenByDescending { it.timestamp },
-                )
-                .take(8)
-                .map { StartPageSite(it.title, it.url, it.visitCount) },
-            bookmarks = bookmarks.take(12).map {
-                StartPageSite(it.title, it.url)
-            },
+            shortcuts = shortcuts
+                .take(StartShortcutRepository.MAX_SHORTCUTS)
+                .map { StartShortcut(it.id, it.title, it.url) },
         )
     }
 
@@ -152,9 +145,9 @@ class BrowserViewModel(
         tabsSlice,
         _isCurrentBookmarked,
         _engineError,
-        homeSlice,
+        startSlice,
         settings,
-    ) { slice, bookmarked, error, home, currentSettings ->
+    ) { slice, bookmarked, error, start, currentSettings ->
         val activeEntry = slice.tabs.firstOrNull { it.tabId == slice.activeId }
         val activeState = slice.activeId?.let { slice.states[it] }
             ?: SessionPageState()
@@ -193,24 +186,25 @@ class BrowserViewModel(
             loadFailed = activeState.loadFailed,
             isBookmarked = bookmarked,
             isDesktopMode = activeEntry?.desktopMode ?: false,
-            isFullscreen = home.chrome.userFullscreen || activeState.isPageFullscreen,
-            findVisible = home.chrome.findVisible,
+            isFullscreen = start.chrome.userFullscreen || activeState.isPageFullscreen,
+            findVisible = start.chrome.findVisible,
             findResult = activeState.findResult,
             textZoomPercent = currentSettings.textZoomPercent,
-            recentlyClosedCount = home.chrome.recentlyClosedCount,
+            recentlyClosedCount = start.chrome.recentlyClosedCount,
             thumbnailVersions = slice.thumbnails,
             errorMessage = error,
             activeSession = activeEntry?.session,
             showStartPage = activeEntry?.showStartPage ?: slice.tabs.isEmpty(),
             hasWebPage = activeState.url.isNotBlank() ||
                 (activeEntry?.lastUrl?.isNotBlank() == true),
-            topSites = if (activeEntry?.isPrivate == true) emptyList() else home.topSites,
-            startBookmarks = if (activeEntry?.isPrivate == true) {
+            startShortcuts = if (activeEntry?.isPrivate == true) {
                 emptyList()
             } else {
-                home.bookmarks
+                start.shortcuts
             },
-            pendingCredentialSave = home.chrome.pendingCredentialSave,
+            canAddStartShortcut = activeEntry?.isPrivate != true &&
+                start.shortcuts.size < StartShortcutRepository.MAX_SHORTCUTS,
+            pendingCredentialSave = start.chrome.pendingCredentialSave,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowserUiState())
 
@@ -357,6 +351,20 @@ class BrowserViewModel(
             BrowserAction.UndoCloseAllTabs -> undoCloseAllTabs()
             BrowserAction.SavePendingCredential -> savePendingCredential()
             BrowserAction.DismissPendingCredential -> dismissPendingCredential()
+            is BrowserAction.AddStartShortcut -> {
+                viewModelScope.launch {
+                    shortcutRepository.add(
+                        title = action.title,
+                        url = UrlUtils.resolveInput(
+                            action.url,
+                            settings.value.searchEngine,
+                        ),
+                    )
+                }
+            }
+            is BrowserAction.DeleteStartShortcut -> {
+                viewModelScope.launch { shortcutRepository.delete(action.id) }
+            }
         }
     }
 
@@ -796,10 +804,9 @@ class BrowserViewModel(
         val pendingCredentialSave: CredentialSavePrompt?,
     )
 
-    private data class HomeSlice(
+    private data class StartSlice(
         val chrome: ChromeSlice,
-        val topSites: List<StartPageSite>,
-        val bookmarks: List<StartPageSite>,
+        val shortcuts: List<StartShortcut>,
     )
 
     companion object {

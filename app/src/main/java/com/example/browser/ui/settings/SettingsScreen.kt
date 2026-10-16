@@ -105,9 +105,9 @@ fun SettingsScreen(
                 onClick = { viewModel.setThemeMode(ThemeMode.DARK) },
             )
             RadioRow(
-                label = stringResource(R.string.theme_glass),
-                selected = settings.themeMode == ThemeMode.GLASS,
-                onClick = { viewModel.setThemeMode(ThemeMode.GLASS) },
+                label = stringResource(R.string.theme_hexora),
+                selected = settings.themeMode == ThemeMode.HEXORA,
+                onClick = { viewModel.setThemeMode(ThemeMode.HEXORA) },
             )
 
             Spacer(Modifier.height(16.dp))

@@ -9,6 +9,7 @@ import com.example.browser.data.repository.BookmarkRepository
 import com.example.browser.data.repository.CredentialRepository
 import com.example.browser.data.repository.DownloadRepository
 import com.example.browser.data.repository.HistoryRepository
+import com.example.browser.data.repository.StartShortcutRepository
 import com.example.browser.data.security.CredentialCipher
 import com.example.browser.util.TabThumbnailStore
 import com.example.browser.data.settings.SettingsRepository
@@ -56,6 +57,10 @@ class AppContainer(context: Context) {
 
     val credentialRepository: CredentialRepository by lazy {
         CredentialRepository(database.credentialDao(), CredentialCipher())
+    }
+
+    val startShortcutRepository: StartShortcutRepository by lazy {
+        StartShortcutRepository(database.shortcutDao())
     }
 
     /**

@@ -167,7 +167,6 @@ HistoryEntity
 - url
 - title
 - timestamp
-- visitCount (drives the Start Page's most-visited sites)
 ```
 
 Record successful navigation.
@@ -217,9 +216,10 @@ Initial settings:
 
 Settings should be isolated from UI implementation.
 
-The Start Page replaces a configurable homepage: it shows most-visited
-sites (history `visitCount`) and bookmarked sites, and appears for new
-tabs, when the Home action is used, and when no tab is open.
+The Start Page replaces a configurable homepage. It appears for new tabs,
+when the Home action is used, and when no tab is open. It shows only up to
+ten shortcuts explicitly created by the user through the round + action;
+it must not derive entries from browsing history or bookmarks.
 
 Saved logins are an optional, offline-only vault. GeckoView autofill
 events surface credential submissions to the ViewModel, which asks for
@@ -318,9 +318,10 @@ Use Material 3.
 
 Support:
 
-- Light
+- Light (plain white, neutral surfaces)
 - Dark
 - System default
+- Hexora Mode (opaque dark theme using #E77E3D on #100B0F)
 
 Keep the initial UI clean and minimal.
 

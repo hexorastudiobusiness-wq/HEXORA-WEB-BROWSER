@@ -14,11 +14,11 @@ data class TabUiItem(
     val isSuspended: Boolean = false,
 )
 
-/** One shortcut shown on the Hexora Start Page. */
-data class StartPageSite(
+/** One user-created shortcut shown on the Hexora Start Page. */
+data class StartShortcut(
+    val id: Long,
     val title: String,
     val url: String,
-    val visitCount: Int = 0,
 )
 
 /** A pending "save this login?" prompt. The password never enters UI state. */
@@ -61,8 +61,9 @@ data class BrowserUiState(
     val showStartPage: Boolean = true,
     /** True when a real web page exists underneath the Start Page. */
     val hasWebPage: Boolean = false,
-    val topSites: List<StartPageSite> = emptyList(),
-    val startBookmarks: List<StartPageSite> = emptyList(),
+    val startShortcuts: List<StartShortcut> = emptyList(),
+    /** True when another user-created Start Page shortcut may be added. */
+    val canAddStartShortcut: Boolean = false,
     val pendingCredentialSave: CredentialSavePrompt? = null,
 )
 
@@ -96,4 +97,6 @@ sealed interface BrowserAction {
     data object UndoCloseAllTabs : BrowserAction
     data object SavePendingCredential : BrowserAction
     data object DismissPendingCredential : BrowserAction
+    data class AddStartShortcut(val title: String, val url: String) : BrowserAction
+    data class DeleteStartShortcut(val id: Long) : BrowserAction
 }

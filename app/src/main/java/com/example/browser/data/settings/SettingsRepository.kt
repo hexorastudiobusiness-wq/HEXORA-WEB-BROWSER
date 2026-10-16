@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 enum class ThemeMode {
-    SYSTEM, LIGHT, DARK, GLASS;
+    SYSTEM, LIGHT, DARK, HEXORA;
 
     companion object {
         fun fromName(name: String?): ThemeMode =

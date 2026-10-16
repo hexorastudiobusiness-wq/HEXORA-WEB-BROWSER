@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
                     historyRepository = container.historyRepository,
                     bookmarkRepository = container.bookmarkRepository,
                     credentialRepository = container.credentialRepository,
+                    shortcutRepository = container.startShortcutRepository,
                     settingsRepository = container.settingsRepository,
                     thumbnailStore = container.tabThumbnailStore,
                 )

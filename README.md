@@ -9,8 +9,8 @@ A modern Android web browser built with **Kotlin**, **Jetpack Compose**, and **M
 - Bookmarks and history
 - Private browsing
 - Downloads
-- Modern Material 3 UI, including an optional translucent Liquid Glass appearance
-- Chrome-like Start Page with most-visited sites and bookmarks
+- Modern Material 3 UI with System, Light, Dark, and solid Hexora Mode themes
+- Start Page with up to ten user-created shortcuts
 - Optional offline saved-login vault (encrypted on-device, no sync)
 - Clean, modular architecture
 - Easy future expansion for privacy and advanced browser features
@@ -107,7 +107,7 @@ app/src/main/java/com/example/browser/
 - Settings
 - Dark mode
 - Desktop site
-- Start Page (most-visited sites + bookmarks)
+- Start Page (manual shortcuts)
 
 ### Phase 3
 
@@ -137,17 +137,23 @@ Phase 1 MVP and the core of Phase 2 are implemented:
 - `window.open` opens a real new tab; private tabs use GeckoView private sessions
 - Room history (private tabs are never recorded) and bookmarks
 - DataStore settings: search engine, JavaScript, desktop mode,
-  theme (system/light/dark/Liquid Glass), open-links-in-new-tab, and the
-  local password-manager master switch
+  theme (System/Light/Dark/Hexora Mode), open-links-in-new-tab, and the
+  local password-manager master switch. Light is plain white with neutral
+  surfaces; Hexora Mode is an opaque dark studio theme built from
+  #E77E3D and #100B0F.
 - Downloads delegated to Android `DownloadManager` (Downloads folder)
 - `ACTION_VIEW` intents open http(s) links in a new tab
 - Quick new-tab (`+`) button beside the tab switcher; the address bar selects
   its whole contents on first focus
 - Closing the last tab is allowed: zero tabs is a valid state and shows the
-  Hexora Start Page (most-visited sites from local history + bookmarks)
+  Hexora Start Page. The Start Page contains only shortcuts the user creates
+  with its round + action (maximum ten); it never derives sites from history.
 - Tabs render through one shared GeckoView whose session is swapped, while
   inactive live sessions are kept high priority; LRU suspension/restore is
   still the memory control for long tab lists
+- The launcher icon uses the complete supplied artwork (including its
+  wordmark), contained without cropping, with Android adaptive-icon masking
+  on modern launchers and pre-rounded legacy icons on older versions.
 - Local password manager: after a login form is submitted, Hexora can ask to
   save it. Usernames/passwords are stored only as Android Keystore-backed
   AES-GCM ciphertext in the on-device Room database, are never transmitted,
