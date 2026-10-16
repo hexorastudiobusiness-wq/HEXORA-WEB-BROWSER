@@ -3,6 +3,7 @@ package com.example.browser.ui.tabs
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -236,7 +237,11 @@ private fun TabTile(
                     .aspectRatio(16f / 10f)
                     .background(MaterialTheme.colorScheme.surface),
             ) {
-                TabThumbnail(tab.id, thumbnailVersion, thumbnailStore)
+                if (tab.isPrivate) {
+                    PrivateTabPreview()
+                } else {
+                    TabThumbnail(tab.id, thumbnailVersion, thumbnailStore)
+                }
 
                 if (tab.isPrivate || tab.isSuspended) {
                     Row(
@@ -273,22 +278,32 @@ private fun TabTile(
                     }
                 }
 
-                IconButton(
-                    onClick = onClose,
+                // Keep the visible close affordance small and identical for
+                // empty and loaded tabs. A plain Surface avoids Material's
+                // minimum-interactive-size expansion, which could visually
+                // enlarge/clip an IconButton over a thumbnail.
+                Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .size(28.dp)
-                        .background(
-                            color = MaterialTheme.colorScheme.surface,
-                            shape = androidx.compose.foundation.shape.CircleShape,
-                        ),
+                        .padding(4.dp)
+                        .size(36.dp)
+                        .clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = stringResource(R.string.tab_close),
-                        modifier = Modifier.size(16.dp),
-                    )
+                    Surface(
+                        modifier = Modifier.size(25.dp),
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 2.dp,
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.tab_close),
+                                modifier = Modifier.size(15.dp),
+                            )
+                        }
+                    }
                 }
             }
 
@@ -318,6 +333,21 @@ private fun MiniBadge(content: @Composable () -> Unit) {
         shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
     ) {
         content()
+    }
+}
+
+@Composable
+private fun PrivateTabPreview() {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Filled.Lock,
+            contentDescription = null,
+            modifier = Modifier.size(30.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

@@ -216,6 +216,16 @@ Initial settings:
 
 Settings should be isolated from UI implementation.
 
+The selected theme is also mapped to GeckoView's official
+`GeckoRuntimeSettings.preferredColorScheme` (System/Light/Dark; Hexora Mode
+maps to Dark) both when the runtime is created and whenever the setting
+changes. This exposes the app's choice through `prefers-color-scheme` so
+sites with their own dark CSS can follow it. GeckoView provides no
+Chromium-style algorithmic forced-dark recoloring for sites without a dark
+theme, and Hexora must not invent one. The cookie and open-links-in-new-tab
+preferences are currently stored only; their Settings summaries say so
+instead of pretending they change engine behavior.
+
 The Start Page replaces a configurable homepage. It appears for new tabs,
 when the Home action is used, and when no tab is open. It shows only up to
 ten shortcuts explicitly created by the user through the round + action;
@@ -258,7 +268,9 @@ Do not request broad storage or unrelated permissions.
 
 The architecture must support private tabs.
 
-Private tabs must not write normal browsing history.
+Private tabs must not write normal browsing history. They must not persist
+tab-preview screenshots or an in-app download-history entry either; the tab
+switcher shows a lock placeholder instead of page content.
 
 When a private tab is closed, its private session/data should be released according to GeckoView's supported private-session behavior.
 
@@ -279,6 +291,7 @@ isLoading
 loadingProgress
 canGoBack
 canGoForward
+canBackCloseTab
 isPrivate
 ```
 
@@ -328,7 +341,8 @@ Support:
 - System default
 - Hexora Mode (opaque dark theme using #E77E3D on #100B0F)
 
-Keep the initial UI clean and minimal.
+The same choice drives web content through `preferredColorScheme` as
+described in §10. Keep the initial UI clean and minimal.
 
 ## 17. Error Handling
 
@@ -365,6 +379,10 @@ Use Room.
 Keep database entities, DAOs, and repositories separated.
 
 UI/ViewModels must not execute raw database queries.
+
+There is deliberately no destructive-migration fallback: a future schema
+change must ship an explicit `Migration` rather than silently deleting the
+user's history, bookmarks, shortcuts or saved logins.
 
 ## 20. Repository Layer
 
@@ -473,3 +491,8 @@ The MVP is complete only when:
 - Do not introduce unnecessary dependencies.
 - Avoid premature abstraction beyond the BrowserEngine boundary.
 - Keep code readable for a beginner-maintainable project.
+- Security baseline: Android backup is disabled (`allowBackup=false`), the
+  single browser Activity is `singleTask` with predictive Back opted in,
+  only http(s) targets are accepted from the address bar, other apps,
+  home-screen shortcuts and the download layer, and full download URLs are
+  never written to logcat (they can carry private query tokens).

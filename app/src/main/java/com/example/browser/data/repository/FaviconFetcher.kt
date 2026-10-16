@@ -32,6 +32,14 @@ class FaviconFetcher {
             candidates += pageUri.resolve("/favicon.png").toString()
             candidates += pageUri.resolve("/favicon.ico").toString()
 
+            if (scheme == "https") {
+                // Never let an HTTPS page's shortcut icon be downgraded to a
+                // spoofable plain-HTTP download.
+                candidates.retainAll {
+                    it.startsWith("https://", ignoreCase = true)
+                }
+            }
+
             candidates.asSequence()
                 .take(MAX_CANDIDATES)
                 .mapNotNull { downloadBitmap(it) }
@@ -75,35 +83,66 @@ class FaviconFetcher {
     }.getOrNull()
 
     private fun downloadBytes(url: String, maxBytes: Int): ByteArray? {
-        val connection = (URL(url).openConnection() as? HttpURLConnection) ?: return null
-        return try {
-            connection.instanceFollowRedirects = true
-            connection.connectTimeout = TIMEOUT_MS
-            connection.readTimeout = TIMEOUT_MS
-            connection.setRequestProperty("User-Agent", USER_AGENT)
-            connection.setRequestProperty("Accept", "image/*,text/html;q=0.5,*/*;q=0.1")
-            if (connection.responseCode !in 200..299) return null
-            connection.inputStream.use { input ->
-                val output = ByteArrayOutputStream()
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                var total = 0
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read <= 0) break
-                    total += read
-                    if (total > maxBytes) return null
-                    output.write(buffer, 0, read)
+        val initialScheme = runCatching { URI(url).scheme?.lowercase() }.getOrNull()
+        var currentUrl = url
+        var redirectsRemaining = MAX_REDIRECTS
+
+        while (true) {
+            val currentScheme = runCatching { URI(currentUrl).scheme?.lowercase() }
+                .getOrNull()
+            if (currentScheme != "http" && currentScheme != "https") return null
+            if (initialScheme == "https" && currentScheme != "https") return null
+
+            val connection = (URL(currentUrl).openConnection() as? HttpURLConnection)
+                ?: return null
+            try {
+                // Redirects are followed manually (bounded) so an HTTPS page
+                // can never be silently downgraded to plain HTTP.
+                connection.instanceFollowRedirects = false
+                connection.connectTimeout = TIMEOUT_MS
+                connection.readTimeout = TIMEOUT_MS
+                connection.setRequestProperty("User-Agent", USER_AGENT)
+                connection.setRequestProperty(
+                    "Accept",
+                    "image/*,text/html;q=0.5,*/*;q=0.1",
+                )
+
+                val responseCode = connection.responseCode
+                if (responseCode in 300..399) {
+                    if (redirectsRemaining == 0) return null
+                    val location = connection.getHeaderField("Location")
+                        ?.takeIf { it.isNotBlank() } ?: return null
+                    currentUrl = runCatching {
+                        URI(currentUrl).resolve(location).toString()
+                    }.getOrNull() ?: return null
+                    redirectsRemaining--
+                    continue
                 }
-                output.toByteArray()
+                if (responseCode !in 200..299) return null
+
+                return connection.inputStream.use { input ->
+                    val output = ByteArrayOutputStream()
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var total = 0
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        total += read
+                        if (total > maxBytes) return@use null
+                        output.write(buffer, 0, read)
+                    }
+                    output.toByteArray()
+                }
+            } finally {
+                connection.disconnect()
             }
-        } finally {
-            connection.disconnect()
         }
     }
 
     private companion object {
-        const val TIMEOUT_MS = 5_000
-        const val MAX_CANDIDATES = 6
+        const val TIMEOUT_MS = 3_000
+        const val MAX_REDIRECTS = 3
+        const val MAX_CANDIDATES = 5
         const val MIN_ICON_SIZE = 16
         const val MAX_HTML_BYTES = 192 * 1024
         const val MAX_ICON_BYTES = 1024 * 1024

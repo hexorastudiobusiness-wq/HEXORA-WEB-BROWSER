@@ -20,6 +20,7 @@ import com.example.browser.R
 object HomeScreenShortcut {
 
     fun add(context: Context, title: String, url: String): Boolean {
+        if (!UrlUtils.isHttpUrl(url)) return false
         if (!ShortcutManagerCompat.isRequestPinShortcutSupported(context)) return false
 
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))

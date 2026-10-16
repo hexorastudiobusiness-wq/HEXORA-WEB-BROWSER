@@ -40,6 +40,8 @@ data class BrowserUiState(
     val progress: Float = 0f,
     val canGoBack: Boolean = false,
     val canGoForward: Boolean = false,
+    /** True when system Back should close a page-opened tab to its opener. */
+    val canBackCloseTab: Boolean = false,
     val isSecure: Boolean = false,
     val isPrivate: Boolean = false,
     val loadFailed: Boolean = false,
@@ -84,6 +86,7 @@ sealed interface BrowserAction {
     data object NewPrivateTab : BrowserAction
     data class SwitchTab(val tabId: String) : BrowserAction
     data class CloseTab(val tabId: String) : BrowserAction
+    data object CloseTabAndReturnToOpener : BrowserAction
     data object ToggleBookmark : BrowserAction
     data object ClearBrowsingData : BrowserAction
     data object ClearSiteData : BrowserAction
@@ -91,6 +94,7 @@ sealed interface BrowserAction {
     data class SetTextZoom(val percent: Int) : BrowserAction
     data object OpenFind : BrowserAction
     data object CloseFind : BrowserAction
+    data object ClearFind : BrowserAction
     data class FindNext(val query: String) : BrowserAction
     data class FindPrevious(val query: String) : BrowserAction
     data object ToggleFullscreen : BrowserAction

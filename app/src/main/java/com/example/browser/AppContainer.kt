@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.example.browser.browser.BrowserEngine
 import com.example.browser.browser.GeckoBrowserEngine
 import com.example.browser.data.database.AppDatabase
+import com.example.browser.data.database.DatabaseMigrations
 import com.example.browser.data.repository.BookmarkRepository
 import com.example.browser.data.repository.CredentialRepository
 import com.example.browser.data.repository.DownloadRepository
@@ -28,8 +29,10 @@ class AppContainer(context: Context) {
 
     private val database: AppDatabase by lazy {
         Room.databaseBuilder(appContext, AppDatabase::class.java, "hexora-browser.db")
-            // Dev-stage database: schema changes simply reset local data.
-            .fallbackToDestructiveMigration(dropAllTables = true)
+            // No destructive fallback: browsing data and saved logins must
+            // never be silently wiped by a schema change. Explicit migrations
+            // cover every shipped schema; future bumps must add another one.
+            .addMigrations(*DatabaseMigrations.ALL)
             .build()
     }
 

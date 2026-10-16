@@ -2,6 +2,7 @@ package com.example.browser.download
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DownloadFileNameTest {
@@ -46,5 +47,12 @@ class DownloadFileNameTest {
     fun `sanitize strips path traversal`() {
         assertEquals("evil.apk", DownloadFileName.sanitize("../../evil.apk"))
         assertEquals("download", DownloadFileName.sanitize("   "))
+    }
+
+    @Test
+    fun `sanitize caps very long names but keeps the extension`() {
+        val result = DownloadFileName.sanitize("a".repeat(200) + ".pdf")
+        assertEquals(128, result.length)
+        assertTrue(result.endsWith(".pdf"))
     }
 }

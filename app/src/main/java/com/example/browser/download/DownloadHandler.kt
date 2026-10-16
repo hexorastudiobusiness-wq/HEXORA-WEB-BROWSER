@@ -22,9 +22,12 @@ class DownloadHandler(context: Context) {
 
     /** @return the DownloadManager id, or -1 when enqueueing failed. */
     fun download(url: String, fileName: String, mimeType: String?): Long {
-        if (!url.startsWith("http", ignoreCase = true)) {
+        if (!url.startsWith("https://", ignoreCase = true) &&
+            !url.startsWith("http://", ignoreCase = true)
+        ) {
             // DownloadManager only supports http(s); anything else is rejected.
-            Log.w(TAG, "Unsupported download URL scheme: $url")
+            // Do not log the URL: it can contain private query parameters.
+            Log.w(TAG, "Unsupported download URL scheme")
             return -1L
         }
         val request = DownloadManager.Request(Uri.parse(url))
@@ -36,7 +39,7 @@ class DownloadHandler(context: Context) {
             )
             .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
         return runCatching { downloadManager.enqueue(request) }
-            .onFailure { Log.e(TAG, "Failed to enqueue download for $url", it) }
+            .onFailure { Log.e(TAG, "Failed to enqueue download", it) }
             .getOrDefault(-1L)
     }
 

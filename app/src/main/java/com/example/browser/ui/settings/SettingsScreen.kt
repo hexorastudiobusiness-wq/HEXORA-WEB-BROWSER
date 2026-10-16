@@ -2,7 +2,6 @@ package com.example.browser.ui.settings
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,23 +23,19 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.browser.R
-import kotlin.math.roundToInt
 import com.example.browser.data.settings.ThemeMode
+import com.example.browser.ui.components.ZoomSlider
 import com.example.browser.util.SearchEngine
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -142,9 +137,6 @@ fun SettingsScreen(
                 checked = settings.desktopMode,
                 onCheckedChange = { viewModel.setDesktopMode(it) },
             )
-            var zoomSlider by remember(settings.textZoomPercent) {
-                mutableFloatStateOf(settings.textZoomPercent.toFloat())
-            }
             Spacer(Modifier.height(12.dp))
             Text(
                 text = stringResource(R.string.settings_text_zoom),
@@ -155,26 +147,16 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(
+            ZoomSlider(
+                percent = settings.textZoomPercent,
+                onPercentCommitted = { percent ->
+                    viewModel.setTextZoomPercent(percent)
+                },
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Slider(
-                    value = zoomSlider,
-                    onValueChange = { zoomSlider = it },
-                    onValueChangeFinished = {
-                        viewModel.setTextZoomPercent(zoomSlider.roundToInt())
-                    },
-                    valueRange = 50f..200f,
-                    steps = 14,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(text = "${zoomSlider.roundToInt()}%")
-            }
+            )
             SwitchRow(
                 label = stringResource(R.string.settings_open_links_new_tab),
-                summary = null,
+                summary = stringResource(R.string.settings_open_links_new_tab_summary),
                 checked = settings.openLinksInNewTab,
                 onCheckedChange = { viewModel.setOpenLinksInNewTab(it) },
             )

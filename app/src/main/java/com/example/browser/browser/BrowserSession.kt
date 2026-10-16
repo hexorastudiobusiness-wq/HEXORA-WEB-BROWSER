@@ -28,9 +28,13 @@ data class SessionPageState(
 
 /** Result of an in-page text search (Find in page). */
 data class FindResultUi(
+    /** Query this result belongs to; empty means no completed search. */
+    val query: String = "",
     val current: Int = 0,
     val total: Int = 0,
     val found: Boolean = false,
+    /** True once the engine has answered for [query]. */
+    val completed: Boolean = false,
 )
 
 /**
@@ -55,6 +59,7 @@ sealed interface BrowserSessionEvent {
         val url: String,
         val fileName: String,
         val mimeType: String?,
+        val isPrivate: Boolean = false,
     ) : BrowserSessionEvent
 
     /** A login form was submitted; the app may ask whether to save it. */

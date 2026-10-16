@@ -9,6 +9,7 @@ import com.example.browser.browser.BrowserSession
 import com.example.browser.browser.BrowserSessionConfig
 import com.example.browser.browser.BrowserSessionEvent
 import com.example.browser.browser.AutofillCredential
+import com.example.browser.browser.WebColorScheme
 import com.example.browser.browser.SavedTabState
 import com.example.browser.browser.SessionPageState
 import com.example.browser.data.repository.BookmarkRepository
@@ -18,6 +19,7 @@ import com.example.browser.data.repository.HistoryRepository
 import com.example.browser.data.repository.StartShortcutRepository
 import com.example.browser.data.settings.BrowserSettingsState
 import com.example.browser.data.settings.SettingsRepository
+import com.example.browser.data.settings.ThemeMode
 import com.example.browser.util.CredentialOrigin
 import com.example.browser.util.ShortcutIconStore
 import com.example.browser.util.TabThumbnailStore
@@ -71,6 +73,8 @@ class BrowserViewModel(
         var lastTitle: String = "",
         var savedState: SavedTabState? = null,
         var showStartPage: Boolean = false,
+        /** Tab that caused this page-opened tab to be created, if any. */
+        val openerTabId: String? = null,
     )
 
     private data class ClosedTabInfo(
@@ -92,6 +96,7 @@ class BrowserViewModel(
     private val _pendingCredentialPrompt = MutableStateFlow<CredentialSavePrompt?>(null)
     private val _shortcutIcons = MutableStateFlow<Map<Long, Bitmap>>(emptyMap())
     private val shortcutIconFetchesInFlight = mutableSetOf<Long>()
+    private val shortcutIconLastAttemptAt = mutableMapOf<Long, Long>()
 
     private data class PendingCredential(
         val origin: String,
@@ -191,6 +196,9 @@ class BrowserViewModel(
             progress = activeState.progress,
             canGoBack = activeState.canGoBack,
             canGoForward = activeState.canGoForward,
+            canBackCloseTab = activeEntry?.openerTabId?.let { openerId ->
+                slice.tabs.any { it.tabId == openerId }
+            } ?: false,
             isSecure = activeState.isSecure,
             isPrivate = activeEntry?.isPrivate ?: false,
             loadFailed = activeState.loadFailed,
@@ -226,18 +234,29 @@ class BrowserViewModel(
     private var pendingExternalUrl: String? = null
 
     init {
+        // Tabs are not restored after process death, so screenshots from a
+        // previous process would only be orphaned private page images.
+        viewModelScope.launch(Dispatchers.IO) { thumbnailStore.clearAll() }
+
         viewModelScope.launch {
             val initialSettings = settingsRepository.settings.first()
             val createdEngine = engineFactory(initialSettings.javaScriptEnabled)
             engine = createdEngine
             createdEngine.setTextZoomPercent(initialSettings.textZoomPercent)
-            createdEngine.newSessionCreatedListener = { session ->
+            createdEngine.setPreferredColorScheme(initialSettings.themeMode.toWebColorScheme())
+            createdEngine.newSessionCreatedListener = { session, openerSessionId ->
                 // A page opened a new window: adopt the engine-made session.
+                // Remember its real opener so hardware Back at the new tab's
+                // history root can close it and return to that tab.
+                val openerTabId = openerSessionId?.let { sessionId ->
+                    _tabs.value.firstOrNull { it.session?.id == sessionId }?.tabId
+                } ?: _activeTabId.value
                 val entry = TabEntry(
                     tabId = newTabId(),
                     session = session,
                     isPrivate = session.isPrivate,
                     desktopMode = initialSettings.desktopMode,
+                    openerTabId = openerTabId,
                 )
                 _tabs.update { it + entry }
                 touchLru(entry.tabId)
@@ -281,6 +300,7 @@ class BrowserViewModel(
             var lastPasswordManagerEnabled: Boolean? = null
             settings.collect { current ->
                 engine?.setTextZoomPercent(current.textZoomPercent)
+                engine?.setPreferredColorScheme(current.themeMode.toWebColorScheme())
                 if (lastPasswordManagerEnabled != current.passwordManagerEnabled) {
                     lastPasswordManagerEnabled = current.passwordManagerEnabled
                     if (!current.passwordManagerEnabled) {
@@ -363,6 +383,7 @@ class BrowserViewModel(
             BrowserAction.NewPrivateTab -> openNewTab(isPrivate = true)
             is BrowserAction.SwitchTab -> switchTab(action.tabId)
             is BrowserAction.CloseTab -> closeTab(action.tabId)
+            BrowserAction.CloseTabAndReturnToOpener -> closeCurrentTabToOpener()
             BrowserAction.ToggleBookmark -> toggleBookmark()
             BrowserAction.ClearBrowsingData -> clearBrowsingData()
             BrowserAction.ClearSiteData -> clearSiteData()
@@ -374,6 +395,7 @@ class BrowserViewModel(
                 _findVisible.value = false
                 activeSession()?.clearFind()
             }
+            BrowserAction.ClearFind -> activeSession()?.clearFind()
             is BrowserAction.FindNext -> activeSession()?.findText(action.query, forward = true)
             is BrowserAction.FindPrevious ->
                 activeSession()?.findText(action.query, forward = false)
@@ -398,7 +420,7 @@ class BrowserViewModel(
                     // If this site is already open and loaded, its real icon
                     // can replace the letter placeholder immediately.
                     loadedPageUrlForShortcut(resolvedUrl)?.let { pageUrl ->
-                        fetchShortcutIcon(shortcutId, pageUrl)
+                        fetchShortcutIcon(listOf(shortcutId), pageUrl)
                     }
                 }
             }
@@ -421,7 +443,7 @@ class BrowserViewModel(
                         }
                         _shortcutIcons.update { icons -> icons - action.id }
                         loadedPageUrlForShortcut(resolvedUrl)?.let { pageUrl ->
-                            fetchShortcutIcon(action.id, pageUrl)
+                            fetchShortcutIcon(listOf(action.id), pageUrl)
                         }
                     }
                 }
@@ -433,6 +455,8 @@ class BrowserViewModel(
                         shortcutIconStore.delete(action.id)
                     }
                     _shortcutIcons.update { icons -> icons - action.id }
+                    shortcutIconLastAttemptAt.remove(action.id)
+                    shortcutIconFetchesInFlight.remove(action.id)
                 }
             }
         }
@@ -454,7 +478,16 @@ class BrowserViewModel(
         enforceSuspension()
     }
 
-    fun closeTab(tabId: String) {
+    fun closeTab(tabId: String) = closeTab(tabId, preferredNextTabId = null)
+
+    private fun closeCurrentTabToOpener() {
+        val current = activeEntry() ?: return
+        val openerId = current.openerTabId ?: return
+        if (entry(openerId) == null) return
+        closeTab(current.tabId, preferredNextTabId = openerId)
+    }
+
+    private fun closeTab(tabId: String, preferredNextTabId: String?) {
         val entry = entry(tabId) ?: return
         val wasActive = _activeTabId.value == tabId
 
@@ -471,7 +504,9 @@ class BrowserViewModel(
             // then shows the Hexora Start Page with no live tab selected.
             _tabs.value.isEmpty() -> _activeTabId.value = null
             wasActive -> {
-                val next = _tabs.value.lastOrNull { it.tabId != tabId } ?: _tabs.value.first()
+                val next = preferredNextTabId?.let { entry(it) }
+                    ?: _tabs.value.lastOrNull { it.tabId != tabId }
+                    ?: _tabs.value.first()
                 switchTab(next.tabId)
             }
         }
@@ -822,27 +857,41 @@ class BrowserViewModel(
     /** After a site finishes loading, cache its icon for matching shortcuts. */
     private fun refreshShortcutIconsForLoadedPage(pageUrl: String) {
         viewModelScope.launch {
-            val shortcuts = shortcutRepository.shortcuts.first()
-            shortcuts
+            val now = System.currentTimeMillis()
+            val matchingIds = shortcutRepository.shortcuts.first()
                 .filter { shortcut ->
+                    val lastAttempt = shortcutIconLastAttemptAt[shortcut.id] ?: 0L
                     !_shortcutIcons.value.containsKey(shortcut.id) &&
-                        shortcutIconFetchesInFlight.add(shortcut.id) &&
+                        shortcut.id !in shortcutIconFetchesInFlight &&
+                        now - lastAttempt >= SHORTCUT_ICON_RETRY_MILLIS &&
                         hostsRelated(shortcut.url, pageUrl)
                 }
-                .forEach { shortcut ->
-                    try {
-                        fetchShortcutIcon(shortcut.id, pageUrl)
-                    } finally {
-                        shortcutIconFetchesInFlight.remove(shortcut.id)
-                    }
-                }
+                .map { it.id }
+            if (matchingIds.isEmpty()) return@launch
+
+            // One network fetch serves every shortcut for this site; failed
+            // lookups are throttled so ordinary navigation cannot repeatedly
+            // download the same page/icon candidates in the background.
+            shortcutIconFetchesInFlight += matchingIds
+            try {
+                fetchShortcutIcon(matchingIds, pageUrl)
+            } finally {
+                shortcutIconFetchesInFlight -= matchingIds.toSet()
+            }
         }
     }
 
-    private suspend fun fetchShortcutIcon(shortcutId: Long, pageUrl: String) {
+    private suspend fun fetchShortcutIcon(shortcutIds: Collection<Long>, pageUrl: String) {
+        if (shortcutIds.isEmpty()) return
+        val attemptedAt = System.currentTimeMillis()
+        shortcutIds.forEach { shortcutIconLastAttemptAt[it] = attemptedAt }
         val icon = faviconFetcher.fetch(pageUrl) ?: return
-        withContext(Dispatchers.IO) { shortcutIconStore.save(shortcutId, icon) }
-        _shortcutIcons.update { icons -> icons + (shortcutId to icon) }
+        withContext(Dispatchers.IO) {
+            shortcutIds.forEach { shortcutIconStore.save(it, icon) }
+        }
+        _shortcutIcons.update { icons ->
+            icons + shortcutIds.associateWith { icon }
+        }
     }
 
     /** The already-loaded page URL when it belongs to [shortcutUrl]'s site. */
@@ -866,7 +915,11 @@ class BrowserViewModel(
     }
 
     private fun captureThumbnail(tabId: String) {
-        val session = entry(tabId)?.session ?: return
+        val tabEntry = entry(tabId) ?: return
+        // Private tabs never get a persisted screenshot: a thumbnail would
+        // leak page content into the tab switcher and onto disk.
+        if (tabEntry.isPrivate) return
+        val session = tabEntry.session ?: return
         session.captureThumbnail { bitmap ->
             if (bitmap == null) return@captureThumbnail
             viewModelScope.launch(Dispatchers.IO) {
@@ -879,6 +932,12 @@ class BrowserViewModel(
     }
 
     // ---- Small helpers ---------------------------------------------------------
+
+    private fun ThemeMode.toWebColorScheme(): WebColorScheme = when (this) {
+        ThemeMode.SYSTEM -> WebColorScheme.SYSTEM
+        ThemeMode.LIGHT -> WebColorScheme.LIGHT
+        ThemeMode.DARK, ThemeMode.HEXORA -> WebColorScheme.DARK
+    }
 
     private fun newTabId(): String = UUID.randomUUID().toString()
 
@@ -930,5 +989,6 @@ class BrowserViewModel(
     companion object {
         /** Live engine sessions kept warm; older inactive tabs are suspended. */
         const val MAX_LIVE_SESSIONS = 6
+        const val SHORTCUT_ICON_RETRY_MILLIS = 6 * 60 * 60 * 1000L
     }
 }

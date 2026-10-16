@@ -68,13 +68,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -92,6 +93,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -100,8 +102,9 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.browser.R
 import com.example.browser.ui.components.AddressBar
+import com.example.browser.ui.components.ZoomSlider
 import com.example.browser.util.HomeScreenShortcut
-import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 /**
  * Main browser screen (ARCHITECTURE.md §6):
@@ -134,6 +137,16 @@ fun BrowserScreen(
 
     BackHandler(enabled = state.showStartPage && state.hasWebPage) {
         viewModel.onAction(BrowserAction.HideStartPage)
+    }
+
+    // A tab created by a page (window.open / target=_blank) has no useful
+    // history at its root. Hardware Back closes that tab and returns to the
+    // tab that opened it instead of leaving the whole browser.
+    BackHandler(
+        enabled = !state.canGoBack && state.canBackCloseTab &&
+            !state.showStartPage && !state.isFullscreen,
+    ) {
+        viewModel.onAction(BrowserAction.CloseTabAndReturnToOpener)
     }
 
     ImmersiveSystemBars(enabled = state.isFullscreen)
@@ -216,10 +229,14 @@ fun BrowserScreen(
             if (state.findVisible) {
                 FindBar(
                     result = state.findResult,
+                    pageKey = state.currentUrl,
+                    isLoading = state.isLoading,
+                    onSearch = { viewModel.onAction(BrowserAction.FindNext(it)) },
                     onQueryNext = { viewModel.onAction(BrowserAction.FindNext(it)) },
                     onPrevious = { query ->
                         viewModel.onAction(BrowserAction.FindPrevious(query))
                     },
+                    onClear = { viewModel.onAction(BrowserAction.ClearFind) },
                     onClose = { viewModel.onAction(BrowserAction.CloseFind) },
                 )
             }
@@ -799,11 +816,27 @@ private fun SwipeToSwitchTabBox(
 @Composable
 private fun FindBar(
     result: com.example.browser.browser.FindResultUi,
+    pageKey: String,
+    isLoading: Boolean,
+    onSearch: (String) -> Unit,
     onQueryNext: (String) -> Unit,
     onPrevious: (String) -> Unit,
+    onClear: () -> Unit,
     onClose: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
+
+    // Search as the user types. Until Gecko answers for this exact query,
+    // the status stays blank instead of incorrectly showing "No results".
+    LaunchedEffect(query, pageKey, isLoading) {
+        if (query.isBlank()) {
+            onClear()
+        } else if (!isLoading) {
+            delay(180)
+            onSearch(query)
+        }
+    }
+
     Surface(
         color = MaterialTheme.colorScheme.surface,
         shadowElevation = 2.dp,
@@ -820,10 +853,15 @@ private fun FindBar(
                 modifier = Modifier.weight(1f),
                 placeholder = { Text(stringResource(R.string.find_hint)) },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(
+                    onSearch = { if (query.isNotBlank()) onQueryNext(query) },
+                ),
             )
             Text(
                 text = when {
                     query.isEmpty() -> ""
+                    !result.completed || result.query != query -> ""
                     result.found && result.total > 0 -> "${result.current}/${result.total}"
                     result.found -> "${result.current}"
                     else -> stringResource(R.string.find_not_found)
@@ -987,35 +1025,21 @@ private fun BrowserBottomBar(
                     HorizontalDivider()
 
                     // Text zoom (engine text scaling), 50%..200% like Chrome's menu.
-                    var sliderValue by remember(state.textZoomPercent) {
-                        mutableFloatStateOf(state.textZoomPercent.toFloat())
-                    }
                     Column(
                         modifier = Modifier
-                            .width(260.dp)
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                            .width(272.dp)
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(
-                                text = stringResource(R.string.menu_zoom),
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
-                            Text(
-                                text = "${sliderValue.roundToInt()}%",
-                                style = MaterialTheme.typography.bodyLarge,
-                            )
-                        }
-                        Slider(
-                            value = sliderValue,
-                            onValueChange = { sliderValue = it },
-                            onValueChangeFinished = {
-                                onAction(BrowserAction.SetTextZoom(sliderValue.roundToInt()))
+                        Text(
+                            text = stringResource(R.string.menu_zoom),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        ZoomSlider(
+                            percent = state.textZoomPercent,
+                            onPercentCommitted = { percent ->
+                                onAction(BrowserAction.SetTextZoom(percent))
                             },
-                            valueRange = 50f..200f,
-                            steps = 14,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                     HorizontalDivider()

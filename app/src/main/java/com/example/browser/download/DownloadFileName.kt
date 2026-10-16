@@ -44,6 +44,18 @@ object DownloadFileName {
             .substringAfterLast('\\')
             .replace(Regex("[\\u0000-\\u001F\\u007F]"), "")
             .trim()
-        return cleaned.ifBlank { "download" }
+            .ifBlank { "download" }
+        if (cleaned.length <= MAX_FILE_NAME_LENGTH) return cleaned
+
+        // Keep very long server-provided names within common filesystem
+        // limits while preserving a short extension such as ".pdf".
+        val extension = cleaned.substringAfterLast('.', missingDelimiterValue = "")
+        return if (extension.length in 1..10) {
+            cleaned.take(MAX_FILE_NAME_LENGTH - extension.length - 1) + "." + extension
+        } else {
+            cleaned.take(MAX_FILE_NAME_LENGTH)
+        }
     }
+
+    private const val MAX_FILE_NAME_LENGTH = 128
 }

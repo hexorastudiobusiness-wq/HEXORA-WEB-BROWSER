@@ -38,6 +38,7 @@ import com.example.browser.ui.settings.SettingsScreen
 import com.example.browser.ui.settings.SettingsViewModel
 import com.example.browser.ui.tabs.TabsScreen
 import com.example.browser.ui.theme.HexoraBrowserTheme
+import com.example.browser.util.UrlUtils
 import kotlinx.coroutines.launch
 
 private object Routes {
@@ -154,7 +155,7 @@ class MainActivity : ComponentActivity() {
     private fun handleViewIntent(intent: Intent?) {
         if (intent?.action == Intent.ACTION_VIEW) {
             intent.dataString
-                ?.takeIf { it.isNotBlank() }
+                ?.takeIf { UrlUtils.isHttpUrl(it) }
                 ?.let { browserViewModel.handleExternalUrl(it) }
         }
     }
@@ -170,7 +171,10 @@ class MainActivity : ComponentActivity() {
                         mimeType = event.mimeType,
                     )
                     val started = downloadId >= 0
-                    if (started) {
+                    if (started && !event.isPrivate) {
+                        // Private-tab downloads still produce the file the
+                        // user asked for, but their URL is not persisted in
+                        // the browser's own download history.
                         launch {
                             container.downloadRepository.record(
                                 downloadManagerId = downloadId,

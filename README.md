@@ -134,14 +134,27 @@ Phase 1 MVP and the core of Phase 2 are implemented:
 - Address bar with URL/search resolution (configurable search engine)
 - Back / forward / reload / stop, loading progress, security indicator
 - Multiple tabs (new / switch / close), one `GeckoSession` per tab
-- `window.open` opens a real new tab; private tabs use GeckoView private sessions
+- `window.open` opens a real new tab; hardware Back at that tab's root
+  closes it and returns to the tab that opened it. Private tabs use
+  GeckoView private sessions, never record history, never persist a tab
+  screenshot, and their downloads are not written to the in-app download
+  history (the downloaded file itself still exists, as the user requested it)
 - Room history (private tabs are never recorded) and bookmarks
 - DataStore settings: search engine, JavaScript, desktop mode,
   theme (System/Light/Dark/Hexora Mode), open-links-in-new-tab, and the
   local password-manager master switch. Light is plain white with neutral
   surfaces; Hexora Mode is an opaque dark studio theme built from
-  #E77E3D and #100B0F.
+  #E77E3D and #100B0F. The theme also sets GeckoView's official
+  `preferredColorScheme`, so sites that provide their own dark theme via
+  `prefers-color-scheme` follow the app theme (Dark and Hexora Mode request
+  the site's dark theme)
 - Downloads delegated to Android `DownloadManager` (Downloads folder)
+- Find in Page searches while typing (debounced) and only reports
+  “No results” after Gecko answers for the exact current text; the slim
+  text-zoom slider (browser menu and Settings) has a reset-to-100% button
+- Address-bar input, external intents, home-screen shortcuts and downloads
+  are restricted to http(s) navigation targets; Android backup is disabled
+  and Room has no destructive-migration fallback
 - `ACTION_VIEW` intents open http(s) links in a new tab
 - Quick new-tab (`+`) button beside the tab switcher; the address bar selects
   its whole contents on first focus
@@ -168,9 +181,13 @@ Phase 1 MVP and the core of Phase 2 are implemented:
   excluded)
 
 Known MVP limitations: site permission prompts (camera/mic/location) are not
-wired yet, the JavaScript toggle applies from the next app start, cookie
-toggling is stored but per-site cookie controls are planned for Phase 3, and
-downloads are re-fetched by `DownloadManager` (no cookie/auth carry-over).
+wired yet, the JavaScript toggle applies from the next app start, the cookie
+and open-links-in-new-tab toggles are stored preferences that are not applied
+to the engine yet, and downloads are re-fetched by `DownloadManager`
+(no cookie/auth carry-over). GeckoView's preferred-color-scheme support lets
+sites use their own dark CSS; unlike Chrome it does not algorithmically
+recolor sites that ship no dark theme, so such pages can remain light in
+Dark/Hexora Mode.
 Saved-login autofill depends on sites exposing recognizable username/password
 fields to GeckoView's autofill tree; when several usernames exist for one
 origin, the most recently saved/updated one is offered first. Passwords are

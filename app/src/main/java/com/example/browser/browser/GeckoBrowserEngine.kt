@@ -45,12 +45,15 @@ class GeckoBrowserEngine(
 
     private val appContext = context.applicationContext
 
-    override var newSessionCreatedListener: ((BrowserSession) -> Unit)? = null
+    override var newSessionCreatedListener: ((BrowserSession, String?) -> Unit)? = null
 
     private var runtimeOrNull: GeckoRuntime? = null
 
     @Volatile
     private var textZoomPercent: Int = 100
+
+    @Volatile
+    private var preferredColorScheme: Int = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
 
     /** Lazily creates the process-wide runtime on first use (main thread). */
     internal val runtime: GeckoRuntime
@@ -62,6 +65,7 @@ class GeckoBrowserEngine(
                 // fight it (setFontSizeFactor throws while it is enabled).
                 .automaticFontSizeAdjustment(false)
                 .fontSizeFactor(textZoomPercent / 100f)
+                .preferredColorScheme(preferredColorScheme)
                 .build(),
         ).also { runtimeOrNull = it }
 
@@ -81,6 +85,19 @@ class GeckoBrowserEngine(
             settings.setAutomaticFontSizeAdjustment(false)
             settings.setFontSizeFactor(textZoomPercent / 100f)
         }
+    }
+
+    override fun setPreferredColorScheme(scheme: WebColorScheme) {
+        val geckoScheme = when (scheme) {
+            WebColorScheme.SYSTEM -> GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
+            WebColorScheme.LIGHT -> GeckoRuntimeSettings.COLOR_SCHEME_LIGHT
+            WebColorScheme.DARK -> GeckoRuntimeSettings.COLOR_SCHEME_DARK
+        }
+        if (preferredColorScheme == geckoScheme) return
+        preferredColorScheme = geckoScheme
+        // Gecko updates `prefers-color-scheme` for pages that provide a dark
+        // theme. It does not algorithmically recolor sites without one.
+        runtimeOrNull?.settings?.setPreferredColorScheme(geckoScheme)
     }
 
     override fun clearSiteData(host: String) {
@@ -209,8 +226,8 @@ class GeckoBrowserEngine(
         )
     }
 
-    internal fun notifyNewSessionCreated(session: BrowserSession) {
-        newSessionCreatedListener?.invoke(session)
+    internal fun notifyNewSessionCreated(session: BrowserSession, openerSessionId: String?) {
+        newSessionCreatedListener?.invoke(session, openerSessionId)
     }
 }
 
@@ -234,6 +251,9 @@ internal class GeckoBrowserSession(
 
     @Volatile
     private var latestStateString: String? = null
+
+    @Volatile
+    private var latestFindQuery: String = ""
     override val state: StateFlow<SessionPageState> = _state.asStateFlow()
 
     private val _events = MutableSharedFlow<BrowserSessionEvent>(extraBufferCapacity = 8)
@@ -287,6 +307,7 @@ internal class GeckoBrowserSession(
 
     override fun findText(query: String, forward: Boolean) {
         if (closed || !geckoSession.isOpen || query.isBlank()) return
+        latestFindQuery = query
         val flags = if (forward) {
             GeckoSession.FINDER_FIND_FORWARD
         } else {
@@ -294,23 +315,39 @@ internal class GeckoBrowserSession(
         }
         geckoSession.finder.find(query, flags).accept(
             { result ->
-                if (result != null && !closed) {
+                // Ignore a late answer for text the user has already edited;
+                // otherwise an older query could briefly claim "no results".
+                if (result != null && !closed && result.searchString == latestFindQuery) {
                     _state.update {
                         it.copy(
                             findResult = FindResultUi(
+                                query = result.searchString,
                                 current = result.current,
                                 total = result.total.coerceAtLeast(0),
                                 found = result.found,
+                                completed = true,
                             ),
                         )
                     }
                 }
             },
-            { _state.update { it.copy(findResult = FindResultUi()) } },
+            {
+                if (!closed && latestFindQuery == query) {
+                    _state.update {
+                        it.copy(
+                            findResult = FindResultUi(
+                                query = query,
+                                completed = true,
+                            ),
+                        )
+                    }
+                }
+            },
         )
     }
 
     override fun clearFind() {
+        latestFindQuery = ""
         if (!closed && geckoSession.isOpen) geckoSession.finder.clear()
         _state.update { it.copy(findResult = FindResultUi()) }
     }
@@ -534,7 +571,7 @@ internal class GeckoBrowserSession(
             val sibling = engine.createSessionInternal(
                 BrowserSessionConfig(isPrivate = config.isPrivate, desktopMode = config.desktopMode),
             )
-            engine.notifyNewSessionCreated(sibling)
+            engine.notifyNewSessionCreated(sibling, id)
             return GeckoResult.fromValue(sibling.geckoSession)
         }
     }
@@ -555,8 +592,17 @@ internal class GeckoBrowserSession(
         }
 
         override fun onPageStart(session: GeckoSession, url: String) {
+            // A new document invalidates any previous Find result; the UI
+            // re-issues the visible query once loading finishes.
+            latestFindQuery = ""
             _state.update {
-                it.copy(url = url, isLoading = true, loadFailed = false, progress = 0f)
+                it.copy(
+                    url = url,
+                    isLoading = true,
+                    loadFailed = false,
+                    progress = 0f,
+                    findResult = FindResultUi(),
+                )
             }
         }
 
@@ -614,6 +660,7 @@ internal class GeckoBrowserSession(
                     url = response.uri,
                     fileName = fileName,
                     mimeType = mimeType,
+                    isPrivate = isPrivate,
                 ),
             )
             // The response body stream must always be closed, even when the

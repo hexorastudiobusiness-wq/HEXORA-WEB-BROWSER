@@ -53,6 +53,16 @@ class UrlUtilsTest {
     }
 
     @Test
+    fun `non-web schemes are searched instead of navigated to`() {
+        assertFalse(UrlUtils.looksLikeUrl("file:///etc/passwd"))
+        assertFalse(UrlUtils.looksLikeUrl("intent://example.com/#Intent;scheme=https;end"))
+        assertTrue(
+            UrlUtils.resolveInput("file:///etc/passwd", SearchEngine.GOOGLE)
+                .startsWith("https://www.google.com/search?q="),
+        )
+    }
+
+    @Test
     fun `isHttpUrl only accepts http and https`() {
         assertTrue(UrlUtils.isHttpUrl("https://example.com"))
         assertTrue(UrlUtils.isHttpUrl("http://example.com"))

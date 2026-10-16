@@ -61,6 +61,7 @@
     <string name="settings_desktop_mode">Desktop site by default</string>
     <string name="settings_desktop_mode_summary">Applies to new tabs</string>
     <string name="settings_open_links_new_tab">Open links in a new tab</string>
+    <string name="settings_open_links_new_tab_summary">Stored preference — not applied yet</string>
 
     <!-- Downloads -->
     <string name="download_started">Downloading %1$s</string>
@@ -112,6 +113,7 @@
     <string name="action_save">Save</string>
     <string name="action_not_now">Not now</string>
     <string name="action_cancel">Cancel</string>
+    <string name="action_reset_zoom">Reset text size to 100%</string>
     <string name="start_title">Hexora</string>
     <string name="start_subtitle">Fast, private, yours</string>
     <string name="start_logo_content_description">Hexora logo</string>

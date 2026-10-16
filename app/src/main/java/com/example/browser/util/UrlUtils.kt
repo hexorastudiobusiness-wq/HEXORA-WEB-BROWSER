@@ -38,7 +38,7 @@ object UrlUtils {
     fun looksLikeUrl(input: String): Boolean {
         val text = input.trim()
         if (text.isEmpty() || text.contains(' ')) return false
-        if (schemeRegex.matches(text)) return true
+        if (schemeRegex.matches(text)) return isHttpUrl(text)
         if (text.startsWith("about:", ignoreCase = true)) return true
         val hostPart = text.substringBefore('/').substringBefore('?')
         return hostLikeRegex.matches(text) && !hostPart.startsWith(".")
@@ -50,8 +50,11 @@ object UrlUtils {
         if (text.isEmpty()) return text
         if (!looksLikeUrl(text)) return searchEngine.searchUrl(text)
         return when {
-            schemeRegex.matches(text) -> text
+            // Only web schemes may be navigated to directly. Anything else
+            // (file:, intent:, data:, ...) is treated as a search query.
+            schemeRegex.matches(text) && isHttpUrl(text) -> text
             text.startsWith("about:", ignoreCase = true) -> text
+            schemeRegex.matches(text) -> searchEngine.searchUrl(text)
             else -> "https://$text"
         }
     }
