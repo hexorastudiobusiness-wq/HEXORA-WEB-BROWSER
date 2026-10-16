@@ -9,6 +9,14 @@ name: Generate release key
 
 on:
   workflow_dispatch:
+  # One-time bootstrap on this development branch: pushing the request
+  # marker below runs the generator once (manual dispatch needs the
+  # workflow on the default branch, which it is not yet).
+  push:
+    branches:
+      - arena/958b2d7a-hexora-web-browser
+    paths:
+      - signing/generate-key.request
 
 permissions:
   contents: read
