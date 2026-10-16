@@ -11,8 +11,8 @@ secrets (Settings → Secrets and variables → Actions):
 
 | Secret | Content |
 | --- | --- |
-| `HEXORA_RELEASE_KEYSTORE_BASE64` | Base64 encoding of the PKCS#12 release keystore |
-| `HEXORA_RELEASE_KEYSTORE_PASSWORD` | Keystore/key password (one password for both) |
+| `HEXORA_WEB_BROWSER_RELEASE_KEYSTORE_BASE64` | Base64 encoding of the PKCS#12 release keystore |
+| `HEXORA_WEB_BROWSER_RELEASE_KEYSTORE_PASSWORD` | Keystore/key password (one password for both) |
 
 The **Build signed release** workflow decodes the keystore into the
 runner's temporary directory, builds `assembleRelease` + `bundleRelease`,
@@ -28,8 +28,8 @@ to a GitHub Release, and the temporary keystore disappears with the runner.
    it *is* the release key backup. Losing the key means the installed app
    can never be updated with a differently-signed build.
 3. Open `keystore-base64.txt`, copy everything, and create the
-   `HEXORA_RELEASE_KEYSTORE_BASE64` secret. Open `password.txt`, copy it,
-   and create the `HEXORA_RELEASE_KEYSTORE_PASSWORD` secret.
+   `HEXORA_WEB_BROWSER_RELEASE_KEYSTORE_BASE64` secret. Open `password.txt`, copy it,
+   and create the `HEXORA_WEB_BROWSER_RELEASE_KEYSTORE_PASSWORD` secret.
 4. Delete the **Generate release key** workflow run so the key does not
    remain on GitHub's artifact storage.
 5. Run **Actions → Build signed release → Run workflow**.
