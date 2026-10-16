@@ -278,7 +278,7 @@ private fun TabTile(
                         .align(Alignment.TopEnd)
                         .padding(2.dp)
                         .background(
-                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                            color = MaterialTheme.colorScheme.surface,
                             shape = androidx.compose.foundation.shape.CircleShape,
                         ),
                 ) {
@@ -311,7 +311,7 @@ private fun TabTile(
 @Composable
 private fun MiniBadge(content: @Composable () -> Unit) {
     Surface(
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+        color = MaterialTheme.colorScheme.surface,
         shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
     ) {
         content()
