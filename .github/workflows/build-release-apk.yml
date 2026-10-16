@@ -37,12 +37,10 @@ jobs:
       - name: Check release signing secrets
         env:
           KEYSTORE_B64: ${{ secrets.HEXORA_RELEASE_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.HEXORA_RELEASE_STORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.HEXORA_RELEASE_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.HEXORA_RELEASE_KEY_PASSWORD }}
+          KEYSTORE_PASSWORD: ${{ secrets.HEXORA_RELEASE_KEYSTORE_PASSWORD }}
         run: |
           missing=0
-          for name in KEYSTORE_B64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+          for name in KEYSTORE_B64 KEYSTORE_PASSWORD; do
             if [ -z "${!name}" ]; then
               echo "::error::Missing required GitHub Secret for release signing (see signing/README.md)."
               missing=1
@@ -60,9 +58,7 @@ jobs:
       - name: Build signed release APKs and AAB
         env:
           HEXORA_RELEASE_STORE_FILE: ${{ runner.temp }}/hexora-release.p12
-          HEXORA_RELEASE_STORE_PASSWORD: ${{ secrets.HEXORA_RELEASE_STORE_PASSWORD }}
-          HEXORA_RELEASE_KEY_ALIAS: ${{ secrets.HEXORA_RELEASE_KEY_ALIAS }}
-          HEXORA_RELEASE_KEY_PASSWORD: ${{ secrets.HEXORA_RELEASE_KEY_PASSWORD }}
+          HEXORA_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.HEXORA_RELEASE_KEYSTORE_PASSWORD }}
           HEXORA_RELEASE_STORE_TYPE: PKCS12
         run: |
           set -o pipefail

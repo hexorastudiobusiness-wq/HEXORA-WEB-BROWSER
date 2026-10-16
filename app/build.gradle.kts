@@ -45,9 +45,11 @@ android {
         create("release") {
             if (hasReleaseSigning) {
                 storeFile = file(releaseStorePath!!)
-                storePassword = System.getenv("HEXORA_RELEASE_STORE_PASSWORD")
-                keyAlias = System.getenv("HEXORA_RELEASE_KEY_ALIAS") ?: "hexora-release"
-                keyPassword = System.getenv("HEXORA_RELEASE_KEY_PASSWORD")
+                // One password serves as both store and key password; the
+                // PKCS#12 keystore is generated that way (see signing/README.md).
+                storePassword = System.getenv("HEXORA_RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = "hexora-release"
+                keyPassword = System.getenv("HEXORA_RELEASE_KEYSTORE_PASSWORD")
                 storeType = System.getenv("HEXORA_RELEASE_STORE_TYPE") ?: "PKCS12"
             }
         }
