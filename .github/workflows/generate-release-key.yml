@@ -1,0 +1,90 @@
+name: Generate release key
+
+# One-time helper: creates the dedicated Hexora release keystore on the
+# runner (nothing is installed on the owner's machine) and packages it as a
+# short-lived workflow artifact together with ready-to-paste secret values.
+# Download the artifact, store it safely offline, paste the two values into
+# the repository's Actions secrets, then delete this workflow run.
+# The keystore is NEVER committed to the repository.
+
+on:
+  workflow_dispatch:
+  # One-time bootstrap on this development branch: pushing the request
+  # marker below runs the generator once (manual dispatch needs the
+  # workflow on the default branch, which it is not yet).
+  push:
+    branches:
+      - arena/958b2d7a-hexora-web-browser
+    paths:
+      - signing/generate-key.request
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Generate release keystore and secret values
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p release-key-backup
+
+          PASSWORD=$(openssl rand -base64 32 | tr -d '\n')
+          echo "::add-mask::$PASSWORD"
+          printf '%s' "$PASSWORD" > release-key-backup/password.txt
+          export HEXORA_KEYSTORE_PASSWORD="$PASSWORD"
+
+          keytool -genkeypair \
+            -keystore release-key-backup/hexora-release.p12 \
+            -storetype PKCS12 \
+            -storepass:env HEXORA_KEYSTORE_PASSWORD \
+            -keypass:env HEXORA_KEYSTORE_PASSWORD \
+            -alias hexora-release \
+            -keyalg RSA -keysize 2048 -validity 36500 \
+            -dname "CN=Hexora Browser, O=Hexora Studio"
+
+          base64 -w0 release-key-backup/hexora-release.p12 \
+            > release-key-backup/keystore-base64.txt
+          echo "::add-mask::$(cat release-key-backup/keystore-base64.txt)"
+
+          keytool -list \
+            -keystore release-key-backup/hexora-release.p12 \
+            -storetype PKCS12 \
+            -storepass:env HEXORA_KEYSTORE_PASSWORD \
+            | grep -i "SHA256:" > release-key-backup/certificate-fingerprint.txt || true
+
+          cat > release-key-backup/READ-ME-FIRST.txt <<'EOF'
+          Hexora release key — KEEP THIS FOLDER SAFE AND OFFLINE.
+
+          Losing this key means the app can never be updated with a new
+          signature. Anyone who has it can sign fake updates as Hexora.
+
+          Next steps (all in the browser, nothing to install):
+          1. Open keystore-base64.txt, select all and copy.
+             In the GitHub repository: Settings -> Secrets and variables ->
+             Actions -> New repository secret.
+             Name:  HEXORA_WEB_BROWSER_RELEASE_KEYSTORE_BASE64
+             Value: paste.
+          2. Open password.txt and copy its content.
+             Create a second secret.
+             Name:  HEXORA_WEB_BROWSER_RELEASE_KEYSTORE_PASSWORD
+             Value: paste.
+          3. Tell the assistant "done", then DELETE this workflow run in
+             GitHub Actions so the key does not stay on GitHub servers.
+          EOF
+
+      - name: Upload key backup (download this, then delete the run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexora-release-key-backup
+          path: release-key-backup/
+          if-no-files-found: error
+          retention-days: 1

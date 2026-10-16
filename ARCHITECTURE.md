@@ -1,5 +1,10 @@
 # Architecture Specification
 
+> Status: this document describes the architecture **as implemented**
+> (currently shipping v0.3.3), not only the original plan. When behavior
+> changes, update this file in the same commit. Agent-facing working rules
+> live in `AGENTS.md`; the release-signing canon is `signing/README.md`.
+
 ## 1. Project Goal
 
 Build a production-oriented Android web browser using:
@@ -42,21 +47,23 @@ Create:
 interface BrowserEngine
 ```
 
-It should expose operations for:
+The engine exposes:
 
-- Creating sessions
-- Loading URLs
-- Reloading
-- Going back
-- Going forward
-- Stopping loading
-- Evaluating JavaScript
-- Clearing browsing data
-- Reading current URL
-- Reading page title
-- Checking back/forward availability
+- Creating and restoring sessions (`BrowserSessionConfig`: private mode,
+  desktop mode)
+- A listener for engine-created sessions (`window.open` / `target=_blank`),
+  which also reports the opener session id so Back can return there
+- Global text zoom and the web-content preferred color scheme
+- Clearing site data / all browsing data
 
-The first implementation is:
+Each `BrowserSession` in turn exposes its page state as `StateFlow`
+(URL, title, loading, progress, back/forward availability, security,
+fullscreen, find result) plus navigation, find, thumbnail, desktop-mode,
+autofill-credential, and content-view binding operations. One-time events
+(download requested, credential submitted, close requested) travel on a
+separate `SharedFlow`.
+
+The implementation is:
 
 ```text
 GeckoBrowserEngine
@@ -66,7 +73,11 @@ Use the current stable GeckoView APIs available at implementation time. Do not i
 
 ## 4. Browser Sessions
 
-Each tab owns its own browser session.
+Each tab owns its own browser session. Rendering uses one shared,
+attached GeckoView owned by the engine layer: switching tabs replaces the
+session bound to that view (`renderContentView`) instead of creating a new
+surface-backed view per tab. Live sessions are kept at high priority;
+suspension (below) — not priority demotion — is the memory control.
 
 A browser tab should contain:
 
@@ -87,7 +98,8 @@ Do not use one global browser session for all tabs.
 The browser must support:
 
 - New tab
-- Close tab
+- Close tab (including the last tab; zero tabs is valid and shows the
+  Start Page)
 - Switch tab
 - Reload tab
 
@@ -123,10 +135,14 @@ Recommended layout:
 
 The address bar should provide:
 
-- URL/search input
-- Security indicator
-- Clear action
-- Loading indicator
+- URL/search input (selects its contents on first focus)
+- Security indicator and loading progress
+- Downloads action (top bar) and bookmark toggle
+- Refresh lives only in the bottom bar, next to Back/Forward/Home/Tabs/Menu
+
+System Back priority is: exit fullscreen, then web-history Back, then —
+for a page-opened tab at its history root — close that tab and return to
+its opener; then dismiss the Start Page overlay; only then exit the app.
 
 ## 7. URL and Search Handling
 
@@ -203,7 +219,6 @@ Use DataStore Preferences for simple settings.
 Initial settings:
 
 - Default search engine
-- Homepage
 - JavaScript enabled
 - Cookies enabled
 - Dark mode
@@ -211,6 +226,33 @@ Initial settings:
 - Desktop site
 
 Settings should be isolated from UI implementation.
+
+The selected theme is also mapped to GeckoView's official
+`GeckoRuntimeSettings.preferredColorScheme` (System/Light/Dark; Hexora Mode
+maps to Dark) both when the runtime is created and whenever the setting
+changes. This exposes the app's choice through `prefers-color-scheme` so
+sites with their own dark CSS can follow it. GeckoView provides no
+Chromium-style algorithmic forced-dark recoloring for sites without a dark
+theme, and Hexora must not invent one. The cookie and open-links-in-new-tab
+preferences are currently stored only; their Settings summaries say so
+instead of pretending they change engine behavior.
+
+The Start Page replaces a configurable homepage. It appears for new tabs,
+when the Home action is used, and when no tab is open. It shows only up to
+ten shortcuts explicitly created by the user through the round + action;
+it must not derive entries from browsing history or bookmarks. Shortcuts can
+be edited or deleted from a long-press menu. Their site icons are fetched
+best-effort only after a matching site finishes loading, then cached in
+private app storage; undecodable icons keep the letter placeholder. The
+dedicated Hexora logo is used for the Start Page header and, on Android 12+,
+the system splash icon instead of the launcher icon.
+
+Saved logins are an optional, offline-only vault. GeckoView autofill
+events surface credential submissions to the ViewModel, which asks for
+explicit consent before `CredentialRepository` stores username/password
+as Android Keystore-backed AES-GCM ciphertext in Room (exact-origin
+matching; private tabs excluded). Passwords are never synced, transmitted,
+or shown in the management UI.
 
 ## 11. Downloads
 
@@ -237,7 +279,9 @@ Do not request broad storage or unrelated permissions.
 
 The architecture must support private tabs.
 
-Private tabs must not write normal browsing history.
+Private tabs must not write normal browsing history. They must not persist
+tab-preview screenshots or an in-app download-history entry either; the tab
+switcher shows a lock placeholder instead of page content.
 
 When a private tab is closed, its private session/data should be released according to GeckoView's supported private-session behavior.
 
@@ -258,6 +302,7 @@ isLoading
 loadingProgress
 canGoBack
 canGoForward
+canBackCloseTab
 isPrivate
 ```
 
@@ -289,6 +334,8 @@ browser
 tabs
 bookmarks
 history
+downloads
+passwords
 settings
 ```
 
@@ -300,11 +347,13 @@ Use Material 3.
 
 Support:
 
-- Light
+- Light (plain white, neutral surfaces)
 - Dark
 - System default
+- Hexora Mode (opaque dark theme using #E77E3D on #100B0F)
 
-Keep the initial UI clean and minimal.
+The same choice drives web content through `preferredColorScheme` as
+described in §10. Keep the initial UI clean and minimal.
 
 ## 17. Error Handling
 
@@ -342,6 +391,10 @@ Keep database entities, DAOs, and repositories separated.
 
 UI/ViewModels must not execute raw database queries.
 
+There is deliberately no destructive-migration fallback: a future schema
+change must ship an explicit `Migration` rather than silently deleting the
+user's history, bookmarks, shortcuts or saved logins.
+
 ## 20. Repository Layer
 
 Repositories provide the application-facing API for persistent data.
@@ -371,68 +424,61 @@ com.example.browser
 │
 ├── data/
 │   ├── database/
-│   │   ├── AppDatabase.kt
-│   │   ├── BookmarkDao.kt
-│   │   ├── HistoryDao.kt
-│   │   ├── BookmarkEntity.kt
-│   │   └── HistoryEntity.kt
-│   │
-│   └── repository/
-│       ├── BookmarkRepository.kt
-│       └── HistoryRepository.kt
+│   │   ├── AppDatabase.kt (v4)
+│   │   ├── DatabaseMigrations.kt (1→4, 2→4, 3→4)
+│   │   ├── *Dao.kt / *Entity.kt (history, bookmarks, downloads,
+│   │   │   credentials, start shortcuts)
+│   │   └── …
+│   ├── repository/ (history, bookmarks, downloads, credentials,
+│   │   start shortcuts, favicon fetching)
+│   ├── security/CredentialCipher.kt
+│   └── settings/SettingsRepository.kt
+│
+├── download/ (DownloadManager bridge, filename sanitizing)
 │
 ├── ui/
-│   ├── browser/
+│   ├── browser/ (BrowserScreen, BrowserViewModel, BrowserUiState)
 │   ├── tabs/
 │   ├── bookmarks/
 │   ├── history/
+│   ├── downloads/
+│   ├── passwords/
 │   ├── settings/
-│   └── components/
+│   ├── theme/
+│   └── components/ (AddressBar, ZoomSlider)
 │
 └── util/
 ```
 
-## 22. Implementation Order
+## 22. How to Change Things Safely
 
-Implement in this order:
+The MVP sequence that built this project is complete. For new work:
 
-1. Create Android project.
-2. Configure Kotlin and Compose.
-3. Add GeckoView using the current stable version.
-4. Create BrowserEngine abstraction.
-5. Implement GeckoBrowserEngine.
-6. Create BrowserSession.
-7. Implement one working browser tab.
-8. Build BrowserScreen.
-9. Add address bar and navigation controls.
-10. Add multiple tabs.
-11. Add Room history.
-12. Add Room bookmarks.
-13. Add DataStore settings.
-14. Add downloads.
-15. Add private browsing.
-16. Run a full build and fix all compilation/runtime issues.
+1. Reproduce/locate the behavior at the owning layer (UI state →
+   ViewModel → engine/session → repository), not in a Composable.
+2. Verify uncertain GeckoView APIs against the pinned dependency's docs
+   or source before writing code.
+3. Make the smallest targeted change; keep the shared-`GeckoView`
+   rendering model and the security baseline intact.
+4. Add or update unit tests where pure logic changed.
+5. Let CI compile and test; verify output assets; ask the owner to verify
+   runtime behavior on a real device.
+6. Update `README.md`, this file, `AGENTS.md`, and `signing/README.md`
+   (when relevant) in the same commit.
 
-## 23. Definition of Done for MVP
+## 23. Definition of Done
 
-The MVP is complete only when:
+A change is done only when:
 
-- The project compiles successfully.
-- The app launches without crashing.
-- A browser tab opens on startup.
-- A real HTTPS website can be loaded.
-- Search from the address bar works.
-- Back works.
-- Forward works.
-- Reload works.
-- Multiple tabs work.
-- Tabs can be closed.
-- History works.
-- Bookmarks work.
-- Dark/light/system theme works.
-- No obvious memory leak is introduced.
-- No unnecessary permissions are requested.
-- No major TODO placeholder replaces required functionality.
+- The project compiles successfully in CI and unit tests pass.
+- The main browser flow still works: launch, load an HTTPS site, search,
+  Back/Forward/Reload, multiple tabs (open/switch/close, including
+  closing the last tab), history, bookmarks, themes/settings.
+- No obvious memory leak, unnecessary permission, or unused import is
+  introduced.
+- The security baseline in §24/§25 is intact.
+- Limitations are stated honestly; nothing is claimed to work on-device
+  without device verification.
 
 ## 24. Important Engineering Rules
 
@@ -446,3 +492,54 @@ The MVP is complete only when:
 - Do not introduce unnecessary dependencies.
 - Avoid premature abstraction beyond the BrowserEngine boundary.
 - Keep code readable for a beginner-maintainable project.
+- Security baseline: Android backup is disabled (`allowBackup=false`), the
+  single browser Activity is `singleTask` with predictive Back opted in,
+  only http(s) targets are accepted from the address bar, other apps,
+  home-screen shortcuts and the download layer, and full download URLs are
+  never written to logcat (they can carry private query tokens).
+
+## 25. Build Variants, CI, and Release Signing
+
+- **Debug**: built by `.github/workflows/build-debug-apk.yml` on every
+  push (`assembleDebug` + `testDebugUnitTest`), published as a
+  `debug-<short-sha>` prerelease with arm64-v8a / armeabi-v7a / x86_64
+  APKs, signed with a stable cached debug keystore so debug updates
+  install over each other.
+- **Release**: built by `.github/workflows/build-release-apk.yml`
+  (`assembleRelease` + `bundleRelease`). CI decodes the dedicated release
+  keystore from GitHub Actions secrets into the runner temp directory,
+  signs, verifies every APK with `apksigner` (and the AAB with
+  `jarsigner`), and publishes GitHub Release `v<versionName>` with all
+  APKs and the AAB. Manual dispatch requires the workflow on the default
+  branch; on a working branch, pushing a change to the marker file
+  `signing/build-release.request` triggers one signed build.
+- **The release key never enters this repository.** Full rules, the exact
+  secret names, backup/loss consequences, and troubleshooting are
+  canonical in `signing/README.md` and summarized in `AGENTS.md` §8. Any
+  architecture change must preserve this property.
+- Release and debug signatures differ; Android will not install one over
+  the other. A signed APK sideloaded from a browser/file manager still
+  triggers Android's per-source "unknown apps" permission and possibly a
+  Play Protect scan — that is platform behavior about install source, not
+  a signing defect. Only store installation (Google Play, using the AAB)
+  removes that prompt.
+
+## 26. Compatibility Targets
+
+- `minSdk` 26 / `targetSdk` 37; the verified focus is Android 12–17,
+  foldables/large screens, and diverse OEM skins. Use only platform and
+  AndroidX/GeckoView APIs; no vendor-specific behavior.
+- Respect edge-to-edge insets, predictive Back, RTL, font scaling, and
+  both small and large screens; keep touch targets usable even when a
+  control's visible glyph is deliberately compact (e.g. tab close).
+
+## 27. Documentation Maintenance
+
+- `README.md` — owner/user facing: features, install, warnings, builds.
+- `ARCHITECTURE.md` (this file) — how the system is built and why.
+- `AGENTS.md` — binding working rules for future agents/developers,
+  including the release-signing red lines.
+- `signing/README.md` — the single source of truth for release signing.
+
+Docs that contradict the code are bugs. Fix them in the same commit as
+the behavior change.

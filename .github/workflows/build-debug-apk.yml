@@ -1,0 +1,94 @@
+name: Build debug APK
+
+# The development sandbox has no JDK/Android SDK and restricted network,
+# so builds run here on GitHub-hosted runners instead.
+
+on:
+  push:
+    branches:
+      - arena/958b2d7a-hexora-web-browser
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Keep ONE debug signing key across CI runs. Each runner would
+      # otherwise mint a fresh debug.keystore, and Android refuses to
+      # install an update whose signature differs from the installed app.
+      - name: Restore stable debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: hexora-debug-keystore-v1
+
+      - name: Install Android SDK platform 37
+        run: |
+          set -o pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --version 2>&1 | tee setup.log
+          yes | "$SDKMANAGER" --licenses >> setup.log 2>&1 || true
+          "$SDKMANAGER" --list 2>/dev/null | grep -E "platforms;android-3[567]" >> setup.log || true
+          PLATFORM_PKG=$("$SDKMANAGER" --list 2>/dev/null | grep -oE "platforms;android-37[0-9.]*" | sort -Vu | tail -1 || true)
+          echo "PLATFORM_PKG=$PLATFORM_PKG" | tee -a setup.log
+          test -n "$PLATFORM_PKG"
+          "$SDKMANAGER" "$PLATFORM_PKG" "build-tools;37.0.0" 2>&1 | tee -a setup.log
+
+      - name: Build debug APK
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee gradle.log
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee -a gradle.log
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hexora-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Publish APK to a GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="debug-${GITHUB_SHA::7}"
+          gh release create "$TAG" \
+            app/build/outputs/apk/debug/*.apk \
+            --title "Hexora Browser — debug build ${GITHUB_SHA::7}" \
+            --notes "Automated debug build of commit ${GITHUB_SHA}. Pick the APK for your device: arm64-v8a (most modern phones), armeabi-v7a (old 32-bit phones), x86_64 (emulators). Not for production use." \
+            --prerelease
+
+      # Log download hosts are unreachable from the dev sandbox, so on
+      # failure the tail of the Gradle log is mirrored into an issue.
+      - name: Report failure log in an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Build failed for commit $GITHUB_SHA (run $GITHUB_RUN_ID)."
+            echo
+            echo '```text'
+            cat setup.log gradle.log 2>/dev/null | tail -n 350; test -f setup.log -o -f gradle.log || echo "(no logs captured)"
+            echo '```'
+          } > failure-report.md
+          gh issue create \
+            --title "CI build failure ${GITHUB_SHA::7}" \
+            --body-file failure-report.md

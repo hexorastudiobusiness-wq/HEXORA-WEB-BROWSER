@@ -1,0 +1,68 @@
+package com.example.browser.download
+
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
+import android.util.Log
+
+/**
+ * Download layer (ARCHITECTURE.md §11).
+ *
+ * Receives download requests coming out of the engine and delegates the
+ * actual transfer to Android's [DownloadManager], which saves to the
+ * user-visible Downloads folder and shows system notifications.
+ * No storage permission is required for this on Android 10+.
+ */
+class DownloadHandler(context: Context) {
+
+    private val appContext = context.applicationContext
+    private val downloadManager =
+        appContext.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+
+    /** @return the DownloadManager id, or -1 when enqueueing failed. */
+    fun download(url: String, fileName: String, mimeType: String?): Long {
+        if (!url.startsWith("https://", ignoreCase = true) &&
+            !url.startsWith("http://", ignoreCase = true)
+        ) {
+            // DownloadManager only supports http(s); anything else is rejected.
+            // Do not log the URL: it can contain private query parameters.
+            Log.w(TAG, "Unsupported download URL scheme")
+            return -1L
+        }
+        val request = DownloadManager.Request(Uri.parse(url))
+            .setTitle(fileName)
+            .setDescription(url)
+            .setMimeType(mimeType)
+            .setNotificationVisibility(
+                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
+            )
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+        return runCatching { downloadManager.enqueue(request) }
+            .onFailure { Log.e(TAG, "Failed to enqueue download", it) }
+            .getOrDefault(-1L)
+    }
+
+    /** Current DownloadManager status (STATUS_*) for [downloadId], if known. */
+    fun statusFor(downloadId: Long): Int? {
+        if (downloadId < 0) return null
+        return runCatching {
+            downloadManager.query(DownloadManager.Query().setFilterById(downloadId))
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                    } else {
+                        null
+                    }
+                }
+        }.getOrNull()
+    }
+
+    /** Content URI of the finished file so it can be opened with other apps. */
+    fun uriFor(downloadId: Long): Uri? =
+        runCatching { downloadManager.getUriForDownloadedFile(downloadId) }.getOrNull()
+
+    private companion object {
+        const val TAG = "DownloadHandler"
+    }
+}

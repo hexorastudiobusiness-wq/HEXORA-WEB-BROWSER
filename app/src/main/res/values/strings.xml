@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hexora Browser</string>
+
+    <!-- Browser chrome -->
+    <string name="address_hint">Search or enter address</string>
+    <string name="action_back">Back</string>
+    <string name="action_forward">Forward</string>
+    <string name="action_home">Home</string>
+    <string name="action_reload">Reload</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_tabs">Tabs</string>
+    <string name="action_menu">Menu</string>
+    <string name="action_clear_input">Clear</string>
+    <string name="action_add_bookmark">Add bookmark</string>
+    <string name="action_remove_bookmark">Remove bookmark</string>
+    <string name="secure_connection">Secure connection</string>
+    <string name="insecure_connection">Connection is not secure</string>
+    <string name="page_load_failed">This page could not be loaded.</string>
+    <string name="action_retry">Retry</string>
+
+    <!-- Menu -->
+    <string name="menu_new_tab">New tab</string>
+    <string name="menu_new_private_tab">New private tab</string>
+    <string name="menu_bookmarks">Bookmarks</string>
+    <string name="menu_history">History</string>
+    <string name="menu_settings">Settings</string>
+    <string name="menu_clear_data">Clear browsing data</string>
+    <string name="browsing_data_cleared">Browsing data cleared</string>
+
+    <!-- Tabs -->
+    <string name="tabs_title">Tabs</string>
+    <string name="tab_close">Close tab</string>
+    <string name="tab_new">New tab</string>
+    <string name="tab_private">Private</string>
+    <string name="tab_new_page">New tab page</string>
+
+    <!-- Bookmarks -->
+    <string name="bookmarks_title">Bookmarks</string>
+    <string name="bookmarks_empty">No bookmarks yet. Tap the star to save this page.</string>
+    <string name="bookmark_delete">Delete bookmark</string>
+
+    <!-- History -->
+    <string name="history_title">History</string>
+    <string name="history_empty">No browsing history yet.</string>
+    <string name="history_delete_entry">Delete from history</string>
+    <string name="history_clear_all">Clear history</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_search_engine">Search engine</string>
+    <string name="settings_theme">Theme</string>
+    <string name="theme_system">System default</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_hexora">Hexora Mode</string>
+    <string name="settings_javascript">JavaScript</string>
+    <string name="settings_javascript_summary">Applies to new browsing sessions after restart</string>
+    <string name="settings_cookies">Cookies</string>
+    <string name="settings_cookies_summary">Stored preference — per-site cookie controls are planned</string>
+    <string name="settings_desktop_mode">Desktop site by default</string>
+    <string name="settings_desktop_mode_summary">Applies to new tabs</string>
+    <string name="settings_open_links_new_tab">Open links in a new tab</string>
+    <string name="settings_open_links_new_tab_summary">Stored preference — not applied yet</string>
+
+    <!-- Downloads -->
+    <string name="download_started">Downloading %1$s</string>
+    <string name="download_failed">Download could not be started</string>
+    <string name="action_remove">Remove</string>
+    <string name="action_undo">Undo</string>
+    <string name="action_exit_fullscreen">Exit fullscreen</string>
+    <string name="action_find_next">Next match</string>
+    <string name="action_find_previous">Previous match</string>
+    <string name="action_close_find">Close find bar</string>
+    <string name="menu_desktop_site">Desktop site</string>
+    <string name="menu_find_in_page">Find in page</string>
+    <string name="menu_fullscreen">Fullscreen</string>
+    <string name="menu_zoom">Text size</string>
+    <string name="menu_add_to_home">Add to Home screen</string>
+    <string name="menu_downloads">Downloads</string>
+    <string name="menu_clear_site_data">Clear site data</string>
+    <string name="find_hint">Find in page</string>
+    <string name="find_not_found">No results</string>
+    <string name="site_data_cleared">Site data cleared</string>
+    <string name="home_shortcut_added">Shortcut added to Home screen</string>
+    <string name="home_shortcut_failed">Could not add shortcut</string>
+    <string name="tabs_close_all">Close all</string>
+    <string name="tabs_closed_message">All tabs were closed</string>
+    <string name="tab_sleeping">Sleeping</string>
+    <string name="downloads_title">Downloads</string>
+    <string name="downloads_empty">No downloads yet. Files you download appear here.</string>
+    <string name="downloads_clear_all">Clear list</string>
+    <string name="download_status_running">Downloading</string>
+    <string name="download_status_paused">Paused</string>
+    <string name="download_status_pending">Waiting</string>
+    <string name="download_status_completed">Completed</string>
+    <string name="download_status_failed">Failed</string>
+    <string name="download_status_unknown">Unknown</string>
+    <string name="settings_text_zoom">Text size</string>
+    <string name="settings_text_zoom_summary">Scales text on pages; applied on next page load</string>
+    <string name="settings_password_manager">Save and autofill passwords</string>
+    <string name="settings_password_manager_summary">Stored encrypted on this device only; Hexora never sends them anywhere</string>
+    <string name="passwords_manage">Manage saved logins</string>
+    <string name="passwords_title">Saved logins</string>
+    <string name="passwords_empty">No saved logins yet.</string>
+    <string name="passwords_delete_all">Delete all</string>
+    <string name="passwords_local_only_note">Saved on this device only, encrypted with Android Keystore. Passwords are never shown here or sent anywhere.</string>
+    <string name="password_save_title">Save password?</string>
+    <string name="password_update_title">Update password?</string>
+    <string name="password_save_message">Save this login for %1$s? It stays encrypted on this device only.</string>
+    <string name="password_update_message">Update the saved login for %1$s? It stays encrypted on this device only.</string>
+    <string name="password_username">Username: %1$s</string>
+    <string name="action_save">Save</string>
+    <string name="action_not_now">Not now</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_reset_zoom">Reset text size to 100%</string>
+    <string name="start_title">Hexora</string>
+    <string name="start_subtitle">Fast, private, yours</string>
+    <string name="start_logo_content_description">Hexora logo</string>
+    <string name="start_shortcuts">Shortcuts</string>
+    <string name="start_shortcuts_count">%1$d/10</string>
+    <string name="start_shortcut_empty">No shortcuts yet. Add the sites you want to reach quickly.</string>
+    <string name="start_add_shortcut">Add shortcut</string>
+    <string name="start_shortcut_add_title">Add shortcut</string>
+    <string name="start_shortcut_edit_title">Edit shortcut</string>
+    <string name="start_shortcut_edit">Edit shortcut</string>
+    <string name="start_shortcut_delete">Delete</string>
+    <string name="start_shortcut_name">Name</string>
+    <string name="start_shortcut_name_hint">Optional</string>
+    <string name="start_shortcut_address">Address</string>
+    <string name="start_shortcut_address_hint">example.com</string>
+    <string name="start_shortcut_remove_hint">Long-press a shortcut to edit or delete it.</string>
+    <string name="start_shortcuts_private">Your shortcuts are hidden in private tabs.</string>
+    <string name="tabs_empty">No open tabs</string>
+    <string name="tabs_empty_hint">Open a new tab or restore the tabs you closed.</string>
+</resources>
