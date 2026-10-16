@@ -94,7 +94,7 @@ fun AddressBar(
                 Surface(
                     modifier = Modifier
                         .weight(1f)
-                        .height(if (compact) 36.dp else 40.dp),
+                        .height(if (compact) 36.dp else 38.dp),
                     shape = RoundedCornerShape(20.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                 ) {
