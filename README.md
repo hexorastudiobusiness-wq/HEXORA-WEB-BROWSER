@@ -224,6 +224,12 @@ Run the unit tests:
 ./gradlew testDebugUnitTest
 ```
 
+Signed release builds use a dedicated release key that is never committed
+to this repository. The keystore lives only in GitHub Actions secrets; run
+the **Build signed release** workflow to produce signed release APKs and an
+AAB published to a GitHub Release. See `signing/README.md` for the secret
+names and the one-time owner checklist.
+
 ## License
 
 Add the project's chosen license here before public release.

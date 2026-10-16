@@ -6,6 +6,12 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// Release signing is injected by CI through environment variables that
+// point at a temporary keystore decoded from GitHub Secrets. The keystore
+// and its passwords are never part of this repository (see signing/README.md).
+val releaseStorePath = System.getenv("HEXORA_RELEASE_STORE_FILE")
+val hasReleaseSigning = !releaseStorePath.isNullOrBlank()
+
 android {
     namespace = "com.example.browser"
     compileSdk = 37
@@ -35,8 +41,23 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            if (hasReleaseSigning) {
+                storeFile = file(releaseStorePath!!)
+                storePassword = System.getenv("HEXORA_RELEASE_STORE_PASSWORD")
+                keyAlias = System.getenv("HEXORA_RELEASE_KEY_ALIAS") ?: "hexora-release"
+                keyPassword = System.getenv("HEXORA_RELEASE_KEY_PASSWORD")
+                storeType = System.getenv("HEXORA_RELEASE_STORE_TYPE") ?: "PKCS12"
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
