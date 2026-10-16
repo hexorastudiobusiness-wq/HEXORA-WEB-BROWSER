@@ -148,6 +148,12 @@ Phase 1 MVP and the core of Phase 2 are implemented:
 - Closing the last tab is allowed: zero tabs is a valid state and shows the
   Hexora Start Page. The Start Page contains only shortcuts the user creates
   with its round + action (maximum ten); it never derives sites from history.
+  Long-pressing a shortcut opens a small menu to edit or delete it. Once a
+  shortcut's site has finished loading, its tile caches and shows the site's
+  own favicon instead of the initial-letter placeholder.
+- The Start Page header and Android 12+ system splash use the dedicated
+  Hexora logo artwork rather than the launcher icon. The address bar and
+  tab-tile close controls use compact sizing for faster one-handed use.
 - Tabs render through one shared GeckoView whose session is swapped, while
   inactive live sessions are kept high priority; LRU suspension/restore is
   still the memory control for long tab lists

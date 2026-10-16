@@ -219,7 +219,12 @@ Settings should be isolated from UI implementation.
 The Start Page replaces a configurable homepage. It appears for new tabs,
 when the Home action is used, and when no tab is open. It shows only up to
 ten shortcuts explicitly created by the user through the round + action;
-it must not derive entries from browsing history or bookmarks.
+it must not derive entries from browsing history or bookmarks. Shortcuts can
+be edited or deleted from a long-press menu. Their site icons are fetched
+best-effort only after a matching site finishes loading, then cached in
+private app storage; undecodable icons keep the letter placeholder. The
+dedicated Hexora logo is used for the Start Page header and, on Android 12+,
+the system splash icon instead of the launcher icon.
 
 Saved logins are an optional, offline-only vault. GeckoView autofill
 events surface credential submissions to the ViewModel, which asks for

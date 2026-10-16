@@ -9,8 +9,10 @@ import com.example.browser.data.repository.BookmarkRepository
 import com.example.browser.data.repository.CredentialRepository
 import com.example.browser.data.repository.DownloadRepository
 import com.example.browser.data.repository.HistoryRepository
+import com.example.browser.data.repository.FaviconFetcher
 import com.example.browser.data.repository.StartShortcutRepository
 import com.example.browser.data.security.CredentialCipher
+import com.example.browser.util.ShortcutIconStore
 import com.example.browser.util.TabThumbnailStore
 import com.example.browser.data.settings.SettingsRepository
 import com.example.browser.download.DownloadHandler
@@ -62,6 +64,12 @@ class AppContainer(context: Context) {
     val startShortcutRepository: StartShortcutRepository by lazy {
         StartShortcutRepository(database.shortcutDao())
     }
+
+    val shortcutIconStore: ShortcutIconStore by lazy {
+        ShortcutIconStore(appContext)
+    }
+
+    val faviconFetcher: FaviconFetcher by lazy { FaviconFetcher() }
 
     /**
      * The engine is created by the ViewModel once the persisted settings

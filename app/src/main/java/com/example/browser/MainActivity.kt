@@ -66,6 +66,8 @@ class MainActivity : ComponentActivity() {
                     bookmarkRepository = container.bookmarkRepository,
                     credentialRepository = container.credentialRepository,
                     shortcutRepository = container.startShortcutRepository,
+                    shortcutIconStore = container.shortcutIconStore,
+                    faviconFetcher = container.faviconFetcher,
                     settingsRepository = container.settingsRepository,
                     thumbnailStore = container.tabThumbnailStore,
                 )

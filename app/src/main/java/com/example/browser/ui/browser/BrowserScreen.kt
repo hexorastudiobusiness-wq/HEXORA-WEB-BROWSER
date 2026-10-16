@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,13 +42,13 @@ import androidx.compose.material.icons.filled.Cookie
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -82,10 +83,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -270,6 +275,9 @@ private fun BrowserPageContent(
                 onAddShortcut = { title, url ->
                     onAction(BrowserAction.AddStartShortcut(title, url))
                 },
+                onEditShortcut = { id, title, url ->
+                    onAction(BrowserAction.EditStartShortcut(id, title, url))
+                },
                 onDeleteShortcut = { id ->
                     onAction(BrowserAction.DeleteStartShortcut(id))
                 },
@@ -350,14 +358,18 @@ private fun StartPage(
     state: BrowserUiState,
     onOpenUrl: (String) -> Unit,
     onAddShortcut: (String, String) -> Unit,
+    onEditShortcut: (Long, String, String) -> Unit,
     onDeleteShortcut: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var addDialogVisible by remember { mutableStateOf(false) }
-    var shortcutPendingDeletion by remember { mutableStateOf<StartShortcut?>(null) }
+    var shortcutPendingEdit by remember { mutableStateOf<StartShortcut?>(null) }
 
     if (addDialogVisible) {
-        AddShortcutDialog(
+        ShortcutDialog(
+            title = stringResource(R.string.start_shortcut_add_title),
+            initialName = "",
+            initialAddress = "",
             onDismiss = { addDialogVisible = false },
             onSave = { title, url ->
                 onAddShortcut(title, url)
@@ -366,32 +378,15 @@ private fun StartPage(
         )
     }
 
-    shortcutPendingDeletion?.let { shortcut ->
-        AlertDialog(
-            onDismissRequest = { shortcutPendingDeletion = null },
-            title = { Text(stringResource(R.string.start_shortcut_remove_title)) },
-            text = {
-                Text(
-                    stringResource(
-                        R.string.start_shortcut_remove_message,
-                        shortcut.title,
-                    ),
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onDeleteShortcut(shortcut.id)
-                        shortcutPendingDeletion = null
-                    },
-                ) {
-                    Text(stringResource(R.string.action_remove))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { shortcutPendingDeletion = null }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
+    shortcutPendingEdit?.let { shortcut ->
+        ShortcutDialog(
+            title = stringResource(R.string.start_shortcut_edit_title),
+            initialName = shortcut.title,
+            initialAddress = shortcut.url,
+            onDismiss = { shortcutPendingEdit = null },
+            onSave = { title, url ->
+                onEditShortcut(shortcut.id, title, url)
+                shortcutPendingEdit = null
             },
         )
     }
@@ -407,21 +402,34 @@ private fun StartPage(
                     .padding(top = 36.dp, bottom = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.size(64.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (state.isPrivate) {
-                                Icons.Filled.Lock
-                            } else {
-                                Icons.Filled.Language
-                            },
-                            contentDescription = null,
-                            modifier = Modifier.size(34.dp),
-                        )
+                Box(modifier = Modifier.size(72.dp)) {
+                    Image(
+                        painter = painterResource(R.drawable.hexora_logo),
+                        contentDescription = stringResource(
+                            R.string.start_logo_content_description,
+                        ),
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(18.dp)),
+                    )
+                    if (state.isPrivate) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .align(Alignment.BottomEnd),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Filled.Lock,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                        }
                     }
                 }
                 Text(
@@ -497,8 +505,10 @@ private fun StartPage(
                         } else {
                             StartShortcutTile(
                                 shortcut = shortcut,
+                                icon = state.startShortcutIcons[shortcut.id],
                                 onClick = { onOpenUrl(shortcut.url) },
-                                onLongClick = { shortcutPendingDeletion = shortcut },
+                                onEdit = { shortcutPendingEdit = shortcut },
+                                onDelete = { onDeleteShortcut(shortcut.id) },
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -527,16 +537,19 @@ private fun StartPage(
 }
 
 @Composable
-private fun AddShortcutDialog(
+private fun ShortcutDialog(
+    title: String,
+    initialName: String,
+    initialAddress: String,
     onDismiss: () -> Unit,
     onSave: (String, String) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var address by remember { mutableStateOf("") }
+    var name by remember(initialName) { mutableStateOf(initialName) }
+    var address by remember(initialAddress) { mutableStateOf(initialAddress) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.start_shortcut_add_title)) },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -582,10 +595,13 @@ private fun AddShortcutDialog(
 @Composable
 private fun StartShortcutTile(
     shortcut: StartShortcut,
+    icon: android.graphics.Bitmap?,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
     val host = remember(shortcut.url) {
         runCatching { Uri.parse(shortcut.url).host }
             .getOrNull()
@@ -594,49 +610,90 @@ private fun StartShortcutTile(
             ?: shortcut.url
     }
     val label = shortcut.title.ifBlank { host }
-    Surface(
-        modifier = modifier
-            .height(108.dp)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick,
-            ),
-        shape = RoundedCornerShape(26.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = 1.dp,
-    ) {
-        Column(
+    Box(modifier = modifier) {
+        Surface(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+                .fillMaxWidth()
+                .height(108.dp)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { menuExpanded = true },
+                ),
+            shape = RoundedCornerShape(26.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            tonalElevation = 1.dp,
         ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(40.dp),
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = label.firstOrNull()?.uppercase() ?: "?",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(40.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (icon != null) {
+                            Image(
+                                bitmap = icon.asImageBitmap(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surface),
+                            )
+                        } else {
+                            Text(
+                                text = label.firstOrNull()?.uppercase() ?: "?",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
+                    }
                 }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 7.dp),
+                )
+                Text(
+                    text = host,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
             }
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.padding(top = 7.dp),
+        }
+
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.start_shortcut_edit)) },
+                leadingIcon = {
+                    Icon(Icons.Filled.Edit, contentDescription = null)
+                },
+                onClick = {
+                    menuExpanded = false
+                    onEdit()
+                },
             )
-            Text(
-                text = host,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.start_shortcut_delete)) },
+                leadingIcon = {
+                    Icon(Icons.Filled.Delete, contentDescription = null)
+                },
+                onClick = {
+                    menuExpanded = false
+                    onDelete()
+                },
             )
         }
     }

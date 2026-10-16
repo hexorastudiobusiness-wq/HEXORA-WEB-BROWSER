@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -276,7 +277,8 @@ private fun TabTile(
                     onClick = onClose,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(2.dp)
+                        .padding(6.dp)
+                        .size(28.dp)
                         .background(
                             color = MaterialTheme.colorScheme.surface,
                             shape = androidx.compose.foundation.shape.CircleShape,
@@ -285,6 +287,7 @@ private fun TabTile(
                     Icon(
                         imageVector = Icons.Filled.Close,
                         contentDescription = stringResource(R.string.tab_close),
+                        modifier = Modifier.size(16.dp),
                     )
                 }
             }

@@ -1,5 +1,6 @@
 package com.example.browser.ui.browser
 
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -12,11 +13,13 @@ import com.example.browser.browser.SavedTabState
 import com.example.browser.browser.SessionPageState
 import com.example.browser.data.repository.BookmarkRepository
 import com.example.browser.data.repository.CredentialRepository
+import com.example.browser.data.repository.FaviconFetcher
 import com.example.browser.data.repository.HistoryRepository
 import com.example.browser.data.repository.StartShortcutRepository
 import com.example.browser.data.settings.BrowserSettingsState
 import com.example.browser.data.settings.SettingsRepository
 import com.example.browser.util.CredentialOrigin
+import com.example.browser.util.ShortcutIconStore
 import com.example.browser.util.TabThumbnailStore
 import com.example.browser.util.UrlUtils
 import java.util.UUID
@@ -33,6 +36,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Owns all tabs and coordinates between the [BrowserEngine], repositories and
@@ -52,6 +56,8 @@ class BrowserViewModel(
     private val thumbnailStore: TabThumbnailStore,
     private val credentialRepository: CredentialRepository,
     private val shortcutRepository: StartShortcutRepository,
+    private val shortcutIconStore: ShortcutIconStore,
+    private val faviconFetcher: FaviconFetcher,
 ) : ViewModel() {
 
     private var engine: BrowserEngine? = null
@@ -84,6 +90,8 @@ class BrowserViewModel(
     private val _userFullscreen = MutableStateFlow(false)
     private val _recentlyClosed = MutableStateFlow<List<ClosedTabInfo>>(emptyList())
     private val _pendingCredentialPrompt = MutableStateFlow<CredentialSavePrompt?>(null)
+    private val _shortcutIcons = MutableStateFlow<Map<Long, Bitmap>>(emptyMap())
+    private val shortcutIconFetchesInFlight = mutableSetOf<Long>()
 
     private data class PendingCredential(
         val origin: String,
@@ -132,12 +140,14 @@ class BrowserViewModel(
     private val startSlice = combine(
         chromeSlice,
         shortcutRepository.shortcuts,
-    ) { chrome, shortcuts ->
+        _shortcutIcons,
+    ) { chrome, shortcuts, icons ->
         StartSlice(
             chrome = chrome,
             shortcuts = shortcuts
                 .take(StartShortcutRepository.MAX_SHORTCUTS)
                 .map { StartShortcut(it.id, it.title, it.url) },
+            icons = icons,
         )
     }
 
@@ -204,6 +214,11 @@ class BrowserViewModel(
             },
             canAddStartShortcut = activeEntry?.isPrivate != true &&
                 start.shortcuts.size < StartShortcutRepository.MAX_SHORTCUTS,
+            startShortcutIcons = if (activeEntry?.isPrivate == true) {
+                emptyMap()
+            } else {
+                start.icons
+            },
             pendingCredentialSave = start.chrome.pendingCredentialSave,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowserUiState())
@@ -238,6 +253,25 @@ class BrowserViewModel(
             pendingExternalUrl?.let { url ->
                 pendingExternalUrl = null
                 openNewTab(url = url, isPrivate = false)
+            }
+        }
+        // Load any favicons cached from earlier visits to shortcut sites.
+        viewModelScope.launch {
+            shortcutRepository.shortcuts.collect { shortcuts ->
+                val ids = shortcuts.map { it.id }.toSet()
+                _shortcutIcons.update { icons -> icons.filterKeys { it in ids } }
+                shortcuts.forEach { shortcut ->
+                    if (!_shortcutIcons.value.containsKey(shortcut.id)) {
+                        val icon = withContext(Dispatchers.IO) {
+                            shortcutIconStore.load(shortcut.id)
+                        }
+                        if (icon != null) {
+                            _shortcutIcons.update { icons ->
+                                icons + (shortcut.id to icon)
+                            }
+                        }
+                    }
+                }
             }
         }
         // Keep the engine's text zoom in sync with the persisted setting.
@@ -353,17 +387,53 @@ class BrowserViewModel(
             BrowserAction.DismissPendingCredential -> dismissPendingCredential()
             is BrowserAction.AddStartShortcut -> {
                 viewModelScope.launch {
-                    shortcutRepository.add(
-                        title = action.title,
-                        url = UrlUtils.resolveInput(
-                            action.url,
-                            settings.value.searchEngine,
-                        ),
+                    val resolvedUrl = UrlUtils.resolveInput(
+                        action.url,
+                        settings.value.searchEngine,
                     )
+                    val shortcutId = shortcutRepository.add(
+                        title = action.title,
+                        url = resolvedUrl,
+                    ) ?: return@launch
+                    // If this site is already open and loaded, its real icon
+                    // can replace the letter placeholder immediately.
+                    loadedPageUrlForShortcut(resolvedUrl)?.let { pageUrl ->
+                        fetchShortcutIcon(shortcutId, pageUrl)
+                    }
+                }
+            }
+            is BrowserAction.EditStartShortcut -> {
+                viewModelScope.launch {
+                    val resolvedUrl = UrlUtils.resolveInput(
+                        action.url,
+                        settings.value.searchEngine,
+                    )
+                    val previous = shortcutRepository.shortcuts.first()
+                        .firstOrNull { it.id == action.id }
+                    val updated = shortcutRepository.update(
+                        id = action.id,
+                        title = action.title,
+                        url = resolvedUrl,
+                    )
+                    if (updated && previous != null && previous.url != resolvedUrl) {
+                        withContext(Dispatchers.IO) {
+                            shortcutIconStore.delete(action.id)
+                        }
+                        _shortcutIcons.update { icons -> icons - action.id }
+                        loadedPageUrlForShortcut(resolvedUrl)?.let { pageUrl ->
+                            fetchShortcutIcon(action.id, pageUrl)
+                        }
+                    }
                 }
             }
             is BrowserAction.DeleteStartShortcut -> {
-                viewModelScope.launch { shortcutRepository.delete(action.id) }
+                viewModelScope.launch {
+                    shortcutRepository.delete(action.id)
+                    withContext(Dispatchers.IO) {
+                        shortcutIconStore.delete(action.id)
+                    }
+                    _shortcutIcons.update { icons -> icons - action.id }
+                }
             }
         }
     }
@@ -723,6 +793,7 @@ class BrowserViewModel(
                     if (finishedLoad && !state.loadFailed) {
                         if (!entry.isPrivate && UrlUtils.isHttpUrl(state.url)) {
                             historyRepository.recordVisit(state.url, state.title)
+                            refreshShortcutIconsForLoadedPage(state.url)
                         }
                         if (state.url.isNotBlank() &&
                             lastThumbnailUrl[entry.tabId] != state.url
@@ -746,6 +817,52 @@ class BrowserViewModel(
                 }
             }
         }
+    }
+
+    /** After a site finishes loading, cache its icon for matching shortcuts. */
+    private fun refreshShortcutIconsForLoadedPage(pageUrl: String) {
+        viewModelScope.launch {
+            val shortcuts = shortcutRepository.shortcuts.first()
+            shortcuts
+                .filter { shortcut ->
+                    !_shortcutIcons.value.containsKey(shortcut.id) &&
+                        shortcutIconFetchesInFlight.add(shortcut.id) &&
+                        hostsRelated(shortcut.url, pageUrl)
+                }
+                .forEach { shortcut ->
+                    try {
+                        fetchShortcutIcon(shortcut.id, pageUrl)
+                    } finally {
+                        shortcutIconFetchesInFlight.remove(shortcut.id)
+                    }
+                }
+        }
+    }
+
+    private suspend fun fetchShortcutIcon(shortcutId: Long, pageUrl: String) {
+        val icon = faviconFetcher.fetch(pageUrl) ?: return
+        withContext(Dispatchers.IO) { shortcutIconStore.save(shortcutId, icon) }
+        _shortcutIcons.update { icons -> icons + (shortcutId to icon) }
+    }
+
+    /** The already-loaded page URL when it belongs to [shortcutUrl]'s site. */
+    private fun loadedPageUrlForShortcut(shortcutUrl: String): String? {
+        val entry = activeEntry() ?: return null
+        if (entry.isPrivate) return null
+        val state = _pageStates.value[entry.tabId] ?: return null
+        val pageUrl = state.url.ifBlank { entry.lastUrl }
+        if (pageUrl.isBlank() || state.isLoading || state.loadFailed) return null
+        return pageUrl.takeIf { hostsRelated(shortcutUrl, it) }
+    }
+
+    private fun hostsRelated(firstUrl: String, secondUrl: String): Boolean {
+        val firstHost = runCatching { Uri.parse(firstUrl).host }
+            .getOrNull()?.lowercase()?.removePrefix("www.") ?: return false
+        val secondHost = runCatching { Uri.parse(secondUrl).host }
+            .getOrNull()?.lowercase()?.removePrefix("www.") ?: return false
+        return firstHost == secondHost ||
+            firstHost.endsWith(".$secondHost") ||
+            secondHost.endsWith(".$firstHost")
     }
 
     private fun captureThumbnail(tabId: String) {
@@ -807,6 +924,7 @@ class BrowserViewModel(
     private data class StartSlice(
         val chrome: ChromeSlice,
         val shortcuts: List<StartShortcut>,
+        val icons: Map<Long, Bitmap>,
     )
 
     companion object {

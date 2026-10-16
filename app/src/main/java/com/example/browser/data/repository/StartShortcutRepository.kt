@@ -9,17 +9,32 @@ class StartShortcutRepository(private val dao: ShortcutDao) {
 
     val shortcuts: Flow<List<ShortcutEntity>> = dao.observeAll()
 
-    /** @return true when the shortcut was added. */
-    suspend fun add(title: String, url: String): Boolean {
+    /** @return the new shortcut id, or null when it was not added. */
+    suspend fun add(title: String, url: String): Long? {
         val normalizedUrl = url.trim()
-        if (normalizedUrl.isBlank()) return false
-        if (dao.count() >= MAX_SHORTCUTS) return false
-        if (dao.getByUrl(normalizedUrl) != null) return false
-        dao.insert(
+        if (normalizedUrl.isBlank()) return null
+        if (dao.count() >= MAX_SHORTCUTS) return null
+        if (dao.getByUrl(normalizedUrl) != null) return null
+        return dao.insert(
             ShortcutEntity(
                 title = title.trim().ifBlank { normalizedUrl },
                 url = normalizedUrl,
                 createdAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    /** @return true when an existing shortcut was updated. */
+    suspend fun update(id: Long, title: String, url: String): Boolean {
+        val normalizedUrl = url.trim()
+        if (normalizedUrl.isBlank()) return false
+        val existing = dao.getById(id) ?: return false
+        val duplicate = dao.getByUrl(normalizedUrl)
+        if (duplicate != null && duplicate.id != id) return false
+        dao.update(
+            existing.copy(
+                title = title.trim().ifBlank { normalizedUrl },
+                url = normalizedUrl,
             ),
         )
         return true

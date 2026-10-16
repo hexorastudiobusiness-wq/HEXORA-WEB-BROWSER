@@ -1,5 +1,6 @@
 package com.example.browser.ui.browser
 
+import android.graphics.Bitmap
 import com.example.browser.browser.BrowserSession
 import com.example.browser.browser.FindResultUi
 
@@ -64,6 +65,8 @@ data class BrowserUiState(
     val startShortcuts: List<StartShortcut> = emptyList(),
     /** True when another user-created Start Page shortcut may be added. */
     val canAddStartShortcut: Boolean = false,
+    /** Cached site icons by shortcut id; absent ids use the letter placeholder. */
+    val startShortcutIcons: Map<Long, Bitmap> = emptyMap(),
     val pendingCredentialSave: CredentialSavePrompt? = null,
 )
 
@@ -98,5 +101,6 @@ sealed interface BrowserAction {
     data object SavePendingCredential : BrowserAction
     data object DismissPendingCredential : BrowserAction
     data class AddStartShortcut(val title: String, val url: String) : BrowserAction
+    data class EditStartShortcut(val id: Long, val title: String, val url: String) : BrowserAction
     data class DeleteStartShortcut(val id: Long) : BrowserAction
 }
