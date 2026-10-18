@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -240,7 +241,19 @@ fun BrowserScreen(
                 WindowInsets.safeDrawing.only(
                     WindowInsetsSides.Horizontal + WindowInsetsSides.Top,
                 ),
-            ),
+            )
+            // The app is edge-to-edge, so on modern Android the window no
+            // longer resizes by itself when the keyboard opens
+            // (adjustResize is a no-op there), and GeckoView inside a
+            // Compose AndroidView does not reliably receive IME insets.
+            // Without this, the web view keeps its full height and a
+            // page's bottom input (chat composers, comment boxes) stays
+            // hidden under the keyboard and cannot be scrolled into view.
+            // imePadding shrinks the whole browser area by the keyboard
+            // height — the classic adjustResize behaviour — so the page
+            // viewport resizes and the focused input is visible above
+            // the keyboard. It also animates with the keyboard.
+            .imePadding(),
     ) {
         // With every tab closed the Start Page stands alone: no address
         // bar (there is no tab to navigate). It comes back as soon as a
