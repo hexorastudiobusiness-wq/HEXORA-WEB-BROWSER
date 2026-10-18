@@ -240,7 +240,12 @@ class MainActivity : ComponentActivity() {
             finished = true
             lifecycleScope.launch {
                 withContext(Dispatchers.IO) {
-                    listOf(cacheDir, codeCacheDir).forEach { dir ->
+                    // Gecko's HTTP/image caches are cleared by the engine via
+                    // StorageController (ALL_CACHES) before this runs. Here we
+                    // only drop Hexora's own temporary cache files. codeCacheDir
+                    // is intentionally left alone: the system manages it and
+                    // deleting it under a still-running process buys nothing.
+                    listOf(cacheDir).forEach { dir ->
                         dir.listFiles()?.forEach { it.deleteRecursively() }
                     }
                     externalCacheDirs.filterNotNull().forEach { dir ->
@@ -354,7 +359,6 @@ class MainActivity : ComponentActivity() {
         browserViewModel.completeFilePicker(requestId, uris)
         // Some devices return from the picker with a dead Gecko surface
         // (alive session, black page). Ask the UI to rebind the display.
-        browserViewModel.requestContentRefresh()
     }
 
     /** Gecko accept values may be MIME types or file extensions. */

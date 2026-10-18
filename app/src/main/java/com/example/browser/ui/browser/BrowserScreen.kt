@@ -98,7 +98,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -115,8 +114,6 @@ import com.example.browser.browser.PageMediaKind
 import com.example.browser.ui.components.AddressBar
 import com.example.browser.ui.components.ZoomSlider
 import com.example.browser.util.HomeScreenShortcut
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 
 /**
@@ -141,46 +138,6 @@ fun BrowserScreen(
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     var webContentView by remember { mutableStateOf<View?>(null) }
-
-    // Returning from an external activity (file picker, share sheet, ...)
-    // can leave the native surface black on some devices even though the
-    // session itself is alive. Rebind its display once the UI is back.
-    LaunchedEffect(viewModel) {
-        viewModel.contentRefreshRequests.collect {
-            delay(450)
-            val host = webContentView ?: return@collect
-            viewModel.uiState.value.activeSession?.refreshContentView(host)
-        }
-    }
-
-    // After a real background/foreground cycle, Android may have destroyed
-    // the underlying SurfaceView. Ask GeckoView for a new surface (without
-    // touching the session) instead of forcing the user to reload.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var resumeRefreshSignal by remember { mutableStateOf(0) }
-    DisposableEffect(lifecycleOwner) {
-        var wasPaused = false
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE -> wasPaused = true
-                Lifecycle.Event.ON_RESUME -> if (wasPaused) {
-                    wasPaused = false
-                    resumeRefreshSignal++
-                }
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    LaunchedEffect(resumeRefreshSignal) {
-        if (resumeRefreshSignal > 0) {
-            delay(250)
-            webContentView?.let { host ->
-                viewModel.uiState.value.activeSession?.refreshContentView(host)
-            }
-        }
-    }
 
     // System back: exit fullscreen first, then navigate web history, and
     // only when neither applies does it leave the app.

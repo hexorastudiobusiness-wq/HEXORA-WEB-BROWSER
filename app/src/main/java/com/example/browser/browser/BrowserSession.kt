@@ -160,7 +160,6 @@ interface BrowserSession {
      * display. Used to recover rendering after an external activity (such as
      * the system file picker) has torn down the underlying surface.
      */
-    fun refreshContentView(view: View)
 
     /** Detaches [view] from this session without closing the session. */
     fun releaseContentView(view: View)

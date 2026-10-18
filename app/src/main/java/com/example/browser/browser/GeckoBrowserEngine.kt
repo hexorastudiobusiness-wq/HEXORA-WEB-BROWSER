@@ -1,7 +1,9 @@
 package com.example.browser.browser
 
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.util.Log
 import android.util.SparseArray
 import android.view.View
@@ -50,27 +52,32 @@ class GeckoBrowserEngine(
 
     override var newSessionCreatedListener: ((BrowserSession, String?) -> Unit)? = null
 
-    private var runtimeOrNull: GeckoRuntime? = null
-
     @Volatile
     private var textZoomPercent: Int = 100
 
     @Volatile
     private var preferredColorScheme: Int = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
 
-    /** Lazily creates the process-wide runtime on first use (main thread). */
+    /**
+     * The Gecko runtime is a process-wide singleton: GeckoView throws if a
+     * second one is created in the same process. It must therefore outlive
+     * activities, ViewModels and engine instances (for example when the app
+     * is closed with finishAndRemoveTask() but Android keeps the process).
+     */
     internal val runtime: GeckoRuntime
-        get() = runtimeOrNull ?: GeckoRuntime.create(
-            appContext,
-            GeckoRuntimeSettings.Builder()
-                .javaScriptEnabled(javaScriptEnabled)
-                // Text zoom is user-controlled; font inflation must not
-                // fight it (setFontSizeFactor throws while it is enabled).
-                .automaticFontSizeAdjustment(false)
-                .fontSizeFactor(textZoomPercent / 100f)
-                .preferredColorScheme(preferredColorScheme)
-                .build(),
-        ).also { runtimeOrNull = it }
+        get() = synchronized(RUNTIME_LOCK) {
+            processRuntime ?: GeckoRuntime.create(
+                appContext,
+                GeckoRuntimeSettings.Builder()
+                    .javaScriptEnabled(javaScriptEnabled)
+                    // Text zoom is user-controlled; font inflation must not
+                    // fight it (setFontSizeFactor throws while enabled).
+                    .automaticFontSizeAdjustment(false)
+                    .fontSizeFactor(textZoomPercent / 100f)
+                    .preferredColorScheme(preferredColorScheme)
+                    .build(),
+            ).also { processRuntime = it }
+        }
 
     override fun createSession(config: BrowserSessionConfig): BrowserSession =
         createSessionInternal(config).also { it.ensureOpen() }
@@ -84,7 +91,7 @@ class GeckoBrowserEngine(
     override fun setTextZoomPercent(percent: Int) {
         textZoomPercent = percent.coerceIn(50, 200)
         // Takes effect on each session's next reload/navigation.
-        runtimeOrNull?.settings?.let { settings ->
+        processRuntime?.settings?.let { settings ->
             settings.setAutomaticFontSizeAdjustment(false)
             settings.setFontSizeFactor(textZoomPercent / 100f)
         }
@@ -100,23 +107,23 @@ class GeckoBrowserEngine(
         preferredColorScheme = geckoScheme
         // Gecko updates `prefers-color-scheme` for pages that provide a dark
         // theme. It does not algorithmically recolor sites without one.
-        runtimeOrNull?.settings?.setPreferredColorScheme(geckoScheme)
+        processRuntime?.settings?.setPreferredColorScheme(geckoScheme)
     }
 
     override fun clearSiteData(host: String) {
         if (host.isBlank()) return
-        runtimeOrNull?.storageController
+        processRuntime?.storageController
             ?.clearDataFromHost(host, StorageController.ClearFlags.ALL)
     }
 
     override fun clearBrowsingData() {
         // Only touch the runtime if it already exists; clearing data must
         // never boot the whole engine just to delete something.
-        runtimeOrNull?.storageController?.clearData(StorageController.ClearFlags.ALL)
+        processRuntime?.storageController?.clearData(StorageController.ClearFlags.ALL)
     }
 
     override fun clearCache(onComplete: () -> Unit) {
-        val controller = runtimeOrNull?.storageController
+        val controller = processRuntime?.storageController
         if (controller == null) {
             onComplete()
             return
@@ -132,9 +139,11 @@ class GeckoBrowserEngine(
     // used by Mozilla's own Android Components). A separate GeckoView per
     // tab leaves detached SurfaceViews behind and previously shown tabs can
     // return white/black even though their GeckoSession is still alive.
-    private var sharedContentView: GeckoView? = null
+    private var sharedContentView: HexoraGeckoView? = null
     private var sharedContentHost: FrameLayout? = null
     private var renderedSession: GeckoBrowserSession? = null
+    /** Session to re-attach automatically when the shared view returns. */
+    private var sessionToRestoreOnAttach: GeckoBrowserSession? = null
 
     internal fun obtainContentView(
         session: GeckoBrowserSession,
@@ -143,12 +152,19 @@ class GeckoBrowserEngine(
         val existing = sharedContentView
         val geckoView = if (existing == null || existing.context !== context) {
             existing?.let { oldView ->
-                (oldView.parent as? ViewGroup)?.removeView(oldView)
+                oldView.onViewDetached = null
+                oldView.onViewAttached = null
                 oldView.releaseSession()
+                (oldView.parent as? ViewGroup)?.removeView(oldView)
             }
             renderedSession?.contentView = null
             renderedSession = null
-            GeckoView(context).also { sharedContentView = it }
+            sessionToRestoreOnAttach = null
+            HexoraGeckoView(context).also { newView ->
+                newView.onViewDetached = { handleSharedViewDetached(newView) }
+                newView.onViewAttached = { handleSharedViewAttached(newView) }
+                sharedContentView = newView
+            }
         } else {
             existing
         }
@@ -177,42 +193,76 @@ class GeckoBrowserEngine(
             // session Autofill.Delegate. Disable GeckoView's Android
             // Autofill bridge so it does not replace that delegate.
             geckoView.setAutofillEnabled(false)
+            // Mozilla's GeckoEngineView covers the not-yet-painted surface
+            // with the app's background color so a tab switch or return can
+            // never flash GeckoView's default black surface.
+            geckoView.coverUntilFirstPaint(coverColor())
             if (geckoView.session != null) geckoView.releaseSession()
+            // setSession() throws for a closed session; reopen defensively
+            // (e.g. after a content-process crash) instead of crashing.
+            if (!session.geckoSession.isOpen) session.ensureOpen()
             geckoView.setSession(session.geckoSession)
             session.installAutofillDelegate()
         }
         renderedSession = session
+        sessionToRestoreOnAttach = session
         session.contentView = geckoView
     }
 
-    internal fun refreshContentView(session: GeckoBrowserSession, view: View) {
-        val geckoView = sharedContentView ?: return
-        val host = sharedContentHost ?: return
-        if (view !== host) return
-        attachToHost(geckoView, host)
-        if (geckoView.session !== session.geckoSession) {
-            bindContentView(session, host)
-            return
+    /**
+     * Called by [HexoraGeckoView] *before* GeckoView's own detach handling.
+     * The subclass releases the session itself (otherwise GeckoView closes
+     * it); here we only forget the stale view binding and remember which
+     * session must be rendered again when the view comes back. The session
+     * itself stays open and loaded: no reload, no state loss.
+     */
+    internal fun handleSharedViewDetached(view: HexoraGeckoView) {
+        if (view !== sharedContentView) return
+        if (renderedSession != null) {
+            sessionToRestoreOnAttach = renderedSession
         }
-        // Do not release/re-set the session here: GeckoView owns its display
-        // and doing so while Android is recreating the SurfaceView can leave
-        // a live session attached to a dead compositor (black page). The
-        // supported recovery is to ask GeckoView for a fresh surface while
-        // keeping the same session and page intact.
-        geckoView.requestNewSurface()
+        renderedSession?.contentView = null
+        renderedSession = null
+    }
+
+    internal fun handleSharedViewAttached(view: HexoraGeckoView) {
+        if (view !== sharedContentView) return
+        val host = sharedContentHost ?: return
+        if (view.parent !== host) return
+        val session = sessionToRestoreOnAttach ?: return
+        if (view.session === session.geckoSession) return
+        bindContentView(session, host)
     }
 
     internal fun releaseContentView(session: GeckoBrowserSession, view: View) {
         val geckoView = sharedContentView ?: return
         // The UI passes the host; session.close() passes the GeckoView.
         if (view !== sharedContentHost && view !== geckoView) return
-        (geckoView.parent as? ViewGroup)?.removeView(geckoView)
+        // Release BEFORE removing the view: removing a plain GeckoView with
+        // a session still attached lets its detach handling close that
+        // session. (Our subclass also guards this, but the explicit order
+        // keeps the lifecycle readable.)
         if (geckoView.session === session.geckoSession) {
             geckoView.releaseSession()
         }
+        (geckoView.parent as? ViewGroup)?.removeView(geckoView)
         sharedContentHost = null
         if (renderedSession === session) renderedSession = null
+        if (sessionToRestoreOnAttach === session) sessionToRestoreOnAttach = null
         if (session.contentView === geckoView) session.contentView = null
+    }
+
+    /** Background colour GeckoView paints until the page's first frame. */
+    private fun coverColor(): Int {
+        val night = when (preferredColorScheme) {
+            GeckoRuntimeSettings.COLOR_SCHEME_DARK -> true
+            GeckoRuntimeSettings.COLOR_SCHEME_LIGHT -> false
+            else ->
+                (appContext.resources.configuration.uiMode and
+                    Configuration.UI_MODE_NIGHT_MASK) ==
+                    Configuration.UI_MODE_NIGHT_YES
+        }
+        return if (night) COVER_DARK else Color.WHITE
     }
 
     private fun attachToHost(geckoView: GeckoView, host: FrameLayout) {
@@ -260,6 +310,59 @@ class GeckoBrowserEngine(
 
     internal fun notifyNewSessionCreated(session: BrowserSession, openerSessionId: String?) {
         newSessionCreatedListener?.invoke(session, openerSessionId)
+    }
+
+    private companion object {
+        private val RUNTIME_LOCK = Any()
+
+        @Volatile
+        private var processRuntime: GeckoRuntime? = null
+
+        /** Matches the app's dark background so resume never flashes black. */
+        private val COVER_DARK: Int = 0xFF100B0F.toInt()
+    }
+}
+
+/**
+ * The one shared content view.
+ *
+ * A plain [GeckoView] **closes its session** in `onDetachedFromWindow()`
+ * when any state was not explicitly saved. That is exactly what used to
+ * destroy pages on tab switches, navigation to the tab switcher and
+ * minimise/return: the GeckoSession died with the detach, and the next
+ * render had to reopen and reload it. Mozilla's own Android Components
+ * (`GeckoEngineView`) avoids this by releasing the session *before*
+ * GeckoView's detach handling runs; this subclass does the same thing for
+ * Hexora's single shared view. The engine re-attaches the same, still-open
+ * session when the view returns, so returning is a repaint, not a reload.
+ */
+internal class HexoraGeckoView(context: Context) : GeckoView(context) {
+
+    var onViewAttached: ((HexoraGeckoView) -> Unit)? = null
+    var onViewDetached: ((HexoraGeckoView) -> Unit)? = null
+
+    override fun onAttachedToWindow() {
+        // GeckoView would create and open a brand-new session here when it
+        // has none. Suppress that; the engine decides which tab renders.
+        val hadSession = session != null
+        super.onAttachedToWindow()
+        if (!hadSession) {
+            // That fresh session is not ours and never loaded anything:
+            // drop it so the engine can attach the tab's real session.
+            val fresh = session
+            if (fresh != null) {
+                releaseSession()
+                if (fresh.isOpen) fresh.close()
+            }
+        }
+        onViewAttached?.invoke(this)
+    }
+
+    override fun onDetachedFromWindow() {
+        // Release first: prevents GeckoView from closing the session.
+        if (session != null) releaseSession()
+        onViewDetached?.invoke(this)
+        super.onDetachedFromWindow()
     }
 }
 
@@ -458,9 +561,6 @@ internal class GeckoBrowserSession(
         engine.bindContentView(this, view)
     }
 
-    override fun refreshContentView(view: View) {
-        engine.refreshContentView(this, view)
-    }
 
     override fun releaseContentView(view: View) {
         engine.releaseContentView(this, view)

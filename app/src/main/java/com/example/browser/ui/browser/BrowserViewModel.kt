@@ -138,11 +138,6 @@ class BrowserViewModel(
 
     private val _pageContextMenu = MutableStateFlow<PageContextMenu?>(null)
 
-    private val _contentRefreshRequests =
-        MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val contentRefreshRequests: SharedFlow<Unit> =
-        _contentRefreshRequests.asSharedFlow()
-
     val settings: StateFlow<BrowserSettingsState> = settingsRepository.settings.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
@@ -273,11 +268,6 @@ class BrowserViewModel(
     /** Cancels the page's pending file-picker request. */
     fun cancelFilePicker(requestId: String) {
         pendingFilePickerSessions.remove(requestId)?.cancelFilePicker(requestId)
-    }
-
-    /** Asks the browser UI to force a fresh display bind for the web view. */
-    fun requestContentRefresh() {
-        _contentRefreshRequests.tryEmit(Unit)
     }
 
     init {
