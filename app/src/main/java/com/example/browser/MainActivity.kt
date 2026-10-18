@@ -8,6 +8,7 @@ import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -309,16 +310,16 @@ class MainActivity : ComponentActivity() {
             val mimeTypes = pickerMimeTypes(request.mimeTypes)
             val mediaType = when {
                 mimeTypes.all { it.startsWith("video/") } ->
-                    ActivityResultContracts.PickVisualMediaRequest.Builder()
+                    PickVisualMediaRequest.Builder()
                         .setMediaType(ActivityResultContracts.PickVisualMedia.VideoOnly)
                         .build()
 
                 mimeTypes.all { it.startsWith("image/") } ->
-                    ActivityResultContracts.PickVisualMediaRequest.Builder()
+                    PickVisualMediaRequest.Builder()
                         .setMediaType(ActivityResultContracts.PickVisualMedia.ImageOnly)
                         .build()
 
-                else -> ActivityResultContracts.PickVisualMediaRequest.Builder()
+                else -> PickVisualMediaRequest.Builder()
                     .setMediaType(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                     .build()
             }
