@@ -6,7 +6,8 @@ name: Build debug APK
 on:
   push:
     branches:
-      - arena/958b2d7a-hexora-web-browser
+      - main
+      - 'arena/**'
   workflow_dispatch:
 
 permissions:
