@@ -21,6 +21,9 @@ class DownloadRepository(private val dao: DownloadDao) {
         )
     }
 
+    suspend fun updateDownloadManagerId(id: Long, downloadManagerId: Long) =
+        dao.updateDownloadManagerId(id, downloadManagerId)
+
     suspend fun delete(id: Long) = dao.deleteById(id)
 
     suspend fun clearAll() = dao.clearAll()

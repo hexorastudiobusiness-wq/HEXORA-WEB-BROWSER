@@ -50,6 +50,9 @@ data class AutofillCredential(
     val password: String,
 )
 
+/** Kind of media found under a long press, if any. */
+enum class PageMediaKind { NONE, IMAGE, VIDEO, AUDIO }
+
 /** One-time events coming out of a session (not part of persistent state). */
 sealed interface BrowserSessionEvent {
     val sessionId: String
@@ -61,6 +64,8 @@ sealed interface BrowserSessionEvent {
         val fileName: String,
         val mimeType: String?,
         val isPrivate: Boolean = false,
+        /** Page that initiated the download; used only as a referer hint. */
+        val pageUrl: String? = null,
     ) : BrowserSessionEvent
 
     /** The page requested a file picker (for example an upload input). */
@@ -70,6 +75,15 @@ sealed interface BrowserSessionEvent {
         val allowMultiple: Boolean,
         val isFolder: Boolean,
         val mimeTypes: List<String>,
+    ) : BrowserSessionEvent
+
+    /** The user long-pressed a link or media element on the page. */
+    data class ContextMenuRequested(
+        override val sessionId: String,
+        val linkUri: String?,
+        val mediaUri: String?,
+        val mediaKind: PageMediaKind,
+        val label: String?,
     ) : BrowserSessionEvent
 
     /** A login form was submitted; the app may ask whether to save it. */
@@ -140,6 +154,13 @@ interface BrowserSession {
 
     /** Binds this session to the already-created shared content [view]. */
     fun renderContentView(view: View)
+
+    /**
+     * Forces the shared native view to release and re-acquire this session's
+     * display. Used to recover rendering after an external activity (such as
+     * the system file picker) has torn down the underlying surface.
+     */
+    fun refreshContentView(view: View)
 
     /** Detaches [view] from this session without closing the session. */
     fun releaseContentView(view: View)

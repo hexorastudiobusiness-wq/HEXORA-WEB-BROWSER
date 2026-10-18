@@ -173,6 +173,27 @@ class GeckoBrowserEngine(
         session.contentView = geckoView
     }
 
+    internal fun refreshContentView(session: GeckoBrowserSession, view: View) {
+        val geckoView = sharedContentView ?: return
+        val host = sharedContentHost ?: return
+        if (view !== host) return
+        attachToHost(geckoView, host)
+        if (geckoView.session === session.geckoSession) {
+            // Some devices lose the Gecko surface while an external picker
+            // activity is in front. A normal bind is a no-op for the same
+            // session, so explicitly release/re-set it to force Gecko to
+            // acquire a fresh display for the existing page.
+            geckoView.releaseSession()
+        } else if (geckoView.session != null) {
+            geckoView.releaseSession()
+        }
+        geckoView.setAutofillEnabled(false)
+        geckoView.setSession(session.geckoSession)
+        session.installAutofillDelegate()
+        renderedSession = session
+        session.contentView = geckoView
+    }
+
     internal fun releaseContentView(session: GeckoBrowserSession, view: View) {
         val geckoView = sharedContentView ?: return
         // The UI passes the host; session.close() passes the GeckoView.
@@ -427,6 +448,10 @@ internal class GeckoBrowserSession(
 
     override fun renderContentView(view: View) {
         engine.bindContentView(this, view)
+    }
+
+    override fun refreshContentView(view: View) {
+        engine.refreshContentView(this, view)
     }
 
     override fun releaseContentView(view: View) {
@@ -721,6 +746,33 @@ internal class GeckoBrowserSession(
             _state.update { it.copy(isPageFullscreen = fullScreen) }
         }
 
+        override fun onContextMenu(
+            session: GeckoSession,
+            screenX: Int,
+            screenY: Int,
+            element: GeckoSession.ContentDelegate.ContextElement,
+        ) {
+            val mediaKind = when (element.type) {
+                GeckoSession.ContentDelegate.ContextElement.TYPE_IMAGE ->
+                    PageMediaKind.IMAGE
+                GeckoSession.ContentDelegate.ContextElement.TYPE_VIDEO ->
+                    PageMediaKind.VIDEO
+                GeckoSession.ContentDelegate.ContextElement.TYPE_AUDIO ->
+                    PageMediaKind.AUDIO
+                else -> PageMediaKind.NONE
+            }
+            _events.tryEmit(
+                BrowserSessionEvent.ContextMenuRequested(
+                    sessionId = id,
+                    linkUri = element.linkUri?.takeIf { it.isNotBlank() },
+                    mediaUri = element.srcUri?.takeIf { it.isNotBlank() },
+                    mediaKind = mediaKind,
+                    label = element.title?.takeIf { it.isNotBlank() }
+                        ?: element.altText?.takeIf { it.isNotBlank() },
+                ),
+            )
+        }
+
         override fun onCloseRequest(session: GeckoSession) {
             _events.tryEmit(BrowserSessionEvent.CloseRequested(sessionId = id))
         }
@@ -745,6 +797,7 @@ internal class GeckoBrowserSession(
                     fileName = fileName,
                     mimeType = mimeType,
                     isPrivate = isPrivate,
+                    pageUrl = _state.value.url.takeIf { it.isNotBlank() },
                 ),
             )
             // The response body stream must always be closed, even when the

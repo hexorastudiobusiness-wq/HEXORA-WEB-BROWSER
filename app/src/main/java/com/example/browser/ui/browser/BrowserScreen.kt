@@ -1,13 +1,16 @@
 package com.example.browser.ui.browser
 
 import android.app.Activity
+import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
+import android.view.View
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -65,11 +68,14 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.text.KeyboardActions
@@ -89,11 +95,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -102,6 +110,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.browser.R
+import com.example.browser.browser.PageMediaKind
 import com.example.browser.ui.components.AddressBar
 import com.example.browser.ui.components.ZoomSlider
 import com.example.browser.util.HomeScreenShortcut
@@ -112,6 +121,7 @@ import kotlinx.coroutines.delay
  * address bar on top, engine view in the middle, navigation bar at the bottom.
  * In fullscreen the chrome hides and only a small exit button remains.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BrowserScreen(
     viewModel: BrowserViewModel,
@@ -126,6 +136,18 @@ fun BrowserScreen(
     val context = LocalContext.current
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var webContentView by remember { mutableStateOf<View?>(null) }
+
+    // Returning from an external activity (file picker, share sheet, ...)
+    // can leave the native surface black on some devices even though the
+    // session itself is alive. Rebind its display once the UI is back.
+    LaunchedEffect(viewModel) {
+        viewModel.contentRefreshRequests.collect {
+            delay(450)
+            val host = webContentView ?: return@collect
+            viewModel.uiState.value.activeSession?.refreshContentView(host)
+        }
+    }
 
     // System back: exit fullscreen first, then navigate web history, and
     // only when neither applies does it leave the app.
@@ -148,6 +170,10 @@ fun BrowserScreen(
             !state.showStartPage && !state.isFullscreen,
     ) {
         viewModel.onAction(BrowserAction.CloseTabAndReturnToOpener)
+    }
+
+    BackHandler(enabled = state.pageContextMenu != null) {
+        viewModel.onAction(BrowserAction.DismissPageContextMenu)
     }
 
     ImmersiveSystemBars(enabled = state.isFullscreen)
@@ -202,6 +228,13 @@ fun BrowserScreen(
         )
     }
 
+    state.pageContextMenu?.let { menu ->
+        PageContextMenuSheet(
+            menu = menu,
+            onAction = viewModel::onAction,
+        )
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -252,6 +285,7 @@ fun BrowserScreen(
             state = state,
             onAction = viewModel::onAction,
             onOpenUrl = { url -> viewModel.onAction(BrowserAction.OpenUrl(url)) },
+            onContentViewReady = { view -> webContentView = view },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
@@ -289,6 +323,7 @@ private fun BrowserPageContent(
     state: BrowserUiState,
     onAction: (BrowserAction) -> Unit,
     onOpenUrl: (String) -> Unit,
+    onContentViewReady: (View) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
@@ -316,8 +351,13 @@ private fun BrowserPageContent(
             // switched with renderContentView(), matching GeckoView's
             // intended session-swap model instead of swapping surfaces.
             AndroidView(
-                factory = { ctx -> session.createContentView(ctx) },
-                update = { view -> session.renderContentView(view) },
+                factory = { ctx ->
+                    session.createContentView(ctx).also(onContentViewReady)
+                },
+                update = { view ->
+                    onContentViewReady(view)
+                    session.renderContentView(view)
+                },
                 onRelease = { view -> session.releaseContentView(view) },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -375,6 +415,122 @@ private fun BrowserPageContent(
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PageContextMenuSheet(
+    menu: PageContextMenu,
+    onAction: (BrowserAction) -> Unit,
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+
+    fun dismiss() = onAction(BrowserAction.DismissPageContextMenu)
+
+    fun copy(url: String) {
+        clipboard.setText(AnnotatedString(url))
+        dismiss()
+    }
+
+    fun share(url: String) {
+        val intent = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_TEXT, url)
+        runCatching {
+            context.startActivity(Intent.createChooser(intent, null))
+        }
+        dismiss()
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = { dismiss() },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+        ) {
+            val heading = menu.title.ifBlank {
+                menu.linkUri ?: menu.mediaUri.orEmpty()
+            }
+            if (heading.isNotBlank()) {
+                Text(
+                    text = heading,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(bottom = 10.dp),
+                )
+            }
+
+            menu.linkUri?.let { link ->
+                ContextMenuItem(stringResource(R.string.context_open_link)) {
+                    onAction(BrowserAction.OpenContextMenuLink)
+                }
+                ContextMenuItem(stringResource(R.string.context_open_link_new_tab)) {
+                    onAction(BrowserAction.OpenContextMenuLinkInNewTab)
+                }
+                ContextMenuItem(stringResource(R.string.context_copy_link)) {
+                    copy(link)
+                }
+                ContextMenuItem(stringResource(R.string.context_share_link)) {
+                    share(link)
+                }
+                if (link.startsWith("http://", true) ||
+                    link.startsWith("https://", true)
+                ) {
+                    ContextMenuItem(stringResource(R.string.context_download_link)) {
+                        onAction(BrowserAction.DownloadContextMenuLink)
+                    }
+                }
+            }
+
+            menu.mediaUri?.let { media ->
+                val saveLabel = stringResource(
+                    when (menu.mediaKind) {
+                        PageMediaKind.IMAGE -> R.string.context_save_image
+                        PageMediaKind.VIDEO -> R.string.context_save_video
+                        PageMediaKind.AUDIO -> R.string.context_save_audio
+                        PageMediaKind.NONE -> R.string.context_save_media
+                    },
+                )
+                if (media.startsWith("http://", true) ||
+                    media.startsWith("https://", true)
+                ) {
+                    ContextMenuItem(saveLabel) {
+                        onAction(BrowserAction.DownloadContextMenuMedia)
+                    }
+                }
+                ContextMenuItem(stringResource(R.string.context_open_media_new_tab)) {
+                    onAction(BrowserAction.OpenContextMenuMediaInNewTab)
+                }
+                ContextMenuItem(stringResource(R.string.context_copy_media_address)) {
+                    copy(media)
+                }
+                ContextMenuItem(stringResource(R.string.context_share_media_address)) {
+                    share(media)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContextMenuItem(
+    label: String,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.bodyLarge,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 13.dp),
+    )
 }
 
 @Composable

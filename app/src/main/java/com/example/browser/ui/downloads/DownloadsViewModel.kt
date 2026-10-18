@@ -77,12 +77,43 @@ class DownloadsViewModel(
         }
     }
 
-    fun delete(id: Long) {
-        viewModelScope.launch { repository.delete(id) }
+    fun delete(entry: DownloadEntity) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                downloadHandler.cancel(entry.downloadManagerId)
+            }
+            repository.delete(entry.id)
+        }
     }
 
     fun clearAll() {
-        viewModelScope.launch { repository.clearAll() }
+        val entries = downloads.value
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                entries.forEach { downloadHandler.cancel(it.downloadManagerId) }
+            }
+            repository.clearAll()
+        }
+    }
+
+    /** Cancels a stuck/failed transfer and enqueues it again from scratch. */
+    fun retry(entry: DownloadEntity) {
+        viewModelScope.launch {
+            val newId = withContext(Dispatchers.IO) {
+                downloadHandler.cancel(entry.downloadManagerId)
+                downloadHandler.download(
+                    url = entry.url,
+                    fileName = entry.fileName,
+                    mimeType = entry.mimeType,
+                )
+            }
+            if (newId >= 0) {
+                repository.updateDownloadManagerId(entry.id, newId)
+                // Force the next poll to describe the new transfer, not the
+                // cancelled one still keyed by the old manager id.
+                _progress.value = _progress.value - entry.downloadManagerId
+            }
+        }
     }
 
     companion object {

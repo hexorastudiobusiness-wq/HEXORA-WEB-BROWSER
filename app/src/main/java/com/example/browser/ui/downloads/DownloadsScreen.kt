@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.compose.foundation.clickable
 import android.text.format.Formatter
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -103,7 +105,8 @@ fun DownloadsScreen(
                                 runCatching { context.startActivity(intent) }
                             }
                         },
-                        onDelete = { viewModel.delete(entry.id) },
+                        onDelete = { viewModel.delete(entry) },
+                        onRetry = { viewModel.retry(entry) },
                     )
                 }
             }
@@ -117,6 +120,7 @@ private fun DownloadRow(
     progress: DownloadProgressUi,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
+    onRetry: () -> Unit,
 ) {
     val context = LocalContext.current
     val status = progress.status
@@ -194,11 +198,24 @@ private fun DownloadRow(
             }
         },
         trailingContent = {
-            IconButton(onClick = onDelete) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = stringResource(R.string.action_remove),
-                )
+            Row {
+                if (status == DownloadStatus.FAILED ||
+                    status == DownloadStatus.PENDING ||
+                    status == DownloadStatus.UNKNOWN
+                ) {
+                    IconButton(onClick = onRetry) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = stringResource(R.string.action_retry),
+                        )
+                    }
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = stringResource(R.string.action_remove),
+                    )
+                }
             }
         },
         modifier = if (status == DownloadStatus.COMPLETED) {

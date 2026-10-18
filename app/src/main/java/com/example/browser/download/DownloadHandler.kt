@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import android.util.Log
+import java.io.File
 
 /**
  * Download layer (ARCHITECTURE.md §11).
@@ -21,7 +22,12 @@ class DownloadHandler(context: Context) {
         appContext.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
 
     /** @return the DownloadManager id, or -1 when enqueueing failed. */
-    fun download(url: String, fileName: String, mimeType: String?): Long {
+    fun download(
+        url: String,
+        fileName: String,
+        mimeType: String?,
+        pageUrl: String? = null,
+    ): Long {
         if (!url.startsWith("https://", ignoreCase = true) &&
             !url.startsWith("http://", ignoreCase = true)
         ) {
@@ -30,17 +36,38 @@ class DownloadHandler(context: Context) {
             Log.w(TAG, "Unsupported download URL scheme")
             return -1L
         }
+        val destinationName = uniqueDestinationName(DownloadFileName.sanitize(fileName))
         val request = DownloadManager.Request(Uri.parse(url))
-            .setTitle(fileName)
+            .setTitle(destinationName)
             // Do not expose the (possibly signed/private) URL in the system
             // notification's description.
-            .setDescription(fileName)
+            .setDescription(destinationName)
             .setMimeType(mimeType)
+            .setAllowedNetworkTypes(
+                DownloadManager.Request.NETWORK_WIFI or DownloadManager.Request.NETWORK_MOBILE,
+            )
             .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+            .setRequiresCharging(false)
+            .setRequiresDeviceIdle(false)
             .setNotificationVisibility(
                 DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
             )
-            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            .setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_DOWNLOADS,
+                destinationName,
+            )
+        // Several real servers reject DownloadManager's bare default request
+        // or require the page as referer. These ordinary browser headers make
+        // the re-fetch behave much more like the tap that initiated it.
+        System.getProperty("http.agent")
+            ?.takeIf { it.isNotBlank() }
+            ?.let { request.addRequestHeader("User-Agent", it) }
+        pageUrl
+            ?.takeIf {
+                it.startsWith("https://", true) || it.startsWith("http://", true)
+            }
+            ?.let { request.addRequestHeader("Referer", it) }
         return runCatching { downloadManager.enqueue(request) }
             .onFailure { Log.e(TAG, "Failed to enqueue download", it) }
             .getOrDefault(-1L)
@@ -93,6 +120,38 @@ class DownloadHandler(context: Context) {
                     )
                 } ?: Progress(status = null)
         }.getOrDefault(Progress(status = null))
+    }
+
+    /** Cancels and removes a DownloadManager transfer, if it exists. */
+    fun cancel(downloadId: Long) {
+        if (downloadId < 0) return
+        runCatching { downloadManager.remove(downloadId) }
+    }
+
+    /**
+     * DownloadManager refuses destinations that already exist. Pick the
+     * first free "name (n).ext" variant in the public Downloads folder.
+     */
+    private fun uniqueDestinationName(fileName: String): String {
+        val dir = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOWNLOADS,
+        )
+        if (!File(dir, fileName).exists()) return fileName
+        val extension = fileName.substringAfterLast('.', missingDelimiterValue = "")
+        val base = if (extension.isBlank()) {
+            fileName
+        } else {
+            fileName.removeSuffix(".$extension")
+        }
+        for (index in 1..99) {
+            val candidate = if (extension.isBlank()) {
+                "$base ($index)"
+            } else {
+                "$base ($index).$extension"
+            }
+            if (!File(dir, candidate).exists()) return candidate
+        }
+        return fileName
     }
 
     /** Content URI of the finished file so it can be opened with other apps. */

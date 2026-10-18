@@ -9,6 +9,7 @@ import com.example.browser.browser.BrowserSession
 import com.example.browser.browser.BrowserSessionConfig
 import com.example.browser.browser.BrowserSessionEvent
 import com.example.browser.browser.AutofillCredential
+import com.example.browser.browser.PageMediaKind
 import com.example.browser.browser.WebColorScheme
 import com.example.browser.browser.SavedTabState
 import com.example.browser.browser.SessionPageState
@@ -20,6 +21,7 @@ import com.example.browser.data.repository.StartShortcutRepository
 import com.example.browser.data.settings.BrowserSettingsState
 import com.example.browser.data.settings.SettingsRepository
 import com.example.browser.data.settings.ThemeMode
+import com.example.browser.download.DownloadFileName
 import com.example.browser.util.CredentialOrigin
 import com.example.browser.util.ShortcutIconStore
 import com.example.browser.util.TabThumbnailStore
@@ -134,6 +136,13 @@ class BrowserViewModel(
     private val pendingFilePickerSessions =
         mutableMapOf<String, BrowserSession>()
 
+    private val _pageContextMenu = MutableStateFlow<PageContextMenu?>(null)
+
+    private val _contentRefreshRequests =
+        MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val contentRefreshRequests: SharedFlow<Unit> =
+        _contentRefreshRequests.asSharedFlow()
+
     val settings: StateFlow<BrowserSettingsState> = settingsRepository.settings.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
@@ -154,8 +163,9 @@ class BrowserViewModel(
         _userFullscreen,
         _recentlyClosed,
         _pendingCredentialPrompt,
-    ) { find, fs, closed, prompt ->
-        ChromeSlice(find, fs, closed.size, prompt)
+        _pageContextMenu,
+    ) { find, fs, closed, prompt, contextMenu ->
+        ChromeSlice(find, fs, closed.size, prompt, contextMenu)
     }
 
     private val startSlice = combine(
@@ -244,6 +254,7 @@ class BrowserViewModel(
                 start.icons
             },
             pendingCredentialSave = start.chrome.pendingCredentialSave,
+            pageContextMenu = start.chrome.pageContextMenu,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowserUiState())
 
@@ -262,6 +273,16 @@ class BrowserViewModel(
     /** Cancels the page's pending file-picker request. */
     fun cancelFilePicker(requestId: String) {
         pendingFilePickerSessions.remove(requestId)?.cancelFilePicker(requestId)
+    }
+
+    /** Asks the browser UI to force a fresh display bind for the web view. */
+    fun requestContentRefresh() {
+        _contentRefreshRequests.tryEmit(Unit)
+    }
+
+    /** Pauses/resumes the visible session with the activity window. */
+    fun setWindowActive(active: Boolean) {
+        activeSession()?.setActive(active)
     }
 
     init {
@@ -438,6 +459,14 @@ class BrowserViewModel(
             BrowserAction.UndoCloseAllTabs -> undoCloseAllTabs()
             BrowserAction.SavePendingCredential -> savePendingCredential()
             BrowserAction.DismissPendingCredential -> dismissPendingCredential()
+            BrowserAction.DismissPageContextMenu ->
+                _pageContextMenu.value = null
+            BrowserAction.OpenContextMenuLink -> openContextMenuLink(newTab = false)
+            BrowserAction.OpenContextMenuLinkInNewTab ->
+                openContextMenuLink(newTab = true)
+            BrowserAction.OpenContextMenuMediaInNewTab -> openContextMenuMedia()
+            BrowserAction.DownloadContextMenuLink -> downloadContextMenuTarget(link = true)
+            BrowserAction.DownloadContextMenuMedia -> downloadContextMenuTarget(link = false)
             is BrowserAction.AddStartShortcut -> {
                 viewModelScope.launch {
                     val resolvedUrl = UrlUtils.resolveInput(
@@ -557,6 +586,89 @@ class BrowserViewModel(
         setShowStartPage(entry, false)
         if (entry.session == null) restoreTab(entry)
         entry.session?.loadUrl(url)
+    }
+
+    private fun openContextMenuLink(newTab: Boolean) {
+        val menu = _pageContextMenu.value ?: return
+        val url = menu.linkUri ?: return
+        _pageContextMenu.value = null
+        val entry = activeEntry() ?: return
+        if (newTab) {
+            createTab(
+                url = url,
+                isPrivate = entry.isPrivate,
+                desktopMode = entry.desktopMode,
+            )
+        } else {
+            setShowStartPage(entry, false)
+            if (entry.session == null) restoreTab(entry)
+            entry.session?.loadUrl(url)
+        }
+    }
+
+    private fun openContextMenuMedia() {
+        val menu = _pageContextMenu.value ?: return
+        val url = menu.mediaUri ?: return
+        _pageContextMenu.value = null
+        val entry = activeEntry() ?: return
+        createTab(
+            url = url,
+            isPrivate = entry.isPrivate,
+            desktopMode = entry.desktopMode,
+        )
+    }
+
+    private fun downloadContextMenuTarget(link: Boolean) {
+        val menu = _pageContextMenu.value ?: return
+        val entry = activeEntry() ?: return
+        val url = if (link) menu.linkUri else menu.mediaUri
+        _pageContextMenu.value = null
+        if (url.isNullOrBlank() || !UrlUtils.isHttpUrl(url)) return
+        val kind = if (link) PageMediaKind.NONE else menu.mediaKind
+        _downloadEvents.tryEmit(
+            BrowserSessionEvent.DownloadRequested(
+                sessionId = entry.session?.id ?: return,
+                url = url,
+                fileName = downloadFileName(url, kind),
+                mimeType = downloadMimeType(url, kind),
+                isPrivate = entry.isPrivate,
+                pageUrl = entry.lastUrl.takeIf { it.isNotBlank() },
+            ),
+        )
+    }
+
+    private fun downloadFileName(url: String, kind: PageMediaKind): String {
+        val fromUrl = DownloadFileName.fromUrl(url)
+        if (fromUrl.contains('.')) return fromUrl
+        val extension = when (kind) {
+            PageMediaKind.IMAGE -> ".jpg"
+            PageMediaKind.VIDEO -> ".mp4"
+            PageMediaKind.AUDIO -> ".mp3"
+            PageMediaKind.NONE -> ""
+        }
+        return fromUrl + extension
+    }
+
+    private fun downloadMimeType(url: String, kind: PageMediaKind): String? {
+        val extension = url.substringBefore('?').substringAfterLast('.', "")
+            .lowercase()
+        return when (extension) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            "mp4" -> "video/mp4"
+            "webm" -> "video/webm"
+            "mp3" -> "audio/mpeg"
+            "pdf" -> "application/pdf"
+            "zip" -> "application/zip"
+            else -> when (kind) {
+                PageMediaKind.IMAGE -> "image/jpeg"
+                PageMediaKind.VIDEO -> "video/mp4"
+                PageMediaKind.AUDIO -> "audio/mpeg"
+                PageMediaKind.NONE -> null
+            }
+        }
     }
 
     /** Handles ACTION_VIEW intents; safe to call before the engine is ready. */
@@ -794,6 +906,7 @@ class BrowserViewModel(
             // an extra full-surface copy without improving the preview much.
         }
         _findVisible.value = false
+        _pageContextMenu.value = null
         _activeTabId.value = tabId
         touchLru(tabId)
         entry(tabId)?.session?.setActive(true)
@@ -887,6 +1000,16 @@ class BrowserViewModel(
                                     mimeTypes = event.mimeTypes,
                                 ),
                             )
+                        }
+                        is BrowserSessionEvent.ContextMenuRequested -> {
+                            if (entry.tabId == _activeTabId.value) {
+                                _pageContextMenu.value = PageContextMenu(
+                                    title = event.label.orEmpty(),
+                                    linkUri = event.linkUri,
+                                    mediaUri = event.mediaUri,
+                                    mediaKind = event.mediaKind,
+                                )
+                            }
                         }
                         is BrowserSessionEvent.CredentialSubmitted ->
                             handleCredentialSubmitted(entry, event)
@@ -1025,6 +1148,7 @@ class BrowserViewModel(
         val userFullscreen: Boolean,
         val recentlyClosedCount: Int,
         val pendingCredentialSave: CredentialSavePrompt?,
+        val pageContextMenu: PageContextMenu?,
     )
 
     private data class StartSlice(

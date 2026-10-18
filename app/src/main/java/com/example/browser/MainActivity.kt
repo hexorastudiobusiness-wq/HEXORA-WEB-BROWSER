@@ -82,14 +82,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private var pendingFilePickerRequestId: String? = null
+    private var pendingFilePickerMultiple: Boolean = false
 
-    private val singleFilePicker = registerForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri -> finishFilePicker(listOfNotNull(uri)) }
-
-    private val multipleFilePicker = registerForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris -> finishFilePicker(uris) }
+    // ACTION_GET_CONTENT (wrapped in a chooser below) lets the user pick
+    // Files, Gallery/Photos, Drive or another installed picker app instead
+    // of always being forced into the system file manager.
+    private val filePicker = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result -> finishFilePicker(extractPickedUris(result.data)) }
 
     private val folderPicker = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -162,6 +162,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Gecko sessions are active only while the window is in front. This
+        // also gives Gecko a clean stop/start edge when returning from an
+        // external picker instead of reviving a torn-down surface.
+        browserViewModel.setWindowActive(true)
+    }
+
+    override fun onStop() {
+        browserViewModel.setWindowActive(false)
+        super.onStop()
+    }
+
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         // Memory pressure: release every inactive tab's engine session.
@@ -195,18 +208,16 @@ class MainActivity : ComponentActivity() {
                         return@collect
                     }
                     pendingFilePickerRequestId = request.requestId
+                    pendingFilePickerMultiple = request.allowMultiple
                     runCatching {
-                        when {
-                            request.isFolder -> folderPicker.launch(null)
-                            request.allowMultiple -> multipleFilePicker.launch(
-                                pickerMimeTypes(request.mimeTypes),
-                            )
-                            else -> singleFilePicker.launch(
-                                pickerMimeTypes(request.mimeTypes),
-                            )
+                        if (request.isFolder) {
+                            folderPicker.launch(null)
+                        } else {
+                            filePicker.launch(buildFileChooserIntent(request))
                         }
                     }.onFailure {
                         pendingFilePickerRequestId = null
+                        pendingFilePickerMultiple = false
                         browserViewModel.cancelFilePicker(request.requestId)
                     }
                 }
@@ -214,9 +225,36 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun buildFileChooserIntent(
+        request: BrowserViewModel.FilePickerRequest,
+    ): Intent {
+        val mimeTypes = pickerMimeTypes(request.mimeTypes)
+        val intent = Intent(Intent.ACTION_GET_CONTENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType(mimeTypes.first())
+            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, request.allowMultiple)
+        if (mimeTypes.size > 1) {
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+        }
+        return Intent.createChooser(intent, getString(R.string.file_picker_title))
+    }
+
+    private fun extractPickedUris(data: Intent?): List<Uri> {
+        if (data == null) return emptyList()
+        val uris = mutableListOf<Uri>()
+        data.clipData?.let { clip ->
+            for (index in 0 until clip.itemCount) {
+                clip.getItemAt(index)?.uri?.let { uris += it }
+            }
+        }
+        if (uris.isEmpty()) data.data?.let { uris += it }
+        return if (pendingFilePickerMultiple) uris else uris.take(1)
+    }
+
     private fun finishFilePicker(uris: List<Uri>) {
         val requestId = pendingFilePickerRequestId ?: return
         pendingFilePickerRequestId = null
+        pendingFilePickerMultiple = false
         uris.forEach { uri ->
             runCatching {
                 contentResolver.takePersistableUriPermission(
@@ -226,6 +264,9 @@ class MainActivity : ComponentActivity() {
             }
         }
         browserViewModel.completeFilePicker(requestId, uris)
+        // Some devices return from the picker with a dead Gecko surface
+        // (alive session, black page). Ask the UI to rebind the display.
+        browserViewModel.requestContentRefresh()
     }
 
     /** Gecko accept values may be MIME types or file extensions. */
@@ -252,6 +293,7 @@ class MainActivity : ComponentActivity() {
                         url = event.url,
                         fileName = event.fileName,
                         mimeType = event.mimeType,
+                        pageUrl = event.pageUrl,
                     )
                     val started = downloadId >= 0
                     if (started && !event.isPrivate) {

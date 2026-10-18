@@ -3,6 +3,7 @@ package com.example.browser.ui.browser
 import android.graphics.Bitmap
 import com.example.browser.browser.BrowserSession
 import com.example.browser.browser.FindResultUi
+import com.example.browser.browser.PageMediaKind
 
 /** UI-ready representation of one open tab (ARCHITECTURE.md §14). */
 data class TabUiItem(
@@ -27,6 +28,14 @@ data class CredentialSavePrompt(
     val origin: String,
     val username: String,
     val isUpdate: Boolean,
+)
+
+/** A link/media long-press menu requested by the current page. */
+data class PageContextMenu(
+    val title: String = "",
+    val linkUri: String? = null,
+    val mediaUri: String? = null,
+    val mediaKind: PageMediaKind = PageMediaKind.NONE,
 )
 
 /** Everything [BrowserScreen] needs to render. Produced by [BrowserViewModel]. */
@@ -70,6 +79,8 @@ data class BrowserUiState(
     /** Cached site icons by shortcut id; absent ids use the letter placeholder. */
     val startShortcutIcons: Map<Long, Bitmap> = emptyMap(),
     val pendingCredentialSave: CredentialSavePrompt? = null,
+    /** Long-press menu for a link/image/video/audio on the page, if open. */
+    val pageContextMenu: PageContextMenu? = null,
 )
 
 /** Explicit user actions sent from the UI to [BrowserViewModel] (ARCHITECTURE.md §14). */
@@ -104,6 +115,12 @@ sealed interface BrowserAction {
     data object UndoCloseAllTabs : BrowserAction
     data object SavePendingCredential : BrowserAction
     data object DismissPendingCredential : BrowserAction
+    data object DismissPageContextMenu : BrowserAction
+    data object OpenContextMenuLink : BrowserAction
+    data object OpenContextMenuLinkInNewTab : BrowserAction
+    data object OpenContextMenuMediaInNewTab : BrowserAction
+    data object DownloadContextMenuLink : BrowserAction
+    data object DownloadContextMenuMedia : BrowserAction
     data class AddStartShortcut(val title: String, val url: String) : BrowserAction
     data class EditStartShortcut(val id: Long, val title: String, val url: String) : BrowserAction
     data class DeleteStartShortcut(val id: Long) : BrowserAction
