@@ -88,6 +88,9 @@ jobs:
         run: rm -f "$RUNNER_TEMP/hexora-release.p12"
 
       - name: Upload signed release files as workflow artifact
+        # Artifact storage can be quota-limited; the GitHub Release below is
+        # the canonical distribution, so do not fail publishing on quota.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: hexora-release-signed
