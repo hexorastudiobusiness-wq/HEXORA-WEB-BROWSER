@@ -118,6 +118,8 @@ sealed interface BrowserAction {
     data object DismissPageContextMenu : BrowserAction
     data object OpenContextMenuLink : BrowserAction
     data object OpenContextMenuLinkInNewTab : BrowserAction
+    data object OpenContextMenuLinkInPrivateTab : BrowserAction
+    data object OpenContextMenuMedia : BrowserAction
     data object OpenContextMenuMediaInNewTab : BrowserAction
     data object DownloadContextMenuLink : BrowserAction
     data object DownloadContextMenuMedia : BrowserAction

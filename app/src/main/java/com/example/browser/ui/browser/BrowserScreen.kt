@@ -98,6 +98,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -114,6 +115,8 @@ import com.example.browser.browser.PageMediaKind
 import com.example.browser.ui.components.AddressBar
 import com.example.browser.ui.components.ZoomSlider
 import com.example.browser.util.HomeScreenShortcut
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 
 /**
@@ -130,6 +133,7 @@ fun BrowserScreen(
     onOpenHistory: () -> Unit,
     onOpenDownloads: () -> Unit,
     onOpenSettings: () -> Unit,
+    onClearCacheAndExit: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -146,6 +150,35 @@ fun BrowserScreen(
             delay(450)
             val host = webContentView ?: return@collect
             viewModel.uiState.value.activeSession?.refreshContentView(host)
+        }
+    }
+
+    // After a real background/foreground cycle, Android may have destroyed
+    // the underlying SurfaceView. Ask GeckoView for a new surface (without
+    // touching the session) instead of forcing the user to reload.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var resumeRefreshSignal by remember { mutableStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        var wasPaused = false
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> wasPaused = true
+                Lifecycle.Event.ON_RESUME -> if (wasPaused) {
+                    wasPaused = false
+                    resumeRefreshSignal++
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(resumeRefreshSignal) {
+        if (resumeRefreshSignal > 0) {
+            delay(250)
+            webContentView?.let { host ->
+                viewModel.uiState.value.activeSession?.refreshContentView(host)
+            }
         }
     }
 
@@ -231,6 +264,7 @@ fun BrowserScreen(
     state.pageContextMenu?.let { menu ->
         PageContextMenuSheet(
             menu = menu,
+            isPrivate = state.isPrivate,
             onAction = viewModel::onAction,
         )
     }
@@ -301,6 +335,7 @@ fun BrowserScreen(
                 onOpenHistory = onOpenHistory,
                 onOpenDownloads = onOpenDownloads,
                 onOpenSettings = onOpenSettings,
+                onClearCacheAndExit = onClearCacheAndExit,
                 onAddToHomeScreen = {
                     val added = HomeScreenShortcut.add(context, state.pageTitle, state.currentUrl)
                     Toast.makeText(
@@ -421,6 +456,7 @@ private fun BrowserPageContent(
 @Composable
 private fun PageContextMenuSheet(
     menu: PageContextMenu,
+    isPrivate: Boolean,
     onAction: (BrowserAction) -> Unit,
 ) {
     val context = LocalContext.current
@@ -473,6 +509,11 @@ private fun PageContextMenuSheet(
                 ContextMenuItem(stringResource(R.string.context_open_link_new_tab)) {
                     onAction(BrowserAction.OpenContextMenuLinkInNewTab)
                 }
+                if (!isPrivate) {
+                    ContextMenuItem(stringResource(R.string.context_open_link_private_tab)) {
+                        onAction(BrowserAction.OpenContextMenuLinkInPrivateTab)
+                    }
+                }
                 ContextMenuItem(stringResource(R.string.context_copy_link)) {
                     copy(link)
                 }
@@ -503,6 +544,9 @@ private fun PageContextMenuSheet(
                     ContextMenuItem(saveLabel) {
                         onAction(BrowserAction.DownloadContextMenuMedia)
                     }
+                }
+                ContextMenuItem(stringResource(R.string.context_open_media)) {
+                    onAction(BrowserAction.OpenContextMenuMedia)
                 }
                 ContextMenuItem(stringResource(R.string.context_open_media_new_tab)) {
                     onAction(BrowserAction.OpenContextMenuMediaInNewTab)
@@ -1070,6 +1114,7 @@ private fun BrowserBottomBar(
     onOpenHistory: () -> Unit,
     onOpenDownloads: () -> Unit,
     onOpenSettings: () -> Unit,
+    onClearCacheAndExit: () -> Unit,
     onAddToHomeScreen: () -> Unit,
     onSiteDataCleared: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1310,6 +1355,14 @@ private fun BrowserBottomBar(
                         onClick = {
                             menuExpanded = false
                             onAction(BrowserAction.ClearBrowsingData)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_clear_cache_and_close)) },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onClearCacheAndExit()
                         },
                     )
                 }

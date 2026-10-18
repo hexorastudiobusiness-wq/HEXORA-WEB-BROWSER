@@ -280,11 +280,6 @@ class BrowserViewModel(
         _contentRefreshRequests.tryEmit(Unit)
     }
 
-    /** Pauses/resumes the visible session with the activity window. */
-    fun setWindowActive(active: Boolean) {
-        activeSession()?.setActive(active)
-    }
-
     init {
         // Tabs are not restored after process death, so screenshots from a
         // previous process would only be orphaned private page images.
@@ -464,7 +459,11 @@ class BrowserViewModel(
             BrowserAction.OpenContextMenuLink -> openContextMenuLink(newTab = false)
             BrowserAction.OpenContextMenuLinkInNewTab ->
                 openContextMenuLink(newTab = true)
-            BrowserAction.OpenContextMenuMediaInNewTab -> openContextMenuMedia()
+            BrowserAction.OpenContextMenuLinkInPrivateTab ->
+                openContextMenuLink(newTab = true, forcePrivate = true)
+            BrowserAction.OpenContextMenuMedia -> openContextMenuMedia(newTab = false)
+            BrowserAction.OpenContextMenuMediaInNewTab ->
+                openContextMenuMedia(newTab = true)
             BrowserAction.DownloadContextMenuLink -> downloadContextMenuTarget(link = true)
             BrowserAction.DownloadContextMenuMedia -> downloadContextMenuTarget(link = false)
             is BrowserAction.AddStartShortcut -> {
@@ -588,7 +587,7 @@ class BrowserViewModel(
         entry.session?.loadUrl(url)
     }
 
-    private fun openContextMenuLink(newTab: Boolean) {
+    private fun openContextMenuLink(newTab: Boolean, forcePrivate: Boolean = false) {
         val menu = _pageContextMenu.value ?: return
         val url = menu.linkUri ?: return
         _pageContextMenu.value = null
@@ -596,8 +595,9 @@ class BrowserViewModel(
         if (newTab) {
             createTab(
                 url = url,
-                isPrivate = entry.isPrivate,
+                isPrivate = entry.isPrivate || forcePrivate,
                 desktopMode = entry.desktopMode,
+                openerTabId = entry.tabId,
             )
         } else {
             setShowStartPage(entry, false)
@@ -606,16 +606,23 @@ class BrowserViewModel(
         }
     }
 
-    private fun openContextMenuMedia() {
+    private fun openContextMenuMedia(newTab: Boolean) {
         val menu = _pageContextMenu.value ?: return
         val url = menu.mediaUri ?: return
         _pageContextMenu.value = null
         val entry = activeEntry() ?: return
-        createTab(
-            url = url,
-            isPrivate = entry.isPrivate,
-            desktopMode = entry.desktopMode,
-        )
+        if (newTab) {
+            createTab(
+                url = url,
+                isPrivate = entry.isPrivate,
+                desktopMode = entry.desktopMode,
+                openerTabId = entry.tabId,
+            )
+        } else {
+            setShowStartPage(entry, false)
+            if (entry.session == null) restoreTab(entry)
+            entry.session?.loadUrl(url)
+        }
     }
 
     private fun downloadContextMenuTarget(link: Boolean) {
@@ -683,6 +690,16 @@ class BrowserViewModel(
     fun clearBrowsingData() {
         engine?.clearBrowsingData()
         viewModelScope.launch { historyRepository.clearAll() }
+    }
+
+    /** Clears only web cache; [onComplete] runs even if the engine is cold. */
+    fun clearCache(onComplete: () -> Unit) {
+        val currentEngine = engine
+        if (currentEngine == null) {
+            onComplete()
+        } else {
+            currentEngine.clearCache(onComplete)
+        }
     }
 
     private fun showStartPage() {
@@ -841,6 +858,7 @@ class BrowserViewModel(
         desktopMode: Boolean,
         makeActive: Boolean = true,
         startPage: Boolean = false,
+        openerTabId: String? = null,
     ): String? {
         val currentEngine = engine ?: return null
         val session = try {
@@ -858,6 +876,7 @@ class BrowserViewModel(
             isPrivate = isPrivate,
             desktopMode = desktopMode,
             showStartPage = startPage || url.isNullOrBlank(),
+            openerTabId = openerTabId,
         )
         _tabs.update { it + entry }
         touchLru(entry.tabId)
@@ -899,17 +918,14 @@ class BrowserViewModel(
     private fun activateTab(tabId: String) {
         val previousId = _activeTabId.value
         if (previousId == tabId) return
-        if (previousId != null) {
-            entry(previousId)?.session?.setActive(false)
-            // A fresh thumbnail is already captured when each page finishes
-            // loading. Capturing pixels again here would block the switch on
-            // an extra full-surface copy without improving the preview much.
-        }
+        // GeckoView itself marks the rendered session active/inactive as its
+        // surface is acquired/released during bindContentView(). Toggling
+        // sessions manually here raced that surface lifecycle and could leave
+        // a previously shown tab with a dead compositor (black until reload).
         _findVisible.value = false
         _pageContextMenu.value = null
         _activeTabId.value = tabId
         touchLru(tabId)
-        entry(tabId)?.session?.setActive(true)
     }
 
     /** Suspends least-recently-used inactive tabs beyond the live budget. */

@@ -115,6 +115,18 @@ class GeckoBrowserEngine(
         runtimeOrNull?.storageController?.clearData(StorageController.ClearFlags.ALL)
     }
 
+    override fun clearCache(onComplete: () -> Unit) {
+        val controller = runtimeOrNull?.storageController
+        if (controller == null) {
+            onComplete()
+            return
+        }
+        controller.clearData(StorageController.ClearFlags.ALL_CACHES).accept(
+            { onComplete() },
+            { onComplete() },
+        )
+    }
+
     // GeckoView is designed to paint sessions through one attached view:
     // tabs are switched by replacing the session on that view (the model
     // used by Mozilla's own Android Components). A separate GeckoView per
@@ -178,20 +190,16 @@ class GeckoBrowserEngine(
         val host = sharedContentHost ?: return
         if (view !== host) return
         attachToHost(geckoView, host)
-        if (geckoView.session === session.geckoSession) {
-            // Some devices lose the Gecko surface while an external picker
-            // activity is in front. A normal bind is a no-op for the same
-            // session, so explicitly release/re-set it to force Gecko to
-            // acquire a fresh display for the existing page.
-            geckoView.releaseSession()
-        } else if (geckoView.session != null) {
-            geckoView.releaseSession()
+        if (geckoView.session !== session.geckoSession) {
+            bindContentView(session, host)
+            return
         }
-        geckoView.setAutofillEnabled(false)
-        geckoView.setSession(session.geckoSession)
-        session.installAutofillDelegate()
-        renderedSession = session
-        session.contentView = geckoView
+        // Do not release/re-set the session here: GeckoView owns its display
+        // and doing so while Android is recreating the SurfaceView can leave
+        // a live session attached to a dead compositor (black page). The
+        // supported recovery is to ask GeckoView for a fresh surface while
+        // keeping the same session and page intact.
+        geckoView.requestNewSurface()
     }
 
     internal fun releaseContentView(session: GeckoBrowserSession, view: View) {

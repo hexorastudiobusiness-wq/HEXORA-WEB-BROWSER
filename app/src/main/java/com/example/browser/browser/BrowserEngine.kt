@@ -37,6 +37,12 @@ interface BrowserEngine {
 
     /** Clears cookies, cache, site data etc. via the engine. Fire-and-forget. */
     fun clearBrowsingData()
+
+    /**
+     * Clears only web caches (network/image), leaving history, bookmarks,
+     * cookies, site storage and saved logins untouched.
+     */
+    fun clearCache(onComplete: () -> Unit = {})
 }
 
 /** Color-scheme preference passed from the app theme to web content. */

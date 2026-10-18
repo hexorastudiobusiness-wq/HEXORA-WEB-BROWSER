@@ -13,13 +13,24 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -44,7 +55,10 @@ import com.example.browser.ui.settings.SettingsViewModel
 import com.example.browser.ui.tabs.TabsScreen
 import com.example.browser.ui.theme.HexoraBrowserTheme
 import com.example.browser.util.UrlUtils
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private object Routes {
     const val BROWSER = "browser"
@@ -81,15 +95,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private var pendingFilePickerRequestId: String? = null
-    private var pendingFilePickerMultiple: Boolean = false
+    private var pendingFilePickerRequest: BrowserViewModel.FilePickerRequest? = null
+    private var clearingCacheAndExiting: Boolean = false
+    private var fileSourcePickerRequest
+        by mutableStateOf<BrowserViewModel.FilePickerRequest?>(null)
 
-    // ACTION_GET_CONTENT (wrapped in a chooser below) lets the user pick
-    // Files, Gallery/Photos, Drive or another installed picker app instead
-    // of always being forced into the system file manager.
-    private val filePicker = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result -> finishFilePicker(extractPickedUris(result.data)) }
+    private val documentPicker = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> finishFilePicker(listOfNotNull(uri)) }
+
+    private val multipleDocumentPicker = registerForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> finishFilePicker(uris) }
+
+    private val visualMediaPicker = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri -> finishFilePicker(listOfNotNull(uri)) }
+
+    private val multipleVisualMediaPicker = registerForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris -> finishFilePicker(uris) }
 
     private val folderPicker = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
@@ -156,23 +181,24 @@ class MainActivity : ComponentActivity() {
                         passwordsViewModel = passwordsViewModel,
                         thumbnailStore = container.tabThumbnailStore,
                         downloadHandler = container.downloadHandler,
+                        onClearCacheAndExit = { clearCacheAndExit() },
                     )
+                    fileSourcePickerRequest?.let { request ->
+                        FileSourcePickerSheet(
+                            onGallery = {
+                                fileSourcePickerRequest = null
+                                launchVisualMediaPicker(request)
+                            },
+                            onFiles = {
+                                fileSourcePickerRequest = null
+                                launchDocumentPicker(request)
+                            },
+                            onDismiss = { cancelPendingFilePicker() },
+                        )
+                    }
                 }
             }
         }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        // Gecko sessions are active only while the window is in front. This
-        // also gives Gecko a clean stop/start edge when returning from an
-        // external picker instead of reviving a torn-down surface.
-        browserViewModel.setWindowActive(true)
-    }
-
-    override fun onStop() {
-        browserViewModel.setWindowActive(false)
-        super.onStop()
     }
 
     override fun onTrimMemory(level: Int) {
@@ -198,63 +224,124 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * "Clear cache & close" from the browser menu: clears only caches (not
+     * history/bookmarks/passwords), removes Android cache-directory files,
+     * then removes the task so the next launch starts cold.
+     */
+    private fun clearCacheAndExit() {
+        if (clearingCacheAndExiting) return
+        clearingCacheAndExiting = true
+        var finished = false
+
+        fun finishOnce() {
+            if (finished) return
+            finished = true
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) {
+                    listOf(cacheDir, codeCacheDir).forEach { dir ->
+                        dir.listFiles()?.forEach { it.deleteRecursively() }
+                    }
+                    externalCacheDirs.filterNotNull().forEach { dir ->
+                        dir.listFiles()?.forEach { it.deleteRecursively() }
+                    }
+                }
+                finishAndRemoveTask()
+            }
+        }
+
+        browserViewModel.clearCache {
+            runOnUiThread { finishOnce() }
+        }
+        // Never trap the user in the app if Gecko does not answer.
+        lifecycleScope.launch {
+            delay(2_500)
+            finishOnce()
+        }
+    }
+
     /** Opens the system picker when a web page asks for an upload file. */
     private fun collectFilePickerRequests() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 browserViewModel.filePickerRequests.collect { request ->
-                    if (pendingFilePickerRequestId != null) {
+                    if (pendingFilePickerRequest != null) {
                         browserViewModel.cancelFilePicker(request.requestId)
                         return@collect
                     }
-                    pendingFilePickerRequestId = request.requestId
-                    pendingFilePickerMultiple = request.allowMultiple
-                    runCatching {
-                        if (request.isFolder) {
+                    pendingFilePickerRequest = request
+                    when {
+                        request.isFolder -> runCatching {
                             folderPicker.launch(null)
-                        } else {
-                            filePicker.launch(buildFileChooserIntent(request))
-                        }
-                    }.onFailure {
-                        pendingFilePickerRequestId = null
-                        pendingFilePickerMultiple = false
-                        browserViewModel.cancelFilePicker(request.requestId)
+                        }.onFailure { cancelPendingFilePicker() }
+
+                        supportsVisualMedia(request) ->
+                            fileSourcePickerRequest = request
+
+                        else -> launchDocumentPicker(request)
                     }
                 }
             }
         }
     }
 
-    private fun buildFileChooserIntent(
+    private fun supportsVisualMedia(
         request: BrowserViewModel.FilePickerRequest,
-    ): Intent {
-        val mimeTypes = pickerMimeTypes(request.mimeTypes)
-        val intent = Intent(Intent.ACTION_GET_CONTENT)
-            .addCategory(Intent.CATEGORY_OPENABLE)
-            .setType(mimeTypes.first())
-            .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, request.allowMultiple)
-        if (mimeTypes.size > 1) {
-            intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
-        }
-        return Intent.createChooser(intent, getString(R.string.file_picker_title))
+    ): Boolean = pickerMimeTypes(request.mimeTypes).any { type ->
+        type == "*/*" || type.startsWith("image/") || type.startsWith("video/")
     }
 
-    private fun extractPickedUris(data: Intent?): List<Uri> {
-        if (data == null) return emptyList()
-        val uris = mutableListOf<Uri>()
-        data.clipData?.let { clip ->
-            for (index in 0 until clip.itemCount) {
-                clip.getItemAt(index)?.uri?.let { uris += it }
+    private fun launchDocumentPicker(request: BrowserViewModel.FilePickerRequest) {
+        runCatching {
+            val mimeTypes = pickerMimeTypes(request.mimeTypes)
+            if (request.allowMultiple) {
+                multipleDocumentPicker.launch(mimeTypes)
+            } else {
+                documentPicker.launch(mimeTypes)
             }
-        }
-        if (uris.isEmpty()) data.data?.let { uris += it }
-        return if (pendingFilePickerMultiple) uris else uris.take(1)
+        }.onFailure { cancelPendingFilePicker() }
+    }
+
+    private fun launchVisualMediaPicker(
+        request: BrowserViewModel.FilePickerRequest,
+    ) {
+        runCatching {
+            val mimeTypes = pickerMimeTypes(request.mimeTypes)
+            val mediaType = when {
+                mimeTypes.all { it.startsWith("video/") } ->
+                    ActivityResultContracts.PickVisualMediaRequest.Builder()
+                        .setMediaType(ActivityResultContracts.PickVisualMedia.VideoOnly)
+                        .build()
+
+                mimeTypes.all { it.startsWith("image/") } ->
+                    ActivityResultContracts.PickVisualMediaRequest.Builder()
+                        .setMediaType(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        .build()
+
+                else -> ActivityResultContracts.PickVisualMediaRequest.Builder()
+                    .setMediaType(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                    .build()
+            }
+            if (request.allowMultiple) {
+                multipleVisualMediaPicker.launch(mediaType)
+            } else {
+                visualMediaPicker.launch(mediaType)
+            }
+        }.onFailure { cancelPendingFilePicker() }
+    }
+
+    private fun cancelPendingFilePicker() {
+        val request = pendingFilePickerRequest ?: return
+        pendingFilePickerRequest = null
+        fileSourcePickerRequest = null
+        browserViewModel.cancelFilePicker(request.requestId)
     }
 
     private fun finishFilePicker(uris: List<Uri>) {
-        val requestId = pendingFilePickerRequestId ?: return
-        pendingFilePickerRequestId = null
-        pendingFilePickerMultiple = false
+        val request = pendingFilePickerRequest ?: return
+        pendingFilePickerRequest = null
+        fileSourcePickerRequest = null
+        val requestId = request.requestId
         uris.forEach { uri ->
             runCatching {
                 contentResolver.takePersistableUriPermission(
@@ -324,6 +411,41 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FileSourcePickerSheet(
+    onGallery: () -> Unit,
+    onFiles: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+        ) {
+            Text(
+                text = androidx.compose.ui.res.stringResource(R.string.file_source_title),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(bottom = 10.dp),
+            )
+            TextButton(onClick = onGallery, modifier = Modifier.fillMaxWidth()) {
+                Text(androidx.compose.ui.res.stringResource(R.string.file_source_gallery))
+            }
+            TextButton(onClick = onFiles, modifier = Modifier.fillMaxWidth()) {
+                Text(androidx.compose.ui.res.stringResource(R.string.file_source_files))
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                Text(androidx.compose.ui.res.stringResource(R.string.action_cancel))
+            }
+        }
+    }
+}
+
 @Composable
 private fun HexoraNavHost(
     browserViewModel: BrowserViewModel,
@@ -334,6 +456,7 @@ private fun HexoraNavHost(
     passwordsViewModel: PasswordsViewModel,
     thumbnailStore: com.example.browser.util.TabThumbnailStore,
     downloadHandler: com.example.browser.download.DownloadHandler,
+    onClearCacheAndExit: () -> Unit,
 ) {
     val navController = rememberNavController()
 
@@ -361,6 +484,7 @@ private fun HexoraNavHost(
                 onOpenHistory = { navController.navigate(Routes.HISTORY) },
                 onOpenDownloads = { navController.navigate(Routes.DOWNLOADS) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                onClearCacheAndExit = onClearCacheAndExit,
             )
         }
         composable(Routes.TABS) {
