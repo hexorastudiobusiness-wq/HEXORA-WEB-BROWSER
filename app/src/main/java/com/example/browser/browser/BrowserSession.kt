@@ -2,6 +2,7 @@ package com.example.browser.browser
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import android.view.View
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -62,6 +63,15 @@ sealed interface BrowserSessionEvent {
         val isPrivate: Boolean = false,
     ) : BrowserSessionEvent
 
+    /** The page requested a file picker (for example an upload input). */
+    data class FilePickerRequested(
+        override val sessionId: String,
+        val requestId: String,
+        val allowMultiple: Boolean,
+        val isFolder: Boolean,
+        val mimeTypes: List<String>,
+    ) : BrowserSessionEvent
+
     /** A login form was submitted; the app may ask whether to save it. */
     data class CredentialSubmitted(
         override val sessionId: String,
@@ -100,6 +110,12 @@ interface BrowserSession {
 
     /** Clears the current in-page search highlights. */
     fun clearFind()
+
+    /** Delivers files selected in the system picker to a pending prompt. */
+    fun completeFilePicker(requestId: String, uris: List<Uri>)
+
+    /** Cancels a pending system file-picker prompt. */
+    fun cancelFilePicker(requestId: String)
 
     /** Captures a small snapshot of the visible page for tab previews. */
     fun captureThumbnail(onCaptured: (Bitmap?) -> Unit)

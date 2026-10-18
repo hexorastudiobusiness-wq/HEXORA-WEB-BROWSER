@@ -32,8 +32,11 @@ class DownloadHandler(context: Context) {
         }
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle(fileName)
-            .setDescription(url)
+            // Do not expose the (possibly signed/private) URL in the system
+            // notification's description.
+            .setDescription(fileName)
             .setMimeType(mimeType)
+            .setAllowedOverMetered(true)
             .setNotificationVisibility(
                 DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
             )
@@ -43,19 +46,53 @@ class DownloadHandler(context: Context) {
             .getOrDefault(-1L)
     }
 
+    data class Progress(
+        val status: Int?,
+        val downloadedBytes: Long = 0L,
+        val totalBytes: Long = -1L,
+        val reason: Int? = null,
+    ) {
+        /** 0f..1f when the server reported a total size, otherwise null. */
+        val fraction: Float?
+            get() = if (totalBytes > 0L) {
+                (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+            } else {
+                null
+            }
+    }
+
     /** Current DownloadManager status (STATUS_*) for [downloadId], if known. */
-    fun statusFor(downloadId: Long): Int? {
-        if (downloadId < 0) return null
+    fun statusFor(downloadId: Long): Int? = progressFor(downloadId).status
+
+    /** Live DownloadManager progress for [downloadId]. */
+    fun progressFor(downloadId: Long): Progress {
+        if (downloadId < 0) return Progress(status = null)
         return runCatching {
             downloadManager.query(DownloadManager.Query().setFilterById(downloadId))
                 ?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-                    } else {
-                        null
-                    }
-                }
-        }.getOrNull()
+                    if (!cursor.moveToFirst()) return@use Progress(status = null)
+                    Progress(
+                        status = cursor.getInt(
+                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS),
+                        ),
+                        downloadedBytes = cursor.getLong(
+                            cursor.getColumnIndexOrThrow(
+                                DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
+                            ),
+                        ),
+                        totalBytes = cursor.getLong(
+                            cursor.getColumnIndexOrThrow(
+                                DownloadManager.COLUMN_TOTAL_SIZE_BYTES,
+                            ),
+                        ),
+                        reason = runCatching {
+                            cursor.getInt(
+                                cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON),
+                            )
+                        }.getOrNull(),
+                    )
+                } ?: Progress(status = null)
+        }.getOrDefault(Progress(status = null))
     }
 
     /** Content URI of the finished file so it can be opened with other apps. */

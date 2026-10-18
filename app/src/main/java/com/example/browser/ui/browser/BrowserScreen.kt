@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -204,9 +205,14 @@ fun BrowserScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            // Keep chrome clear of the status bar, camera cutout and
-            // gesture/navigation bar (edge-to-edge rendering).
-            .windowInsetsPadding(WindowInsets.safeDrawing),
+            // Keep chrome clear of the status bar and side cutouts. The
+            // bottom inset is consumed by the bottom bar itself so landscape
+            // does not lose an extra strip below an already short viewport.
+            .windowInsetsPadding(
+                WindowInsets.safeDrawing.only(
+                    WindowInsetsSides.Horizontal + WindowInsetsSides.Top,
+                ),
+            ),
     ) {
         if (!state.isFullscreen) {
             SwipeToSwitchTabBox(
@@ -254,6 +260,7 @@ fun BrowserScreen(
         if (!state.isFullscreen) {
             BrowserBottomBar(
                 state = state,
+                compact = landscape,
                 onAction = viewModel::onAction,
                 onOpenTabs = onOpenTabs,
                 onOpenBookmarks = onOpenBookmarks,
@@ -900,6 +907,7 @@ private fun FindBar(
 @Composable
 private fun BrowserBottomBar(
     state: BrowserUiState,
+    compact: Boolean = false,
     onAction: (BrowserAction) -> Unit,
     onOpenTabs: () -> Unit,
     onOpenBookmarks: () -> Unit,
@@ -920,11 +928,14 @@ private fun BrowserBottomBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 2.dp, vertical = 2.dp),
+                .windowInsetsPadding(
+                    WindowInsets.navigationBars.only(WindowInsetsSides.Bottom),
+                )
+                .padding(horizontal = 2.dp, vertical = if (compact) 0.dp else 2.dp),
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(modifier = Modifier.size(42.dp),
+            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp),
                 onClick = { onAction(BrowserAction.GoBack) },
                 enabled = state.canGoBack,
             ) {
@@ -933,7 +944,7 @@ private fun BrowserBottomBar(
                     contentDescription = stringResource(R.string.action_back),
                 )
             }
-            IconButton(modifier = Modifier.size(42.dp),
+            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp),
                 onClick = { onAction(BrowserAction.GoForward) },
                 enabled = state.canGoForward,
             ) {
@@ -942,7 +953,7 @@ private fun BrowserBottomBar(
                     contentDescription = stringResource(R.string.action_forward),
                 )
             }
-            IconButton(modifier = Modifier.size(42.dp),
+            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp),
                 onClick = {
                     onAction(
                         if (state.isLoading) BrowserAction.StopLoading else BrowserAction.Reload,
@@ -956,13 +967,13 @@ private fun BrowserBottomBar(
                     ),
                 )
             }
-            IconButton(modifier = Modifier.size(42.dp), onClick = { onAction(BrowserAction.LoadHome) }) {
+            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp), onClick = { onAction(BrowserAction.LoadHome) }) {
                 Icon(
                     imageVector = Icons.Filled.Home,
                     contentDescription = stringResource(R.string.action_home),
                 )
             }
-            IconButton(modifier = Modifier.size(42.dp), onClick = { onAction(BrowserAction.ToggleFullscreen) }) {
+            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp), onClick = { onAction(BrowserAction.ToggleFullscreen) }) {
                 Icon(
                     imageVector = Icons.Filled.Fullscreen,
                     contentDescription = stringResource(R.string.menu_fullscreen),
@@ -970,7 +981,7 @@ private fun BrowserBottomBar(
             }
 
             // Tabs button with a Firefox-style tab counter.
-            IconButton(modifier = Modifier.size(42.dp), onClick = onOpenTabs) {
+            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp), onClick = onOpenTabs) {
                 Box(
                     modifier = Modifier
                         .size(26.dp)
@@ -988,7 +999,7 @@ private fun BrowserBottomBar(
                 }
             }
 
-            IconButton(modifier = Modifier.size(42.dp), onClick = { onAction(BrowserAction.NewTab) }) {
+            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp), onClick = { onAction(BrowserAction.NewTab) }) {
                 Icon(
                     imageVector = Icons.Filled.Add,
                     contentDescription = stringResource(R.string.tab_new),
@@ -996,7 +1007,7 @@ private fun BrowserBottomBar(
             }
 
             Box {
-                IconButton(modifier = Modifier.size(42.dp), onClick = { menuExpanded = true }) {
+                IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp), onClick = { menuExpanded = true }) {
                     Icon(
                         imageVector = Icons.Filled.MoreVert,
                         contentDescription = stringResource(R.string.action_menu),

@@ -118,6 +118,22 @@ class BrowserViewModel(
     val downloadEvents: SharedFlow<BrowserSessionEvent.DownloadRequested> =
         _downloadEvents.asSharedFlow()
 
+    /** A page is waiting for the system file picker. */
+    data class FilePickerRequest(
+        val requestId: String,
+        val allowMultiple: Boolean,
+        val isFolder: Boolean,
+        val mimeTypes: List<String>,
+    )
+
+    private val _filePickerRequests =
+        MutableSharedFlow<FilePickerRequest>(extraBufferCapacity = 4)
+    val filePickerRequests: SharedFlow<FilePickerRequest> =
+        _filePickerRequests.asSharedFlow()
+
+    private val pendingFilePickerSessions =
+        mutableMapOf<String, BrowserSession>()
+
     val settings: StateFlow<BrowserSettingsState> = settingsRepository.settings.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
@@ -232,6 +248,21 @@ class BrowserViewModel(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowserUiState())
 
     private var pendingExternalUrl: String? = null
+
+    /** Delivers the system picker's result to the page that requested it. */
+    fun completeFilePicker(requestId: String, uris: List<Uri>) {
+        val session = pendingFilePickerSessions.remove(requestId) ?: return
+        if (uris.isEmpty()) {
+            session.cancelFilePicker(requestId)
+        } else {
+            session.completeFilePicker(requestId, uris)
+        }
+    }
+
+    /** Cancels the page's pending file-picker request. */
+    fun cancelFilePicker(requestId: String) {
+        pendingFilePickerSessions.remove(requestId)?.cancelFilePicker(requestId)
+    }
 
     init {
         // Tabs are not restored after process death, so screenshots from a
@@ -758,7 +789,9 @@ class BrowserViewModel(
         if (previousId == tabId) return
         if (previousId != null) {
             entry(previousId)?.session?.setActive(false)
-            captureThumbnail(previousId)
+            // A fresh thumbnail is already captured when each page finishes
+            // loading. Capturing pixels again here would block the switch on
+            // an extra full-surface copy without improving the preview much.
         }
         _findVisible.value = false
         _activeTabId.value = tabId
@@ -844,6 +877,17 @@ class BrowserViewModel(
                     when (event) {
                         is BrowserSessionEvent.DownloadRequested ->
                             _downloadEvents.tryEmit(event)
+                        is BrowserSessionEvent.FilePickerRequested -> {
+                            pendingFilePickerSessions[event.requestId] = session
+                            _filePickerRequests.tryEmit(
+                                FilePickerRequest(
+                                    requestId = event.requestId,
+                                    allowMultiple = event.allowMultiple,
+                                    isFolder = event.isFolder,
+                                    mimeTypes = event.mimeTypes,
+                                ),
+                            )
+                        }
                         is BrowserSessionEvent.CredentialSubmitted ->
                             handleCredentialSubmitted(entry, event)
                         is BrowserSessionEvent.CloseRequested ->
@@ -960,6 +1004,9 @@ class BrowserViewModel(
 
     override fun onCleared() {
         engine?.newSessionCreatedListener = null
+        pendingFilePickerSessions.keys.toList().forEach { requestId ->
+            pendingFilePickerSessions.remove(requestId)?.cancelFilePicker(requestId)
+        }
         sessionJobs.values.forEach { it.cancel() }
         sessionJobs.clear()
         _tabs.value.forEach { it.session?.close() }

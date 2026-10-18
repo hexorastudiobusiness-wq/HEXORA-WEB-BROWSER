@@ -2,8 +2,10 @@ package com.example.browser.ui.downloads
 
 import android.content.Intent
 import androidx.compose.foundation.clickable
+import android.text.format.Formatter
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,6 +16,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -23,7 +26,6 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -47,6 +49,7 @@ fun DownloadsScreen(
     modifier: Modifier = Modifier,
 ) {
     val downloads by viewModel.downloads.collectAsState()
+    val progressById by viewModel.progress.collectAsState()
     val context = LocalContext.current
 
     Scaffold(
@@ -89,11 +92,8 @@ fun DownloadsScreen(
                 items(downloads, key = { it.id }) { entry ->
                     DownloadRow(
                         entry = entry,
-                        status = DownloadsViewModel.mapStatus(
-                            remember(entry.downloadManagerId) {
-                                downloadHandler.statusFor(entry.downloadManagerId)
-                            },
-                        ),
+                        progress = progressById[entry.downloadManagerId]
+                            ?: DownloadProgressUi(),
                         onOpen = {
                             val uri = downloadHandler.uriFor(entry.downloadManagerId)
                             if (uri != null) {
@@ -114,10 +114,12 @@ fun DownloadsScreen(
 @Composable
 private fun DownloadRow(
     entry: DownloadEntity,
-    status: DownloadStatus,
+    progress: DownloadProgressUi,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val status = progress.status
     val statusText = stringResource(
         when (status) {
             DownloadStatus.RUNNING -> R.string.download_status_running
@@ -128,16 +130,68 @@ private fun DownloadRow(
             DownloadStatus.UNKNOWN -> R.string.download_status_unknown
         },
     )
+    val detail = buildString {
+        append(statusText)
+        if (status == DownloadStatus.RUNNING || status == DownloadStatus.PAUSED) {
+            val downloaded = Formatter.formatShortFileSize(
+                context,
+                progress.downloadedBytes.coerceAtLeast(0L),
+            )
+            if (progress.totalBytes > 0L) {
+                val total = Formatter.formatShortFileSize(context, progress.totalBytes)
+                val percent = ((progress.fraction ?: 0f) * 100f).toInt()
+                append(" · ")
+                append(downloaded)
+                append(" / ")
+                append(total)
+                append(" · ")
+                append(percent)
+                append('%')
+            } else if (progress.downloadedBytes > 0L) {
+                append(" · ")
+                append(downloaded)
+            }
+        }
+    }
     ListItem(
         headlineContent = {
             Text(entry.fileName, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         supportingContent = {
-            Text(
-                "$statusText · ${entry.url}",
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column {
+                Text(
+                    detail,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    entry.url,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (status == DownloadStatus.RUNNING ||
+                    status == DownloadStatus.PENDING ||
+                    status == DownloadStatus.PAUSED
+                ) {
+                    val fraction = progress.fraction
+                    if (fraction != null) {
+                        LinearProgressIndicator(
+                            progress = { fraction },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp),
+                        )
+                    } else {
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp),
+                        )
+                    }
+                }
+            }
         },
         trailingContent = {
             IconButton(onClick = onDelete) {

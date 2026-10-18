@@ -45,6 +45,9 @@ class GeckoBrowserEngine(
 
     private val appContext = context.applicationContext
 
+    internal val promptContext: Context
+        get() = appContext
+
     override var newSessionCreatedListener: ((BrowserSession, String?) -> Unit)? = null
 
     private var runtimeOrNull: GeckoRuntime? = null
@@ -359,7 +362,24 @@ internal class GeckoBrowserSession(
             return
         }
         view.capturePixels().accept(
-            { bitmap -> onCaptured(bitmap) },
+            { bitmap ->
+                // Tab-switcher thumbnails never need the full surface. Scaling
+                // here avoids retaining and JPEG-encoding a huge bitmap on
+                // every page load.
+                if (bitmap == null || bitmap.width <= MAX_THUMBNAIL_WIDTH) {
+                    onCaptured(bitmap)
+                } else {
+                    val scale = MAX_THUMBNAIL_WIDTH.toFloat() / bitmap.width
+                    val scaled = Bitmap.createScaledBitmap(
+                        bitmap,
+                        MAX_THUMBNAIL_WIDTH,
+                        (bitmap.height * scale).toInt().coerceAtLeast(1),
+                        true,
+                    )
+                    if (scaled !== bitmap) bitmap.recycle()
+                    onCaptured(scaled)
+                }
+            },
             { onCaptured(null) },
         )
     }
@@ -425,6 +445,8 @@ internal class GeckoBrowserSession(
         if (closed) return
         closed = true
         autofillCredential = null
+        cancelAllFilePickers()
+        geckoSession.setPromptDelegate(null)
         geckoSession.setNavigationDelegate(null)
         geckoSession.setProgressDelegate(null)
         geckoSession.setContentDelegate(null)
@@ -435,6 +457,68 @@ internal class GeckoBrowserSession(
 
     @Volatile
     private var autofillCredential: AutofillCredential? = null
+
+    private data class PendingFilePrompt(
+        val prompt: GeckoSession.PromptDelegate.FilePrompt,
+        val result: GeckoResult<GeckoSession.PromptDelegate.PromptResponse>,
+    )
+
+    private val pendingFilePrompts = mutableMapOf<String, PendingFilePrompt>()
+
+    private val promptDelegate = object : GeckoSession.PromptDelegate {
+        override fun onFilePrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.FilePrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> {
+            if (closed) return GeckoResult.fromValue(prompt.dismiss())
+            val requestId = UUID.randomUUID().toString()
+            val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+            pendingFilePrompts[requestId] = PendingFilePrompt(prompt, result)
+            val emitted = _events.tryEmit(
+                BrowserSessionEvent.FilePickerRequested(
+                    sessionId = id,
+                    requestId = requestId,
+                    allowMultiple =
+                        prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE,
+                    isFolder =
+                        prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.FOLDER,
+                    mimeTypes = prompt.mimeTypes?.filterNotNull()?.take(16) ?: emptyList(),
+                ),
+            )
+            if (!emitted) {
+                pendingFilePrompts.remove(requestId)
+                return GeckoResult.fromValue(prompt.dismiss())
+            }
+            return result
+        }
+    }
+
+    override fun completeFilePicker(requestId: String, uris: List<android.net.Uri>) {
+        val pending = pendingFilePrompts.remove(requestId) ?: return
+        if (closed || uris.isEmpty()) {
+            pending.result.complete(pending.prompt.dismiss())
+            return
+        }
+        val response = if (pending.prompt.type ==
+            GeckoSession.PromptDelegate.FilePrompt.Type.MULTIPLE
+        ) {
+            pending.prompt.confirm(engine.promptContext, uris.toTypedArray())
+        } else {
+            pending.prompt.confirm(engine.promptContext, uris.first())
+        }
+        pending.result.complete(response)
+    }
+
+    override fun cancelFilePicker(requestId: String) {
+        val pending = pendingFilePrompts.remove(requestId) ?: return
+        pending.result.complete(pending.prompt.dismiss())
+    }
+
+    private fun cancelAllFilePickers() {
+        val pending = pendingFilePrompts.values.toList()
+        pendingFilePrompts.clear()
+        pending.forEach { it.result.complete(it.prompt.dismiss()) }
+    }
 
     private val autofillDelegate = object : Autofill.Delegate {
         override fun onSessionCommit(
@@ -674,6 +758,7 @@ internal class GeckoBrowserSession(
     }
 
     init {
+        geckoSession.setPromptDelegate(promptDelegate)
         geckoSession.setNavigationDelegate(navigationDelegate)
         geckoSession.setProgressDelegate(progressDelegate)
         geckoSession.setContentDelegate(contentDelegate)
@@ -682,6 +767,7 @@ internal class GeckoBrowserSession(
 
     private companion object {
         const val TAG = "GeckoBrowserSession"
+        const val MAX_THUMBNAIL_WIDTH = 480
 
         /** HTTP header names are case-insensitive. */
         fun Map<String, String>.headerValue(name: String): String? =

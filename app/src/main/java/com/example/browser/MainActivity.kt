@@ -2,12 +2,17 @@ package com.example.browser
 
 import android.content.ComponentCallbacks2
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -76,6 +81,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var pendingFilePickerRequestId: String? = null
+
+    private val singleFilePicker = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> finishFilePicker(listOfNotNull(uri)) }
+
+    private val multipleFilePicker = registerForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> finishFilePicker(uris) }
+
+    private val folderPicker = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri -> finishFilePicker(listOfNotNull(uri)) }
+
     private val bookmarksViewModel: BookmarksViewModel by viewModels {
         viewModelFactory {
             initializer { BookmarksViewModel(container.bookmarkRepository) }
@@ -90,7 +109,12 @@ class MainActivity : ComponentActivity() {
 
     private val downloadsViewModel: DownloadsViewModel by viewModels {
         viewModelFactory {
-            initializer { DownloadsViewModel(container.downloadRepository) }
+            initializer {
+                DownloadsViewModel(
+                    repository = container.downloadRepository,
+                    downloadHandler = container.downloadHandler,
+                )
+            }
         }
     }
 
@@ -114,6 +138,7 @@ class MainActivity : ComponentActivity() {
 
         handleViewIntent(intent)
         collectDownloadRequests()
+        collectFilePickerRequests()
 
         setContent {
             val settings by browserViewModel.settings.collectAsState()
@@ -158,6 +183,64 @@ class MainActivity : ComponentActivity() {
                 ?.takeIf { UrlUtils.isHttpUrl(it) }
                 ?.let { browserViewModel.handleExternalUrl(it) }
         }
+    }
+
+    /** Opens the system picker when a web page asks for an upload file. */
+    private fun collectFilePickerRequests() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                browserViewModel.filePickerRequests.collect { request ->
+                    if (pendingFilePickerRequestId != null) {
+                        browserViewModel.cancelFilePicker(request.requestId)
+                        return@collect
+                    }
+                    pendingFilePickerRequestId = request.requestId
+                    runCatching {
+                        when {
+                            request.isFolder -> folderPicker.launch(null)
+                            request.allowMultiple -> multipleFilePicker.launch(
+                                pickerMimeTypes(request.mimeTypes),
+                            )
+                            else -> singleFilePicker.launch(
+                                pickerMimeTypes(request.mimeTypes),
+                            )
+                        }
+                    }.onFailure {
+                        pendingFilePickerRequestId = null
+                        browserViewModel.cancelFilePicker(request.requestId)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun finishFilePicker(uris: List<Uri>) {
+        val requestId = pendingFilePickerRequestId ?: return
+        pendingFilePickerRequestId = null
+        uris.forEach { uri ->
+            runCatching {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        }
+        browserViewModel.completeFilePicker(requestId, uris)
+    }
+
+    /** Gecko accept values may be MIME types or file extensions. */
+    private fun pickerMimeTypes(raw: List<String>): Array<String> {
+        val converted = raw.mapNotNull { value ->
+            val normalized = value.trim().lowercase()
+            when {
+                normalized.isBlank() -> null
+                normalized.startsWith(".") -> MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(normalized.removePrefix("."))
+                "/" in normalized -> normalized
+                else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(normalized)
+            }
+        }.distinct()
+        return converted.ifEmpty { listOf("*/*") }.toTypedArray()
     }
 
     /** Routes engine download requests to the Android DownloadManager layer. */
@@ -217,7 +300,17 @@ private fun HexoraNavHost(
         navController.navigateToBrowser()
     }
 
-    NavHost(navController = navController, startDestination = Routes.BROWSER) {
+    NavHost(
+        navController = navController,
+        startDestination = Routes.BROWSER,
+        // The browser swaps a native Gecko surface between tabs. Cross-fading
+        // or sliding that surface makes switching feel heavy and can expose
+        // an extra compositor frame, so screen changes are instant here.
+        enterTransition = { EnterTransition.None },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = { ExitTransition.None },
+    ) {
         composable(Routes.BROWSER) {
             BrowserScreen(
                 viewModel = browserViewModel,

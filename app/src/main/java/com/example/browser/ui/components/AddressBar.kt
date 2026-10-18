@@ -88,13 +88,13 @@ fun AddressBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = if (compact) 1.dp else 2.dp),
+                    .padding(horizontal = 8.dp, vertical = if (compact) 0.dp else 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Surface(
                     modifier = Modifier
                         .weight(1f)
-                        .height(if (compact) 36.dp else 38.dp),
+                        .height(if (compact) 34.dp else 38.dp),
                     shape = RoundedCornerShape(20.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                 ) {
@@ -187,7 +187,7 @@ fun AddressBar(
 
                 IconButton(
                     onClick = onOpenDownloads,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(if (compact) 32.dp else 36.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Download,
@@ -197,7 +197,7 @@ fun AddressBar(
                 }
                 IconButton(
                     onClick = onToggleBookmark,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(if (compact) 32.dp else 36.dp),
                 ) {
                     Icon(
                         imageVector = if (isBookmarked) Icons.Filled.Star else Icons.Outlined.StarOutline,
