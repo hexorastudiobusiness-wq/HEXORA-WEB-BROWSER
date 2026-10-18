@@ -1,3 +1,4 @@
 One-time marker: pushing this file runs the signed release build once
 on this branch (manual workflow dispatch requires the default branch).
 It can be deleted afterwards.
+Requested release: v0.3.4

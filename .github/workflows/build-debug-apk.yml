@@ -59,6 +59,9 @@ jobs:
           ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee -a gradle.log
 
       - name: Upload APK as workflow artifact
+        # Artifact storage can be quota-limited; the same APKs are also
+        # published to the prerelease below, so do not fail the build here.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: hexora-debug-apk

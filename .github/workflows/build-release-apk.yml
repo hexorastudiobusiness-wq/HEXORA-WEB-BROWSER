@@ -11,7 +11,7 @@ on:
   # runs the signed release build once.
   push:
     branches:
-      - arena/958b2d7a-hexora-web-browser
+      - 'arena/**'
     paths:
       - signing/build-release.request
 
