@@ -1,5 +1,6 @@
 package com.example.browser.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Icon
@@ -43,6 +45,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.browser.R
+import com.example.browser.ui.browser.AddressSuggestion
 
 /**
  * Address/search bar (ARCHITECTURE.md §6): URL or search input, security
@@ -62,6 +65,9 @@ fun AddressBar(
     onToggleBookmark: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    suggestions: List<AddressSuggestion> = emptyList(),
+    onQueryChange: (String) -> Unit = {},
+    onSuggestionSelected: (String) -> Unit = {},
 ) {
     val focusManager = LocalFocusManager.current
     var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
@@ -126,6 +132,9 @@ fun AddressBar(
                             BasicTextField(
                                 value = fieldValue,
                                 onValueChange = { newValue ->
+                                    if (newValue.text != text) {
+                                        onQueryChange(newValue.text)
+                                    }
                                     fieldValue = if (selectAllOnFocus && newValue.text == text) {
                                         // The first tap after focus may move the cursor
                                         // as part of the same click. Convert that first
@@ -172,7 +181,10 @@ fun AddressBar(
                         }
                         if (isEditing && text.isNotEmpty()) {
                             IconButton(
-                                onClick = { fieldValue = TextFieldValue("") },
+                                onClick = {
+                                    fieldValue = TextFieldValue("")
+                                    onQueryChange("")
+                                },
                                 modifier = Modifier.size(32.dp),
                             ) {
                                 Icon(
@@ -212,6 +224,46 @@ fun AddressBar(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
+                }
+            }
+
+            // History suggestions while typing: tap one to open it directly
+            // instead of retyping a previously visited address.
+            if (isEditing && suggestions.isNotEmpty()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    suggestions.forEach { suggestion ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    focusManager.clearFocus()
+                                    onSuggestionSelected(suggestion.url)
+                                }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.History,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = suggestion.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                )
+                                Text(
+                                    text = suggestion.url,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

@@ -204,10 +204,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        // Memory pressure: release every inactive tab's engine session.
-        // Tabs keep their saved state + thumbnail and restore on selection.
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
-            browserViewModel.suspendAllInactiveTabs()
+        // Only genuine low-memory signals may suspend cold tab sessions.
+        // This must be an exact-level check, mirroring Mozilla's
+        // TrimMemoryMiddleware: a numeric `>=` comparison also matches
+        // TRIM_MEMORY_UI_HIDDEN (20), which Android delivers the moment the
+        // app is minimised — that comparison is what used to close every
+        // inactive tab (and reload it on return) after a few seconds in
+        // the background. UI_HIDDEN / BACKGROUND / MODERATE must never
+        // suspend anything.
+        if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level == ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+        ) {
+            browserViewModel.suspendTabsOutsideWarmSet()
         }
     }
 

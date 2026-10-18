@@ -13,6 +13,7 @@ import com.example.browser.browser.PageMediaKind
 import com.example.browser.browser.WebColorScheme
 import com.example.browser.browser.SavedTabState
 import com.example.browser.browser.SessionPageState
+import com.example.browser.data.database.HistoryEntity
 import com.example.browser.data.repository.BookmarkRepository
 import com.example.browser.data.repository.CredentialRepository
 import com.example.browser.data.repository.FaviconFetcher
@@ -46,11 +47,13 @@ import kotlinx.coroutines.withContext
  * Owns all tabs and coordinates between the [BrowserEngine], repositories and
  * the UI. Business logic lives here — never in Composables.
  *
- * Tabs are identified by a stable tab id (not by their engine session):
- * inactive tabs beyond [MAX_LIVE_SESSIONS] are *suspended* — their engine
- * session is closed and only the saved navigation state + a thumbnail are
- * kept, so hundreds of tabs can stay "open" without holding memory. A
- * suspended tab is restored transparently when selected.
+ * Tabs are identified by a stable tab id (not by their engine session).
+ * Following Mozilla's Android Components model, tab sessions are *not*
+ * suspended during ordinary tab switching or while the app is merely in
+ * the background. Only genuine low-memory signals may suspend sessions
+ * outside the warm set (the selected tab plus the [WARM_INACTIVE_TABS]
+ * most recently used inactive tabs); a suspended tab keeps its saved
+ * navigation state + thumbnail and is restored when selected.
  */
 class BrowserViewModel(
     private val engineFactory: (javaScriptEnabled: Boolean) -> BrowserEngine,
@@ -138,6 +141,9 @@ class BrowserViewModel(
 
     private val _pageContextMenu = MutableStateFlow<PageContextMenu?>(null)
 
+    /** Text currently typed in the address bar (drives history suggestions). */
+    private val _addressQuery = MutableStateFlow("")
+
     val settings: StateFlow<BrowserSettingsState> = settingsRepository.settings.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
@@ -167,13 +173,16 @@ class BrowserViewModel(
         chromeSlice,
         shortcutRepository.shortcuts,
         _shortcutIcons,
-    ) { chrome, shortcuts, icons ->
+        historyRepository.history,
+        _addressQuery,
+    ) { chrome, shortcuts, icons, history, addressQuery ->
         StartSlice(
             chrome = chrome,
             shortcuts = shortcuts
                 .take(StartShortcutRepository.MAX_SHORTCUTS)
                 .map { StartShortcut(it.id, it.title, it.url) },
             icons = icons,
+            addressSuggestions = buildAddressSuggestions(history, addressQuery),
         )
     }
 
@@ -250,6 +259,12 @@ class BrowserViewModel(
             },
             pendingCredentialSave = start.chrome.pendingCredentialSave,
             pageContextMenu = start.chrome.pageContextMenu,
+            // Private tabs never surface the normal browsing history.
+            addressSuggestions = if (activeEntry?.isPrivate == true) {
+                emptyList()
+            } else {
+                start.addressSuggestions.filter { it.url != activeState.url }
+            },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowserUiState())
 
@@ -438,8 +453,14 @@ class BrowserViewModel(
                 activeSession()?.findText(action.query, forward = false)
             BrowserAction.ToggleFullscreen ->
                 _userFullscreen.update { !it }
-            BrowserAction.ExitFullscreen -> _userFullscreen.value = false
+            BrowserAction.ExitFullscreen -> {
+                _userFullscreen.value = false
+                activeSession()?.exitFullscreen()
+            }
             is BrowserAction.SwitchAdjacentTab -> switchAdjacentTab(action.delta)
+            BrowserAction.CycleNextTab -> cycleToNextTab()
+            is BrowserAction.AddressQueryChanged ->
+                _addressQuery.value = action.query
             BrowserAction.CloseAllTabs -> closeAllTabs()
             BrowserAction.UndoCloseAllTabs -> undoCloseAllTabs()
             BrowserAction.SavePendingCredential -> savePendingCredential()
@@ -524,7 +545,7 @@ class BrowserViewModel(
         val entry = entry(tabId) ?: return
         if (entry.session == null) restoreTab(entry)
         activateTab(tabId)
-        enforceSuspension()
+        updateWarmPriorities()
     }
 
     fun closeTab(tabId: String) = closeTab(tabId, preferredNextTabId = null)
@@ -559,6 +580,7 @@ class BrowserViewModel(
                 switchTab(next.tabId)
             }
         }
+        updateWarmPriorities()
     }
 
     /** Opens [url] (from Start Page/bookmarks/history/another app). */
@@ -755,10 +777,25 @@ class BrowserViewModel(
         }
     }
 
-    /** Called by the Activity on memory pressure: free every inactive session. */
-    fun suspendAllInactiveTabs() {
+    /**
+     * Called by the Activity only on genuine low-memory signals. Mirrors
+     * Mozilla's TrimMemoryMiddleware: the selected tab and the
+     * [WARM_INACTIVE_TABS] most recently used inactive tabs are never
+     * suspended; only colder sessions are closed (their saved state and
+     * thumbnail are kept, so they restore when selected again).
+     */
+    fun suspendTabsOutsideWarmSet() {
+        val activeId = _activeTabId.value
+        val warmInactiveIds = lruOrder
+            .filter { it != activeId }
+            .takeLast(WARM_INACTIVE_TABS)
+            .toSet()
         _tabs.value
-            .filter { it.session != null && it.tabId != _activeTabId.value }
+            .filter { entry ->
+                entry.session != null &&
+                    entry.tabId != activeId &&
+                    entry.tabId !in warmInactiveIds
+            }
             .forEach { suspendTab(it) }
     }
 
@@ -796,6 +833,15 @@ class BrowserViewModel(
         if (currentIndex < 0) return
         val target = (currentIndex + delta).coerceIn(0, tabs.lastIndex)
         if (target != currentIndex) switchTab(tabs[target].tabId)
+    }
+
+    /** One-tap quick tab cycling: next tab, wrapping last -> first. */
+    private fun cycleToNextTab() {
+        val tabs = _tabs.value
+        if (tabs.size < 2) return
+        val currentIndex = tabs.indexOfFirst { it.tabId == _activeTabId.value }
+        val target = if (currentIndex < 0) 0 else (currentIndex + 1) % tabs.size
+        switchTab(tabs[target].tabId)
     }
 
     private fun closeAllTabs() {
@@ -878,7 +924,7 @@ class BrowserViewModel(
                 session.loadUrl(UrlUtils.resolveInput(target, settings.value.searchEngine))
             }
         }
-        enforceSuspension()
+        updateWarmPriorities()
         return entry.tabId
     }
 
@@ -903,6 +949,7 @@ class BrowserViewModel(
             session.loadUrl(entry.lastUrl)
         }
         entry.savedState = null
+        updateWarmPriorities()
     }
 
     private fun activateTab(tabId: String) {
@@ -916,21 +963,30 @@ class BrowserViewModel(
         _pageContextMenu.value = null
         _activeTabId.value = tabId
         touchLru(tabId)
+        updateWarmPriorities()
     }
 
-    /** Suspends least-recently-used inactive tabs beyond the live budget. */
-    private fun enforceSuspension() {
-        val liveCount = _tabs.value.count { it.session != null }
-        if (liveCount <= MAX_LIVE_SESSIONS) return
+    /**
+     * Gecko prioritisation, following Mozilla's
+     * SessionPrioritizationMiddleware: only a small warm set — the selected
+     * tab plus the [WARM_INACTIVE_TABS] most recently used tabs — is marked
+     * high priority, so Gecko/Android keep those pages alive instead of
+     * discarding and reloading them. Marking *every* session high (the old
+     * behaviour) boosts every content process at once and makes the system
+     * kill them under memory pressure.
+     */
+    private fun updateWarmPriorities() {
         val activeId = _activeTabId.value
-        val candidates = _tabs.value
-            .filter { it.session != null && it.tabId != activeId }
-            .sortedBy { lruOrder.indexOf(it.tabId) }
-        var remaining = liveCount
-        for (entry in candidates) {
-            if (remaining <= MAX_LIVE_SESSIONS) break
-            suspendTab(entry)
-            remaining--
+        val warmIds = buildSet {
+            activeId?.let { add(it) }
+            addAll(
+                lruOrder
+                    .filter { it != activeId }
+                    .takeLast(WARM_INACTIVE_TABS),
+            )
+        }
+        _tabs.value.forEach { entry ->
+            entry.session?.setPriorityHigh(entry.tabId in warmIds)
         }
     }
 
@@ -1112,6 +1168,47 @@ class BrowserViewModel(
         ThemeMode.DARK, ThemeMode.HEXORA -> WebColorScheme.DARK
     }
 
+    /**
+     * Ranks browsing-history matches for [query]. Host/URL prefix matches
+     * come first, then URL and title substring matches; Room already returns
+     * entries newest-first, and the sort is stable, so equal ranks stay
+     * recency-ordered.
+     */
+    private fun buildAddressSuggestions(
+        history: List<HistoryEntity>,
+        query: String,
+    ): List<AddressSuggestion> {
+        val needle = query.trim().lowercase()
+        if (needle.length < 2) return emptyList()
+        return history
+            .mapNotNull { entry ->
+                val url = entry.url
+                val host = runCatching { Uri.parse(url).host }
+                    .getOrNull()
+                    ?.removePrefix("www.")
+                    .orEmpty()
+                val urlText = url.lowercase()
+                    .removePrefix("https://")
+                    .removePrefix("http://")
+                val title = entry.title.lowercase()
+                val rank = when {
+                    host.startsWith(needle) -> 0
+                    urlText.startsWith(needle) -> 1
+                    title.startsWith(needle) -> 2
+                    urlText.contains(needle) -> 3
+                    title.contains(needle) -> 4
+                    else -> return@mapNotNull null
+                }
+                rank to AddressSuggestion(
+                    title = entry.title.ifBlank { host.ifBlank { url } },
+                    url = url,
+                )
+            }
+            .sortedBy { it.first }
+            .take(MAX_ADDRESS_SUGGESTIONS)
+            .map { it.second }
+    }
+
     private fun newTabId(): String = UUID.randomUUID().toString()
 
     private fun entry(tabId: String): TabEntry? =
@@ -1161,11 +1258,13 @@ class BrowserViewModel(
         val chrome: ChromeSlice,
         val shortcuts: List<StartShortcut>,
         val icons: Map<Long, Bitmap>,
+        val addressSuggestions: List<AddressSuggestion>,
     )
 
     companion object {
-        /** Live engine sessions kept warm; older inactive tabs are suspended. */
-        const val MAX_LIVE_SESSIONS = 6
+        /** Inactive tabs (besides the selected one) kept at high priority. */
+        const val WARM_INACTIVE_TABS = 3
+        const val MAX_ADDRESS_SUGGESTIONS = 6
         const val SHORTCUT_ICON_RETRY_MILLIS = 6 * 60 * 60 * 1000L
     }
 }

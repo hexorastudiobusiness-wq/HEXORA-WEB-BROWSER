@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.lazy.LazyColumn
@@ -69,6 +70,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -92,6 +94,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -107,6 +110,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.browser.R
@@ -238,7 +242,10 @@ fun BrowserScreen(
                 ),
             ),
     ) {
-        if (!state.isFullscreen) {
+        // With every tab closed the Start Page stands alone: no address
+        // bar (there is no tab to navigate). It comes back as soon as a
+        // tab exists again.
+        if (!state.isFullscreen && state.tabs.isNotEmpty()) {
             SwipeToSwitchTabBox(
                 tabCount = state.tabs.size,
                 onSwipe = { delta -> viewModel.onAction(BrowserAction.SwitchAdjacentTab(delta)) },
@@ -253,6 +260,9 @@ fun BrowserScreen(
                     onSubmit = { viewModel.onAction(BrowserAction.LoadInput(it)) },
                     onOpenDownloads = onOpenDownloads,
                     onToggleBookmark = { viewModel.onAction(BrowserAction.ToggleBookmark) },
+                    suggestions = state.addressSuggestions,
+                    onQueryChange = { viewModel.onAction(BrowserAction.AddressQueryChanged(it)) },
+                    onSuggestionSelected = { viewModel.onAction(BrowserAction.OpenUrl(it)) },
                 )
             }
 
@@ -276,6 +286,7 @@ fun BrowserScreen(
             state = state,
             onAction = viewModel::onAction,
             onOpenUrl = { url -> viewModel.onAction(BrowserAction.OpenUrl(url)) },
+            onNewTab = { viewModel.onAction(BrowserAction.NewTab) },
             onContentViewReady = { view -> webContentView = view },
             modifier = Modifier
                 .weight(1f)
@@ -315,14 +326,42 @@ private fun BrowserPageContent(
     state: BrowserUiState,
     onAction: (BrowserAction) -> Unit,
     onOpenUrl: (String) -> Unit,
+    onNewTab: () -> Unit,
     onContentViewReady: (View) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
+        // Fullscreen exit lives outside the page branch on purpose: it
+        // must be visible no matter which content is underneath, drawn
+        // above the Gecko surface with a high-contrast scrim so it can
+        // never blend into a bright or dark video/page.
+        if (state.isFullscreen) {
+            IconButton(
+                onClick = { onAction(BrowserAction.ExitFullscreen) },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .zIndex(10f)
+                    .padding(20.dp)
+                    .size(52.dp)
+                    .background(
+                        color = Color.Black.copy(alpha = 0.65f),
+                        shape = CircleShape,
+                    ),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.FullscreenExit,
+                    contentDescription = stringResource(R.string.action_exit_fullscreen),
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+        }
+
         if (state.showStartPage) {
             StartPage(
                 state = state,
                 onOpenUrl = onOpenUrl,
+                onNewTab = onNewTab,
                 onAddShortcut = { title, url ->
                     onAction(BrowserAction.AddStartShortcut(title, url))
                 },
@@ -387,24 +426,6 @@ private fun BrowserPageContent(
                 color = MaterialTheme.colorScheme.error,
                 textAlign = TextAlign.Center,
             )
-        }
-
-        if (state.isFullscreen) {
-            IconButton(
-                onClick = { onAction(BrowserAction.ExitFullscreen) },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(20.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.surface,
-                        shape = CircleShape,
-                    ),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.FullscreenExit,
-                    contentDescription = stringResource(R.string.action_exit_fullscreen),
-                )
-            }
         }
     }
 }
@@ -538,6 +559,7 @@ private fun ContextMenuItem(
 private fun StartPage(
     state: BrowserUiState,
     onOpenUrl: (String) -> Unit,
+    onNewTab: () -> Unit,
     onAddShortcut: (String, String) -> Unit,
     onEditShortcut: (Long, String, String) -> Unit,
     onDeleteShortcut: (Long) -> Unit,
@@ -623,12 +645,35 @@ private fun StartPage(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    text = stringResource(R.string.address_hint),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 10.dp),
-                )
+                if (state.tabs.isEmpty()) {
+                    // Every tab is closed and there is no address bar on
+                    // this page: one small "+" opens a fresh tab.
+                    FilledIconButton(
+                        onClick = onNewTab,
+                        modifier = Modifier
+                            .padding(top = 16.dp)
+                            .size(48.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = stringResource(R.string.tab_new),
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.tab_new),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.address_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
             }
         }
 
@@ -1077,6 +1122,8 @@ private fun BrowserBottomBar(
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    // Nine actions share this bar; keep every button on narrow phones.
+    val buttonSize = if (compact) 36.dp else 38.dp
 
     Surface(
         modifier = modifier,
@@ -1093,7 +1140,7 @@ private fun BrowserBottomBar(
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp),
+            IconButton(modifier = Modifier.size(buttonSize),
                 onClick = { onAction(BrowserAction.GoBack) },
                 enabled = state.canGoBack,
             ) {
@@ -1102,7 +1149,7 @@ private fun BrowserBottomBar(
                     contentDescription = stringResource(R.string.action_back),
                 )
             }
-            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp),
+            IconButton(modifier = Modifier.size(buttonSize),
                 onClick = { onAction(BrowserAction.GoForward) },
                 enabled = state.canGoForward,
             ) {
@@ -1111,7 +1158,7 @@ private fun BrowserBottomBar(
                     contentDescription = stringResource(R.string.action_forward),
                 )
             }
-            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp),
+            IconButton(modifier = Modifier.size(buttonSize),
                 onClick = {
                     onAction(
                         if (state.isLoading) BrowserAction.StopLoading else BrowserAction.Reload,
@@ -1125,13 +1172,13 @@ private fun BrowserBottomBar(
                     ),
                 )
             }
-            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp), onClick = { onAction(BrowserAction.LoadHome) }) {
+            IconButton(modifier = Modifier.size(buttonSize), onClick = { onAction(BrowserAction.LoadHome) }) {
                 Icon(
                     imageVector = Icons.Filled.Home,
                     contentDescription = stringResource(R.string.action_home),
                 )
             }
-            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp), onClick = { onAction(BrowserAction.ToggleFullscreen) }) {
+            IconButton(modifier = Modifier.size(buttonSize), onClick = { onAction(BrowserAction.ToggleFullscreen) }) {
                 Icon(
                     imageVector = Icons.Filled.Fullscreen,
                     contentDescription = stringResource(R.string.menu_fullscreen),
@@ -1139,7 +1186,7 @@ private fun BrowserBottomBar(
             }
 
             // Tabs button with a Firefox-style tab counter.
-            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp), onClick = onOpenTabs) {
+            IconButton(modifier = Modifier.size(buttonSize), onClick = onOpenTabs) {
                 Box(
                     modifier = Modifier
                         .size(26.dp)
@@ -1157,15 +1204,28 @@ private fun BrowserBottomBar(
                 }
             }
 
-            IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp), onClick = { onAction(BrowserAction.NewTab) }) {
+            IconButton(modifier = Modifier.size(buttonSize), onClick = { onAction(BrowserAction.NewTab) }) {
                 Icon(
                     imageVector = Icons.Filled.Add,
                     contentDescription = stringResource(R.string.tab_new),
                 )
             }
 
+            // Quick tab cycling: each tap jumps to the next tab and wraps
+            // from the last tab back to the first.
+            IconButton(
+                modifier = Modifier.size(buttonSize),
+                onClick = { onAction(BrowserAction.CycleNextTab) },
+                enabled = state.tabs.size > 1,
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.SwapHoriz,
+                    contentDescription = stringResource(R.string.action_cycle_next_tab),
+                )
+            }
+
             Box {
-                IconButton(modifier = Modifier.size(if (compact) 38.dp else 42.dp), onClick = { menuExpanded = true }) {
+                IconButton(modifier = Modifier.size(buttonSize), onClick = { menuExpanded = true }) {
                     Icon(
                         imageVector = Icons.Filled.MoreVert,
                         contentDescription = stringResource(R.string.action_menu),

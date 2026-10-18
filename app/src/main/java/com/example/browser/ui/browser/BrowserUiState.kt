@@ -30,6 +30,12 @@ data class CredentialSavePrompt(
     val isUpdate: Boolean,
 )
 
+/** One history entry offered while the user types in the address bar. */
+data class AddressSuggestion(
+    val title: String,
+    val url: String,
+)
+
 /** A link/media long-press menu requested by the current page. */
 data class PageContextMenu(
     val title: String = "",
@@ -81,6 +87,8 @@ data class BrowserUiState(
     val pendingCredentialSave: CredentialSavePrompt? = null,
     /** Long-press menu for a link/image/video/audio on the page, if open. */
     val pageContextMenu: PageContextMenu? = null,
+    /** History matches for the text currently typed in the address bar. */
+    val addressSuggestions: List<AddressSuggestion> = emptyList(),
 )
 
 /** Explicit user actions sent from the UI to [BrowserViewModel] (ARCHITECTURE.md §14). */
@@ -111,6 +119,9 @@ sealed interface BrowserAction {
     data object ToggleFullscreen : BrowserAction
     data object ExitFullscreen : BrowserAction
     data class SwitchAdjacentTab(val delta: Int) : BrowserAction
+    /** Jump to the next tab, wrapping from the last tab back to the first. */
+    data object CycleNextTab : BrowserAction
+    data class AddressQueryChanged(val query: String) : BrowserAction
     data object CloseAllTabs : BrowserAction
     data object UndoCloseAllTabs : BrowserAction
     data object SavePendingCredential : BrowserAction

@@ -399,14 +399,20 @@ internal class GeckoBrowserSession(
     @Volatile
     private var closed = false
 
+    @Volatile
+    private var priorityHigh: Boolean = false
+
     /** Opens the session against the shared runtime if it is not open yet. */
     internal fun ensureOpen() {
         if (!closed && !geckoSession.isOpen) {
             geckoSession.open(engine.runtime)
-            // Live (not suspended) tabs are intentionally kept high priority
-            // so Gecko preserves their page/compositor state. Suspension,
-            // not background-tab priority demotion, is our memory control.
-            geckoSession.setPriorityHint(GeckoSession.PRIORITY_HIGH)
+            geckoSession.setPriorityHint(
+                if (priorityHigh) {
+                    GeckoSession.PRIORITY_HIGH
+                } else {
+                    GeckoSession.PRIORITY_DEFAULT
+                },
+            )
             pendingRestore?.let { saved ->
                 pendingRestore = null
                 GeckoSession.SessionState.fromString(saved.serialized)
@@ -516,6 +522,10 @@ internal class GeckoBrowserSession(
         )
     }
 
+    override fun exitFullscreen() {
+        if (!closed && geckoSession.isOpen) geckoSession.exitFullScreen()
+    }
+
     override fun loadUrl(url: String) {
         if (closed || url.isBlank()) return
         ensureOpen()
@@ -547,10 +557,16 @@ internal class GeckoBrowserSession(
         if (!closed && geckoSession.isOpen && _state.value.canGoForward) geckoSession.goForward()
     }
 
-    override fun setActive(active: Boolean) {
+    override fun setPriorityHigh(high: Boolean) {
+        priorityHigh = high
         if (!closed && geckoSession.isOpen) {
-            if (active) geckoSession.setPriorityHint(GeckoSession.PRIORITY_HIGH)
-            geckoSession.setActive(active)
+            geckoSession.setPriorityHint(
+                if (high) {
+                    GeckoSession.PRIORITY_HIGH
+                } else {
+                    GeckoSession.PRIORITY_DEFAULT
+                },
+            )
         }
     }
 

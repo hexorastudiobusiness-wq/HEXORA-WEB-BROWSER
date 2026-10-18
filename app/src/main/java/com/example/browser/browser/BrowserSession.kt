@@ -134,14 +134,23 @@ interface BrowserSession {
     /** Captures a small snapshot of the visible page for tab previews. */
     fun captureThumbnail(onCaptured: (Bitmap?) -> Unit)
 
+    /** Asks the page to leave HTML fullscreen (no-op when not fullscreen). */
+    fun exitFullscreen()
+
     fun loadUrl(url: String)
     fun reload()
     fun stopLoading()
     fun goBack()
     fun goForward()
 
-    /** Active sessions render/paint; inactive ones are paused by the engine. */
-    fun setActive(active: Boolean)
+    /**
+     * Marks this session as part of the small "warm" set Gecko should keep
+     * alive as long as possible (the selected tab and the most recently used
+     * ones). GeckoView itself manages active/inactive from the surface; this
+     * only steers its process prioritisation, mirroring Mozilla's
+     * SessionPrioritizationMiddleware.
+     */
+    fun setPriorityHigh(high: Boolean)
 
     /**
      * Returns the browser's single shared native content view and binds this
@@ -154,12 +163,6 @@ interface BrowserSession {
 
     /** Binds this session to the already-created shared content [view]. */
     fun renderContentView(view: View)
-
-    /**
-     * Forces the shared native view to release and re-acquire this session's
-     * display. Used to recover rendering after an external activity (such as
-     * the system file picker) has torn down the underlying surface.
-     */
 
     /** Detaches [view] from this session without closing the session. */
     fun releaseContentView(view: View)
