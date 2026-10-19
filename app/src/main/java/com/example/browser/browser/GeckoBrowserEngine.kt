@@ -89,6 +89,26 @@ class GeckoBrowserEngine(
     override fun createSession(config: BrowserSessionConfig): BrowserSession =
         createSessionInternal(config).also { it.ensureOpen() }
 
+    override fun rebindRenderedContentView() {
+        val geckoView = sharedContentView ?: return
+        val host = sharedContentHost ?: return
+        if (renderedSession == null) return
+        if (geckoView.parent !== host) return
+        // Recreate the native surface exactly the way a round trip to the
+        // tab switcher does: detach releases (never closes) the session and
+        // remembers it for re-attach; adding the view back re-acquires a
+        // fresh display via handleSharedViewAttached -> bindContentView.
+        // The page is repainted from the live session, not reloaded.
+        (geckoView.parent as? ViewGroup)?.removeView(geckoView)
+        host.addView(
+            geckoView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+    }
+
     override fun restoreSession(
         config: BrowserSessionConfig,
         savedState: SavedTabState,

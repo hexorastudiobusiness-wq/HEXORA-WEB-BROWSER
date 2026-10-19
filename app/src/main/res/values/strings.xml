@@ -69,7 +69,6 @@
     <string name="download_failed">Download could not be started</string>
     <string name="action_remove">Remove</string>
     <string name="action_undo">Undo</string>
-    <string name="action_exit_fullscreen">Exit fullscreen</string>
     <string name="action_find_next">Next match</string>
     <string name="action_find_previous">Previous match</string>
     <string name="action_close_find">Close find bar</string>

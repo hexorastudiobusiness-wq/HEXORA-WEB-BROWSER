@@ -824,16 +824,29 @@ class BrowserViewModel(
      * without it the tab that was on screen at minimise time came back as
      * an empty tab even though the tab strip still showed its site.
      */
-    fun onAppForegrounded() {
+    fun onAppForegrounded(backgroundDurationMs: Long = 0L) {
+        var activeRecovered = false
         _tabs.value.forEach { entry ->
             val session = entry.session ?: return@forEach
             if (!session.isUsable()) {
+                if (entry.tabId == _activeTabId.value) activeRecovered = true
                 recoverDeadSession(entry, session)
             }
         }
-        val active = activeEntry()
-        if (active != null && active.session == null) {
+        val active = activeEntry() ?: return
+        if (active.session == null) {
             restoreTab(active)
+            return
+        }
+        if (!activeRecovered &&
+            backgroundDurationMs >= REBIND_AFTER_BACKGROUND_MS
+        ) {
+            // The sessions survived the background stay but the native
+            // surface did not: pages keep loading yet paint white, and
+            // even Refresh cannot revive them (only a round trip to the
+            // tab switcher, which recreates the surface, used to help).
+            // Recreate the surface proactively after a long backgrounding.
+            engine?.rebindRenderedContentView()
         }
     }
 
@@ -1403,6 +1416,12 @@ class BrowserViewModel(
     companion object {
         /** Inactive tabs (besides the selected one) kept at high priority. */
         const val WARM_INACTIVE_TABS = 3
+
+        /**
+         * After this long in the background the rendered surface is
+         * recreated on return even when all sessions are still alive.
+         */
+        const val REBIND_AFTER_BACKGROUND_MS = 30_000L
         const val MAX_ADDRESS_SUGGESTIONS = 6
         const val SHORTCUT_ICON_RETRY_MILLIS = 6 * 60 * 60 * 1000L
     }

@@ -4,6 +4,7 @@ import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -220,12 +221,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var backgroundedAtMs: Long = 0L
+
+    override fun onStop() {
+        super.onStop()
+        backgroundedAtMs = SystemClock.elapsedRealtime()
+    }
+
     override fun onStart() {
         super.onStart()
         // Returning to the foreground: recreate any tab session whose
         // content process died while backgrounded, so the visible tab
-        // repaints its page instead of coming back empty.
-        browserViewModel.onAppForegrounded()
+        // repaints its page instead of coming back empty. After a long
+        // backgrounding the rendered surface is recreated too.
+        val backgroundDurationMs = if (backgroundedAtMs == 0L) {
+            0L
+        } else {
+            SystemClock.elapsedRealtime() - backgroundedAtMs
+        }
+        browserViewModel.onAppForegrounded(backgroundDurationMs)
     }
 
     override fun onNewIntent(intent: Intent) {
