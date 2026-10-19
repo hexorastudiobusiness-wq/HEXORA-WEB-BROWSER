@@ -389,12 +389,25 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 browserViewModel.downloadEvents.collect { event ->
-                    val downloadId = container.downloadHandler.download(
-                        url = event.url,
-                        fileName = event.fileName,
-                        mimeType = event.mimeType,
-                        pageUrl = event.pageUrl,
-                    )
+                    val bodySource = event.bodySource
+                    val downloadId = if (bodySource != null) {
+                        // The engine already received this response; consume
+                        // its body. A fresh GET could not reproduce blob,
+                        // POST or authenticated downloads.
+                        container.downloadHandler.downloadStream(
+                            bodySource = bodySource,
+                            fileName = event.fileName,
+                            mimeType = event.mimeType,
+                            contentLength = event.contentLength,
+                        )
+                    } else {
+                        container.downloadHandler.download(
+                            url = event.url,
+                            fileName = event.fileName,
+                            mimeType = event.mimeType,
+                            pageUrl = event.pageUrl,
+                        )
+                    }
                     val started = downloadId >= 0
                     if (started && !event.isPrivate) {
                         // Private-tab downloads still produce the file the

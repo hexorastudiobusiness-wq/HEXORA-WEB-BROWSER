@@ -31,7 +31,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -126,7 +127,7 @@ import kotlinx.coroutines.delay
  * address bar on top, engine view in the middle, navigation bar at the bottom.
  * In fullscreen the chrome hides and only a small exit button remains.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun BrowserScreen(
     viewModel: BrowserViewModel,
@@ -249,11 +250,17 @@ fun BrowserScreen(
             // Without this, the web view keeps its full height and a
             // page's bottom input (chat composers, comment boxes) stays
             // hidden under the keyboard and cannot be scrolled into view.
-            // imePadding shrinks the whole browser area by the keyboard
-            // height — the classic adjustResize behaviour — so the page
-            // viewport resizes and the focused input is visible above
-            // the keyboard. It also animates with the keyboard.
-            .imePadding(),
+            //
+            // Padding by the IME *animation target* instead of the live
+            // IME inset keeps that behaviour but resizes the browser area
+            // exactly once per keyboard toggle, at the target height,
+            // instead of following every animation frame. The previous
+            // live imePadding() resized the Gecko surface dozens of times
+            // per toggle, which lagged on Samsung keyboards and glitched
+            // the display on Xiaomi devices.
+            .windowInsetsPadding(
+                WindowInsets.imeAnimationTarget.only(WindowInsetsSides.Bottom),
+            ),
     ) {
         // With every tab closed the Start Page stands alone: no address
         // bar (there is no tab to navigate). It comes back as soon as a

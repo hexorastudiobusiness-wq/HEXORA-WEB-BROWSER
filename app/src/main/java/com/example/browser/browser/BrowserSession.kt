@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.view.View
+import java.io.InputStream
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -66,6 +67,26 @@ sealed interface BrowserSessionEvent {
         val isPrivate: Boolean = false,
         /** Page that initiated the download; used only as a referer hint. */
         val pageUrl: String? = null,
+        /** Total body size in bytes when the engine reported one, else -1. */
+        val contentLength: Long = -1L,
+        /**
+         * Opens the response body the engine already received, when it handed
+         * one over. Consuming this stream is the only way to download
+         * blob/data/POST/authenticated responses: they cannot be replayed as
+         * a fresh GET. The stream may be opened at most once and must be
+         * closed by the consumer. Null means "re-fetch [url] instead".
+         */
+        val bodySource: (() -> InputStream?)? = null,
+    ) : BrowserSessionEvent
+
+    /**
+     * The session's content process crashed or was killed by the system
+     * (Gecko `onCrash`/`onKill`). The session is closed and unusable; the
+     * tab itself must survive and be restored from its saved state, the way
+     * Firefox's crash handling recreates a dead tab's engine session.
+     */
+    data class SessionDied(
+        override val sessionId: String,
     ) : BrowserSessionEvent
 
     /** The page requested a file picker (for example an upload input). */

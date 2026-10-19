@@ -11,6 +11,7 @@ import android.util.Log
 import android.webkit.MimeTypeMap
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
@@ -45,6 +46,7 @@ class DownloadHandler(context: Context) {
     private val progressById = ConcurrentHashMap<Long, Progress>()
     private val jobs = ConcurrentHashMap<Long, Job>()
     private val connections = ConcurrentHashMap<Long, HttpURLConnection>()
+    private val streams = ConcurrentHashMap<Long, InputStream>()
     private val completedUris = ConcurrentHashMap<Long, Uri>()
     private val fileNames = ConcurrentHashMap<Long, String>()
 
@@ -113,30 +115,8 @@ class DownloadHandler(context: Context) {
                 throw IllegalStateException("HTTP $responseCode")
             }
             val total = opened.contentLengthLong
-            var downloaded = 0L
-            var lastUpdateAt = 0L
-            opened.inputStream.buffered().use { input ->
-                FileOutputStream(tempFile).use { output ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    while (true) {
-                        scope.ensureActive()
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        output.write(buffer, 0, read)
-                        downloaded += read
-                        val now = System.currentTimeMillis()
-                        if (now - lastUpdateAt >= UPDATE_INTERVAL_MILLIS ||
-                            (total > 0 && downloaded == total)
-                        ) {
-                            lastUpdateAt = now
-                            progressById[id] = Progress(
-                                status = DownloadManager.STATUS_RUNNING,
-                                downloadedBytes = downloaded,
-                                totalBytes = total,
-                            )
-                        }
-                    }
-                }
+            val downloaded = opened.inputStream.buffered().use { input ->
+                copyToTempFile(id, input, tempFile, total)
             }
             scope.ensureActive()
             val publishedUri = publish(tempFile, fileName, mimeType)
@@ -158,6 +138,108 @@ class DownloadHandler(context: Context) {
             connections.remove(id)
             connection?.disconnect()
         }
+    }
+
+    /**
+     * Starts a transfer from a response body the engine already received.
+     * This is the only path that works for blob/data/POST/authenticated
+     * downloads (e.g. a generated ZIP export), which cannot be replayed as a
+     * fresh GET. Returns the transfer id; the stream is consumed (and
+     * closed) on the IO thread.
+     */
+    fun downloadStream(
+        bodySource: () -> InputStream?,
+        fileName: String,
+        mimeType: String?,
+        contentLength: Long = -1L,
+    ): Long {
+        val safeName = DownloadFileName.sanitize(fileName)
+        val id = nextId.incrementAndGet()
+        fileNames[id] = safeName
+        progressById[id] = Progress(DownloadManager.STATUS_PENDING)
+        val job = scope.launch {
+            performStreamDownload(id, bodySource, safeName, mimeType, contentLength)
+        }
+        jobs[id] = job
+        job.invokeOnCompletion {
+            jobs.remove(id, job)
+            streams.remove(id)
+        }
+        return id
+    }
+
+    private suspend fun performStreamDownload(
+        id: Long,
+        bodySource: () -> InputStream?,
+        fileName: String,
+        mimeType: String?,
+        contentLength: Long,
+    ) {
+        val tempDir = File(appContext.cacheDir, "downloads").apply { mkdirs() }
+        val tempFile = File(tempDir, "$id.part")
+        var stream: InputStream? = null
+        try {
+            progressById[id] = Progress(DownloadManager.STATUS_RUNNING)
+            val opened = bodySource()
+                ?: throw IllegalStateException("Download body unavailable")
+            stream = opened
+            streams[id] = opened
+            val downloaded = opened.buffered().use { input ->
+                copyToTempFile(id, input, tempFile, contentLength)
+            }
+            scope.ensureActive()
+            val publishedUri = publish(tempFile, fileName, mimeType)
+            completedUris[id] = publishedUri
+            val finalTotal = if (contentLength > 0) contentLength else downloaded
+            progressById[id] = Progress(
+                status = DownloadManager.STATUS_SUCCESSFUL,
+                downloadedBytes = downloaded,
+                totalBytes = finalTotal,
+            )
+        } catch (cancelled: CancellationException) {
+            tempFile.delete()
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "Stream download failed", error)
+            tempFile.delete()
+            progressById[id] = Progress(DownloadManager.STATUS_FAILED)
+        } finally {
+            streams.remove(id)
+            runCatching { stream?.close() }
+        }
+    }
+
+    /** Streams [input] into [tempFile], reporting progress; returns bytes copied. */
+    private suspend fun copyToTempFile(
+        id: Long,
+        input: InputStream,
+        tempFile: File,
+        total: Long,
+    ): Long {
+        var downloaded = 0L
+        var lastUpdateAt = 0L
+        FileOutputStream(tempFile).use { output ->
+            val buffer = ByteArray(BUFFER_SIZE)
+            while (true) {
+                scope.ensureActive()
+                val read = input.read(buffer)
+                if (read < 0) break
+                output.write(buffer, 0, read)
+                downloaded += read
+                val now = System.currentTimeMillis()
+                if (now - lastUpdateAt >= UPDATE_INTERVAL_MILLIS ||
+                    (total > 0 && downloaded == total)
+                ) {
+                    lastUpdateAt = now
+                    progressById[id] = Progress(
+                        status = DownloadManager.STATUS_RUNNING,
+                        downloadedBytes = downloaded,
+                        totalBytes = total,
+                    )
+                }
+            }
+        }
+        return downloaded
     }
 
     /** Copies the finished temp file into the user-visible Downloads folder. */
@@ -282,6 +364,8 @@ class DownloadHandler(context: Context) {
         val hadOwnTransfer = jobs.containsKey(downloadId) ||
             progressById.containsKey(downloadId)
         connections.remove(downloadId)?.disconnect()
+        // Closing the stream also unblocks a read the job is parked in.
+        runCatching { streams.remove(downloadId)?.close() }
         jobs.remove(downloadId)?.cancel()
         progressById.remove(downloadId)
         completedUris.remove(downloadId)

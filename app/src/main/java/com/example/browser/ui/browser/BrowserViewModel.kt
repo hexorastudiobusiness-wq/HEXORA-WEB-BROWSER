@@ -1000,6 +1000,27 @@ class BrowserViewModel(
         entry.session = null
     }
 
+    /**
+     * The tab's content process crashed or was killed while backgrounded
+     * (Gecko `onCrash`/`onKill`): the session is closed and unusable, but
+     * the *tab* must survive. Following Firefox's crash handling, drop the
+     * dead session and restore the tab from its latest saved state (or its
+     * last URL). The active tab is recreated immediately so returning to
+     * the app repaints the page instead of showing the dead session's
+     * black/empty surface; an inactive tab is simply left suspended and
+     * restores when selected.
+     */
+    private fun recoverDeadSession(entry: TabEntry, deadSession: BrowserSession) {
+        if (entry.session !== deadSession) return
+        entry.savedState = deadSession.latestSavedState() ?: entry.savedState
+        sessionJobs.remove(entry.tabId)?.cancel()
+        deadSession.close()
+        entry.session = null
+        if (entry.tabId == _activeTabId.value) {
+            restoreTab(entry)
+        }
+    }
+
     private fun attachSession(entry: TabEntry, session: BrowserSession) {
         _pageStates.update { it + (entry.tabId to session.state.value) }
         sessionJobs[entry.tabId] = viewModelScope.launch {
@@ -1077,6 +1098,8 @@ class BrowserViewModel(
                             handleCredentialSubmitted(entry, event)
                         is BrowserSessionEvent.CloseRequested ->
                             closeTab(event.sessionId.toTabId())
+                        is BrowserSessionEvent.SessionDied ->
+                            recoverDeadSession(entry, session)
                     }
                 }
             }

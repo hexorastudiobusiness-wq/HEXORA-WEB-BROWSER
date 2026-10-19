@@ -901,8 +901,20 @@ internal class GeckoBrowserSession(
             _events.tryEmit(BrowserSessionEvent.CloseRequested(sessionId = id))
         }
 
-        override fun onCrash(session: GeckoSession) {
+        override fun onCrash(session: GeckoSession) = onSessionDied()
+
+        override fun onKill(session: GeckoSession) = onSessionDied()
+
+        /**
+         * Gecko has closed this session because its content process died
+         * (crash, or the system killing it while the app was backgrounded).
+         * Tell the tab layer so it can restore the tab from saved state
+         * instead of leaving a dead session attached to the view, which is
+         * what used to come back black/empty after minimising the app.
+         */
+        private fun onSessionDied() {
             _state.update { it.copy(isLoading = false, loadFailed = true) }
+            _events.tryEmit(BrowserSessionEvent.SessionDied(sessionId = id))
         }
 
         override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
@@ -913,8 +925,19 @@ internal class GeckoBrowserSession(
                 ?.substringBefore(';')
                 ?.trim()
                 ?.takeIf { it.isNotBlank() }
+            val contentLength = response.headers
+                .headerValue("Content-Length")
+                ?.toLongOrNull()
+                ?: -1L
+            val body = response.body
+            if (body != null) {
+                // The download layer reads this stream on a background
+                // thread; the default 30 s per-read timeout would kill slow
+                // or large transfers mid-stream.
+                runCatching { response.setReadTimeoutMillis(0) }
+            }
 
-            _events.tryEmit(
+            val handedOff = _events.tryEmit(
                 BrowserSessionEvent.DownloadRequested(
                     sessionId = id,
                     url = response.uri,
@@ -922,14 +945,22 @@ internal class GeckoBrowserSession(
                     mimeType = mimeType,
                     isPrivate = isPrivate,
                     pageUrl = _state.value.url.takeIf { it.isNotBlank() },
+                    contentLength = contentLength,
+                    // Hand the already-received body to the download layer.
+                    // Re-GET-ing the URL cannot reproduce blob/data/POST or
+                    // authenticated downloads (e.g. generated ZIP exports),
+                    // which is why those used to fail with "could not start".
+                    bodySource = body?.let { stream -> { stream } },
                 ),
             )
-            // The response body stream must always be closed, even when the
-            // download is re-fetched by the download layer instead.
-            try {
-                response.body?.close()
-            } catch (e: IOException) {
-                Log.w(TAG, "Failed to close download response stream", e)
+            if (!handedOff && body != null) {
+                // Nobody took the stream: it must still be closed, otherwise
+                // the underlying connection leaks until GC.
+                try {
+                    body.close()
+                } catch (e: IOException) {
+                    Log.w(TAG, "Failed to close download response stream", e)
+                }
             }
         }
     }
