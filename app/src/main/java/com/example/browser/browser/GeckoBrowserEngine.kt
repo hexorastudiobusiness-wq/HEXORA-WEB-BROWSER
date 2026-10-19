@@ -6,7 +6,9 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.util.Log
 import android.util.SparseArray
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import java.io.IOException
@@ -51,6 +53,11 @@ class GeckoBrowserEngine(
         get() = appContext
 
     override var newSessionCreatedListener: ((BrowserSession, String?) -> Unit)? = null
+
+    override var onTabSwipe: ((Int) -> Unit)? = null
+
+    @Volatile
+    override var tabSwipeEnabled: Boolean = false
 
     @Volatile
     private var textZoomPercent: Int = 100
@@ -173,7 +180,9 @@ class GeckoBrowserEngine(
         // is moved into that host by the engine, so a Compose branch change
         // (for example entering fullscreen) can never try to add a GeckoView
         // that still has another parent.
-        val host = FrameLayout(context)
+        val host = SwipeableHostLayout(context)
+        host.swipeEnabledProvider = { tabSwipeEnabled }
+        host.onSwipeTab = { delta -> onTabSwipe?.invoke(delta) }
         sharedContentHost = host
         attachToHost(geckoView, host)
         bindContentView(session, host)
@@ -324,6 +333,75 @@ class GeckoBrowserEngine(
 }
 
 /**
+ * Host of the shared GeckoView that can intercept a deliberate horizontal
+ * swipe so the app can switch tabs while the browser chrome is hidden
+ * (fullscreen). Touch events over the web surface never reach Compose, so
+ * the gesture must be detected here, at the view level. Only a clearly
+ * horizontal, fast-enough drag is intercepted; taps, vertical page
+ * scrolling and in-page horizontal interactions keep flowing to the page.
+ */
+internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
+
+    /** +1 = swiped left (next tab), -1 = swiped right (previous tab). */
+    var onSwipeTab: ((Int) -> Unit)? = null
+
+    /** Consulted on every gesture start; swipes are ignored while false. */
+    var swipeEnabledProvider: () -> Boolean = { false }
+
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private var downX = 0f
+    private var downY = 0f
+    private var swiping = false
+    private var fired = false
+
+    override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x
+                downY = event.y
+                swiping = false
+                fired = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!swiping && swipeEnabledProvider()) {
+                    val dx = event.x - downX
+                    val dy = event.y - downY
+                    if (kotlin.math.abs(dx) > touchSlop * 3 &&
+                        kotlin.math.abs(dx) > kotlin.math.abs(dy) * 2f
+                    ) {
+                        swiping = true
+                        return true
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> swiping = false
+        }
+        return super.onInterceptTouchEvent(event)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (swiping) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.x - downX
+                    if (!fired && kotlin.math.abs(dx) > SWIPE_THRESHOLD_PX) {
+                        fired = true
+                        onSwipeTab?.invoke(if (dx < 0) 1 else -1)
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> swiping = false
+            }
+            return true
+        }
+        return super.onTouchEvent(event)
+    }
+
+    private companion object {
+        const val SWIPE_THRESHOLD_PX = 96f
+    }
+}
+
+/**
  * The one shared content view.
  *
  * A plain [GeckoView] **closes its session** in `onDetachedFromWindow()`
@@ -402,27 +480,49 @@ internal class GeckoBrowserSession(
     @Volatile
     private var priorityHigh: Boolean = false
 
+    /**
+     * Set when Gecko reports this session's content process died
+     * (`onCrash`/`onKill`). A later defensive reopen must restore the saved
+     * state; reopening blank is what used to turn the tab into an empty
+     * page after the app spent time in the background.
+     */
+    @Volatile
+    private var closedUnexpectedly: Boolean = false
+
     /** Opens the session against the shared runtime if it is not open yet. */
     internal fun ensureOpen() {
-        if (!closed && !geckoSession.isOpen) {
-            geckoSession.open(engine.runtime)
-            geckoSession.setPriorityHint(
-                if (priorityHigh) {
-                    GeckoSession.PRIORITY_HIGH
-                } else {
-                    GeckoSession.PRIORITY_DEFAULT
-                },
-            )
-            pendingRestore?.let { saved ->
-                pendingRestore = null
-                GeckoSession.SessionState.fromString(saved.serialized)
-                    ?.let { restored -> geckoSession.restoreState(restored) }
+        if (closed || geckoSession.isOpen) return
+        geckoSession.open(engine.runtime)
+        geckoSession.setPriorityHint(
+            if (priorityHigh) {
+                GeckoSession.PRIORITY_HIGH
+            } else {
+                GeckoSession.PRIORITY_DEFAULT
+            },
+        )
+        val explicitRestore = pendingRestore
+        val restore = explicitRestore
+            ?: if (closedUnexpectedly) latestSavedState() else null
+        pendingRestore = null
+        closedUnexpectedly = false
+        restore?.let { saved ->
+            val restored = GeckoSession.SessionState.fromString(saved.serialized)
+            when {
+                restored != null -> geckoSession.restoreState(restored)
+                // An explicit restore that cannot be parsed must fail loudly
+                // so the caller falls back to loading the tab's last URL
+                // instead of silently opening an empty tab.
+                explicitRestore != null ->
+                    throw IllegalStateException("Unreadable saved tab state")
+                else -> Unit
             }
         }
     }
 
     override fun latestSavedState(): SavedTabState? =
         latestStateString?.let { SavedTabState(it) }
+
+    override fun isUsable(): Boolean = !closed && geckoSession.isOpen
 
     override fun setDesktopMode(enabled: Boolean) {
         if (closed || _state.value.isDesktopMode == enabled) return
@@ -913,6 +1013,7 @@ internal class GeckoBrowserSession(
          * what used to come back black/empty after minimising the app.
          */
         private fun onSessionDied() {
+            closedUnexpectedly = true
             _state.update { it.copy(isLoading = false, loadFailed = true) }
             _events.tryEmit(BrowserSessionEvent.SessionDied(sessionId = id))
         }

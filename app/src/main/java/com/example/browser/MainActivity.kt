@@ -91,6 +91,7 @@ class MainActivity : ComponentActivity() {
                     faviconFetcher = container.faviconFetcher,
                     settingsRepository = container.settingsRepository,
                     thumbnailStore = container.tabThumbnailStore,
+                    tabSessionStore = container.tabSessionStore,
                 )
             }
         }
@@ -217,6 +218,14 @@ class MainActivity : ComponentActivity() {
         ) {
             browserViewModel.suspendTabsOutsideWarmSet()
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Returning to the foreground: recreate any tab session whose
+        // content process died while backgrounded, so the visible tab
+        // repaints its page instead of coming back empty.
+        browserViewModel.onAppForegrounded()
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -137,6 +137,14 @@ interface BrowserSession {
     /** Latest saved state for suspending this tab, if the engine has one. */
     fun latestSavedState(): SavedTabState?
 
+    /**
+     * True while the underlying engine session is open and can render/load.
+     * A session whose content process was killed in the background reports
+     * false here even when no crash event was delivered, so the tab layer
+     * can recreate it instead of binding a dead session.
+     */
+    fun isUsable(): Boolean
+
     /** Switches desktop/mobile rendering for this tab and reloads the page. */
     fun setDesktopMode(enabled: Boolean)
 

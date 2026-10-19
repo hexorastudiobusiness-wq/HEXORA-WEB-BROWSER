@@ -50,7 +50,6 @@ import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -96,7 +95,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -112,7 +110,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.zIndex
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.browser.R
@@ -144,6 +141,12 @@ fun BrowserScreen(
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     var webContentView by remember { mutableStateOf<View?>(null) }
+
+    // Content-level left/right tab swipes only exist in fullscreen (where
+    // the chrome with its own swipe area is hidden).
+    LaunchedEffect(state.isFullscreen) {
+        viewModel.setTabSwipeEnabled(state.isFullscreen)
+    }
 
     // System back: exit fullscreen first, then navigate web history, and
     // only when neither applies does it leave the app.
@@ -351,31 +354,12 @@ private fun BrowserPageContent(
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
-        // Fullscreen exit lives outside the page branch on purpose: it
-        // must be visible no matter which content is underneath, drawn
-        // above the Gecko surface with a high-contrast scrim so it can
-        // never blend into a bright or dark video/page.
-        if (state.isFullscreen) {
-            IconButton(
-                onClick = { onAction(BrowserAction.ExitFullscreen) },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .zIndex(10f)
-                    .padding(20.dp)
-                    .size(52.dp)
-                    .background(
-                        color = Color.Black.copy(alpha = 0.65f),
-                        shape = CircleShape,
-                    ),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.FullscreenExit,
-                    contentDescription = stringResource(R.string.action_exit_fullscreen),
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp),
-                )
-            }
-        }
+        // No on-screen fullscreen-exit button by design: leaving fullscreen
+        // is the system Back button's job (handled in BrowserScreen), the
+        // way video players behave. Left/right swipes over the content
+        // switch tabs while staying in fullscreen; those are detected by
+        // the engine's native content view, because touch events over the
+        // web surface never reach Compose.
 
         if (state.showStartPage) {
             StartPage(

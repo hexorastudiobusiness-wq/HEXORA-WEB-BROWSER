@@ -20,7 +20,9 @@ import com.example.browser.data.repository.FaviconFetcher
 import com.example.browser.data.repository.HistoryRepository
 import com.example.browser.data.repository.StartShortcutRepository
 import com.example.browser.data.settings.BrowserSettingsState
+import com.example.browser.data.settings.PersistedTab
 import com.example.browser.data.settings.SettingsRepository
+import com.example.browser.data.settings.TabSessionStore
 import com.example.browser.data.settings.ThemeMode
 import com.example.browser.download.DownloadFileName
 import com.example.browser.util.CredentialOrigin
@@ -65,6 +67,7 @@ class BrowserViewModel(
     private val shortcutRepository: StartShortcutRepository,
     private val shortcutIconStore: ShortcutIconStore,
     private val faviconFetcher: FaviconFetcher,
+    private val tabSessionStore: TabSessionStore,
 ) : ViewModel() {
 
     private var engine: BrowserEngine? = null
@@ -286,8 +289,9 @@ class BrowserViewModel(
     }
 
     init {
-        // Tabs are not restored after process death, so screenshots from a
-        // previous process would only be orphaned private page images.
+        // Tab thumbnails are not restored after process death, so screenshots
+        // from a previous process would only be orphaned page images. (The
+        // tab strip itself — URLs/titles — is restored via TabSessionStore.)
         viewModelScope.launch(Dispatchers.IO) { thumbnailStore.clearAll() }
 
         viewModelScope.launch {
@@ -315,16 +319,19 @@ class BrowserViewModel(
                 attachSession(entry, session)
                 activateTab(entry.tabId)
             }
-            createTab(
-                url = null,
-                isPrivate = false,
-                desktopMode = initialSettings.desktopMode,
-                startPage = true,
-            )
+            createdEngine.onTabSwipe = { delta -> handleFullscreenTabSwipe(delta) }
+            restorePersistedTabs(initialSettings.desktopMode)
             pendingExternalUrl?.let { url ->
                 pendingExternalUrl = null
                 openNewTab(url = url, isPrivate = false)
             }
+        }
+        // Keep the persisted tab strip in sync so a cold start (e.g. after
+        // the system killed the backgrounded process) restores the tabs the
+        // user had open. Private tabs are never persisted.
+        viewModelScope.launch {
+            combine(_tabs, _activeTabId) { tabs, activeId -> tabs to activeId }
+                .collect { persistTabsSnapshot() }
         }
         // Load any favicons cached from earlier visits to shortcut sites.
         viewModelScope.launch {
@@ -543,6 +550,15 @@ class BrowserViewModel(
 
     fun switchTab(tabId: String) {
         val entry = entry(tabId) ?: return
+        val session = entry.session
+        if (session != null && !session.isUsable()) {
+            // The content process died while this tab sat in the background
+            // and no death event reached us (or it was missed): recreate
+            // the session from saved state / last URL instead of binding a
+            // dead one, which rendered a white page even Refresh could not
+            // revive.
+            recoverDeadSession(entry, session)
+        }
         if (entry.session == null) restoreTab(entry)
         activateTab(tabId)
         updateWarmPriorities()
@@ -799,6 +815,92 @@ class BrowserViewModel(
             .forEach { suspendTab(it) }
     }
 
+    /**
+     * Called by the Activity every time the app returns to the foreground.
+     * Any session whose content process died while backgrounded — whether
+     * or not Gecko delivered the death event — is recreated here: the
+     * active tab immediately, inactive ones lazily (they restore when
+     * selected). This is the foreground half of the crash-recovery story;
+     * without it the tab that was on screen at minimise time came back as
+     * an empty tab even though the tab strip still showed its site.
+     */
+    fun onAppForegrounded() {
+        _tabs.value.forEach { entry ->
+            val session = entry.session ?: return@forEach
+            if (!session.isUsable()) {
+                recoverDeadSession(entry, session)
+            }
+        }
+        val active = activeEntry()
+        if (active != null && active.session == null) {
+            restoreTab(active)
+        }
+    }
+
+    /** Fullscreen tab swipes are detected by the engine's content view. */
+    fun setTabSwipeEnabled(enabled: Boolean) {
+        engine?.tabSwipeEnabled = enabled
+    }
+
+    /**
+     * A left/right swipe over fullscreen web content: move to the adjacent
+     * tab and *stay* in fullscreen (app-level, so the newly shown tab is
+     * fullscreen too) until the user leaves with Back.
+     */
+    private fun handleFullscreenTabSwipe(delta: Int) {
+        if (_tabs.value.size < 2) return
+        val activeId = _activeTabId.value ?: return
+        val pageFullscreen = _pageStates.value[activeId]?.isPageFullscreen == true
+        if (!_userFullscreen.value && !pageFullscreen) return
+        _userFullscreen.value = true
+        switchAdjacentTab(delta)
+    }
+
+    /** Recreates tab entries (no sessions yet) from the persisted tab strip. */
+    private suspend fun restorePersistedTabs(desktopMode: Boolean) {
+        val persisted = runCatching { tabSessionStore.load() }.getOrNull()
+        if (persisted == null || persisted.tabs.isEmpty()) {
+            createTab(
+                url = null,
+                isPrivate = false,
+                desktopMode = desktopMode,
+                startPage = true,
+            )
+            return
+        }
+        val entries = persisted.tabs.map { saved ->
+            TabEntry(
+                tabId = newTabId(),
+                session = null,
+                isPrivate = false,
+                desktopMode = desktopMode,
+                lastUrl = saved.url,
+                lastTitle = saved.title,
+                showStartPage = false,
+            )
+        }
+        _tabs.update { it + entries }
+        entries.forEach { touchLru(it.tabId) }
+        val active = entries[persisted.activeIndex.coerceIn(entries.indices)]
+        _activeTabId.value = active.tabId
+        restoreTab(active)
+        updateWarmPriorities()
+    }
+
+    /** Writes the current (non-private) tab strip to [tabSessionStore]. */
+    private suspend fun persistTabsSnapshot() {
+        val entries = _tabs.value.filterNot { it.isPrivate || it.lastUrl.isBlank() }
+        val activeIndex = entries.indexOfFirst { it.tabId == _activeTabId.value }
+        runCatching {
+            tabSessionStore.save(
+                tabs = entries.map { entry ->
+                    PersistedTab(url = entry.lastUrl, title = entry.lastTitle)
+                },
+                activeIndex = if (activeIndex >= 0) activeIndex else 0,
+            )
+        }
+    }
+
     // ---- Action helpers ------------------------------------------------------
 
     private fun toggleBookmark() {
@@ -934,18 +1036,31 @@ class BrowserViewModel(
             isPrivate = entry.isPrivate,
             desktopMode = entry.desktopMode,
         )
+        val saved = entry.savedState
+        var restoredFromState = false
         val session = try {
-            entry.savedState?.let { saved ->
-                runCatching { currentEngine.restoreSession(config, saved) }.getOrNull()
-            } ?: currentEngine.createSession(config)
+            if (saved != null) {
+                currentEngine.restoreSession(config, saved)
+                    .also { restoredFromState = true }
+            } else {
+                currentEngine.createSession(config)
+            }
         } catch (e: Exception) {
-            _engineError.value = e.message ?: e.javaClass.simpleName
-            return
+            // Restore failed (e.g. unreadable saved state): fall back to a
+            // fresh session and reopen the tab's last URL below. Silently
+            // binding a blank session here is what turned restored tabs
+            // into empty pages.
+            try {
+                currentEngine.createSession(config)
+            } catch (e2: Exception) {
+                _engineError.value = e2.message ?: e2.javaClass.simpleName
+                return
+            }
         }
         entry.session = session
         attachSession(entry, session)
-        if (entry.savedState == null && entry.lastUrl.isNotBlank()) {
-            // No saved navigation state (should be rare): reopen the page.
+        if (!restoredFromState && entry.lastUrl.isNotBlank()) {
+            // No (usable) saved navigation state: reopen the page.
             session.loadUrl(entry.lastUrl)
         }
         entry.savedState = null
@@ -1058,6 +1173,7 @@ class BrowserViewModel(
                         if (!entry.isPrivate && UrlUtils.isHttpUrl(state.url)) {
                             historyRepository.recordVisit(state.url, state.title)
                             refreshShortcutIconsForLoadedPage(state.url)
+                            persistTabsSnapshot()
                         }
                         if (state.url.isNotBlank() &&
                             lastThumbnailUrl[entry.tabId] != state.url

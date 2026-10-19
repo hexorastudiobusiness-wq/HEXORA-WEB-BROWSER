@@ -17,6 +17,21 @@ interface BrowserEngine {
      */
     var newSessionCreatedListener: ((BrowserSession, String?) -> Unit)?
 
+    /**
+     * Called when the user performs a horizontal tab-swipe gesture on the
+     * rendered web content (+1 = swiped left / next tab, -1 = swiped right /
+     * previous tab). Only delivered while [tabSwipeEnabled] is true; the
+     * gesture is detected at the native-view level because touch events over
+     * the web surface never reach Compose.
+     */
+    var onTabSwipe: ((Int) -> Unit)?
+
+    /**
+     * Enables content-level tab swiping (used in fullscreen, where the
+     * browser chrome — and its own swipe area — is hidden).
+     */
+    var tabSwipeEnabled: Boolean
+
     /** Creates a new, independent session. Not thread-confined, but cheap. */
     fun createSession(config: BrowserSessionConfig): BrowserSession
 
