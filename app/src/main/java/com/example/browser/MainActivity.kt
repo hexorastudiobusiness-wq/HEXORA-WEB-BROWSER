@@ -504,9 +504,12 @@ class MainActivity : ComponentActivity() {
                     errorCode: Int,
                     errString: CharSequence?,
                 ) {
-                    if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
-                        errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
-                    ) {
+                    // 10 = ERROR_USER_CANCELED and 13 =
+                    // ERROR_NEGATIVE_BUTTON of the framework BiometricPrompt
+                    // (the constants are not exposed in the SDK 37 stubs,
+                    // so the documented values are compared directly). A
+                    // user cancelling the prompt is not an unlock failure.
+                    if (errorCode != 10 && errorCode != 13) {
                         Toast.makeText(
                             this@MainActivity,
                             R.string.passwords_unlock_failed,

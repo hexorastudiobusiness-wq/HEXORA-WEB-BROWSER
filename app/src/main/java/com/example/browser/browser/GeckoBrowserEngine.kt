@@ -695,7 +695,7 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
         val action = event.actionMasked
         val y = event.y
         onTouchEventForDetailResult(event).accept(
-            { detail -> onPullDetail(action, y, detail) },
+            { detail -> detail?.let { onPullDetail(action, y, it) } },
             { _ -> },
         )
         return true
