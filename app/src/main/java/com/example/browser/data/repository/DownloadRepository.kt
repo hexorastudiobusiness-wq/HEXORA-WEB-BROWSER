@@ -2,7 +2,9 @@ package com.example.browser.data.repository
 
 import com.example.browser.data.database.DownloadDao
 import com.example.browser.data.database.DownloadEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 
 /**
  * Application-facing downloads history API. Files themselves live in the
