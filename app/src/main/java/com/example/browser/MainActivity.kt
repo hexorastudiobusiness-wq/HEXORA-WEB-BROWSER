@@ -10,7 +10,7 @@ import android.graphics.Rect
 import android.app.KeyguardManager
 import android.hardware.biometrics.BiometricPrompt
 import android.graphics.pdf.PdfRenderer
-import android.graphics.pdf.PrintedPdfDocument
+import android.graphics.pdf.PdfDocument
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
@@ -1026,12 +1026,12 @@ private class PdfFilePrintAdapter(
             callback.onWriteFailed("No pages to print")
             return
         }
-        val attributes = PrintAttributes.Builder()
-            .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
-            .setResolution(PrintAttributes.Resolution("hexora-pdf", "PDF", 300, 300))
-            .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
-            .build()
-        val document = PrintedPdfDocument(context, attributes)
+        // PdfDocument (android.graphics.pdf) is used directly: the
+        // convenience PrintedPdfDocument wrapper is not part of the
+        // SDK 37 stubs this project compiles against. Each output page
+        // takes the source page's own dimensions (PdfRenderer reports
+        // page sizes in 1/72-inch points, exactly what PageInfo wants).
+        val document = PdfDocument()
         try {
             pageIndices.forEachIndexed { outputIndex, pageIndex ->
                 if (cancellationSignal?.isCanceled == true) {
@@ -1056,7 +1056,13 @@ private class PdfFilePrintAdapter(
                         null,
                         PdfRenderer.Page.RENDER_MODE_FOR_PRINT,
                     )
-                    val printedPage = document.startPage(outputIndex)
+                    val printedPage = document.startPage(
+                        PdfDocument.PageInfo.Builder(
+                            sourcePage.width,
+                            sourcePage.height,
+                            outputIndex,
+                        ).create(),
+                    )
                     try {
                         printedPage.canvas.drawBitmap(
                             bitmap,
