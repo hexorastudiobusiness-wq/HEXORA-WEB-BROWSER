@@ -18,7 +18,9 @@ permissions:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
+    # Apple-silicon runners boot the ARM emulator natively (Linux hosted
+    # runners timed out booting an x86_64 emulator), and ARM matches phones.
+    runs-on: macos-14
     steps:
       - name: Check out sources
         uses: actions/checkout@v4
@@ -56,7 +58,7 @@ jobs:
         run: |
           mkdir -p old
           gh release download debug-799c44b \
-            --pattern 'app-x86_64-debug.apk' \
+            --pattern 'app-arm64-v8a-debug.apk' \
             --dir old
 
       - name: Run upgrade smoke test on emulator
