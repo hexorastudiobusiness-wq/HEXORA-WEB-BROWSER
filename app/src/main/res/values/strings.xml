@@ -246,6 +246,9 @@
     <string name="passwords_unlock_subtitle">Verify it is you</string>
     <string name="passwords_unlock_failed">Could not verify your identity</string>
     <string name="external_link_failed">No app can open this link</string>
+    <string name="crash_title">Hexora closed unexpectedly last time. Please share this report so the bug can be found and fixed:</string>
+    <string name="crash_share">Share crash report</string>
+    <string name="crash_clear_retry">Delete report and try again</string>
     <string name="auth_username">Username</string>
     <string name="auth_password">Password</string>
 </resources>
