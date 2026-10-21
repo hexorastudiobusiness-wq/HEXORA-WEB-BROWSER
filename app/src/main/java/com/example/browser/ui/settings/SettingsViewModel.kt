@@ -25,6 +25,10 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setSearchEngine(engine) }
     }
 
+    fun setCustomSearch(name: String, template: String) {
+        viewModelScope.launch { repository.setCustomSearch(name, template) }
+    }
+
     fun setPasswordManagerEnabled(enabled: Boolean) {
         viewModelScope.launch { repository.setPasswordManagerEnabled(enabled) }
     }
@@ -41,8 +45,12 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setJavaScriptEnabled(enabled) }
     }
 
-    fun setCookiesEnabled(enabled: Boolean) {
-        viewModelScope.launch { repository.setCookiesEnabled(enabled) }
+    fun setTrackingProtectionEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setTrackingProtectionEnabled(enabled) }
+    }
+
+    fun setHttpsOnlyMode(enabled: Boolean) {
+        viewModelScope.launch { repository.setHttpsOnlyMode(enabled) }
     }
 
     fun setDesktopMode(enabled: Boolean) {

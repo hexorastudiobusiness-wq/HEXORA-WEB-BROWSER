@@ -40,6 +40,7 @@ class CredentialCipher {
         String(cipher.doFinal(encrypted), Charsets.UTF_8)
     }.getOrNull()
 
+    @Synchronized
     private fun key(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)

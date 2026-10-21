@@ -73,11 +73,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="debug-${GITHUB_SHA::7}"
-          gh release create "$TAG" \
-            app/build/outputs/apk/debug/*.apk \
-            --title "Hexora Browser — debug build ${GITHUB_SHA::7}" \
-            --notes "Automated debug build of commit ${GITHUB_SHA}. Pick the APK for your device: arm64-v8a (most modern phones), armeabi-v7a (old 32-bit phones), x86_64 (emulators). Not for production use." \
-            --prerelease
+          # Re-running the workflow for the same commit (or re-pushing the
+          # same SHA) must not fail just because the prerelease exists.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" \
+              app/build/outputs/apk/debug/*.apk \
+              --clobber
+          else
+            gh release create "$TAG" \
+              app/build/outputs/apk/debug/*.apk \
+              --title "Hexora Browser — debug build ${GITHUB_SHA::7}" \
+              --notes "Automated debug build of commit ${GITHUB_SHA}. Pick the APK for your device: arm64-v8a (most modern phones), armeabi-v7a (old 32-bit phones), x86_64 (emulators). Not for production use." \
+              --prerelease
+          fi
 
       # Log download hosts are unreachable from the dev sandbox, so on
       # failure the tail of the Gradle log is mirrored into an issue.

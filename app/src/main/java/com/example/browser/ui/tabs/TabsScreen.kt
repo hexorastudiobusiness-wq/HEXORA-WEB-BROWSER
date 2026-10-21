@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,9 +13,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
@@ -22,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
@@ -40,10 +46,14 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,6 +81,18 @@ fun TabsScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsState()
+    val recentlyClosedTabs by viewModel.recentlyClosedTabs.collectAsState()
+    // Re-evaluate inactivity when this screen is entered; the underlying
+    // tab state may not have emitted since the four-hour boundary passed.
+    val nowMs = remember { System.currentTimeMillis() }
+    val tabsWithFreshInactiveState = state.tabs.map { tab ->
+        tab.copy(
+            isInactive = !tab.isActive && tab.lastAccessMs > 0L &&
+                nowMs - tab.lastAccessMs > INACTIVE_TAB_AFTER_MS,
+        )
+    }
+    val currentTabs = tabsWithFreshInactiveState.filterNot { it.isInactive }
+    val inactiveTabs = tabsWithFreshInactiveState.filter { it.isInactive }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -130,44 +152,137 @@ fun TabsScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 160.dp),
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(state.tabs, key = { it.id }) { tab ->
-                    TabTile(
-                        tab = tab,
-                        thumbnailVersion = state.thumbnailVersions[tab.id] ?: 0,
-                        thumbnailStore = thumbnailStore,
-                        onSelect = {
-                            viewModel.onAction(BrowserAction.SwitchTab(tab.id))
-                            onNavigateToBrowser()
-                        },
-                        onClose = { viewModel.onAction(BrowserAction.CloseTab(tab.id)) },
-                    )
-                }
+                    columns = GridCells.Adaptive(minSize = 160.dp),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (inactiveTabs.isNotEmpty() && currentTabs.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Text(
+                                text = stringResource(R.string.tabs_current),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                        }
+                    }
+                    items(currentTabs, key = { it.id }) { tab ->
+                        TabTile(
+                            tab = tab,
+                            thumbnailVersion = state.thumbnailVersions[tab.id] ?: 0,
+                            thumbnailStore = thumbnailStore,
+                            onSelect = {
+                                viewModel.onAction(BrowserAction.SwitchTab(tab.id))
+                                onNavigateToBrowser()
+                            },
+                            onClose = {
+                                viewModel.onAction(BrowserAction.CloseTab(tab.id))
+                            },
+                            onMove = { delta ->
+                                viewModel.onAction(BrowserAction.MoveTab(tab.id, delta))
+                            },
+                        )
+                    }
+                    if (inactiveTabs.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            Text(
+                                text = stringResource(R.string.tabs_inactive),
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                        items(inactiveTabs, key = { it.id }) { tab ->
+                            TabTile(
+                                tab = tab,
+                                thumbnailVersion = state.thumbnailVersions[tab.id] ?: 0,
+                                thumbnailStore = thumbnailStore,
+                                onSelect = {
+                                    viewModel.onAction(BrowserAction.SwitchTab(tab.id))
+                                    onNavigateToBrowser()
+                                },
+                                onClose = {
+                                    viewModel.onAction(BrowserAction.CloseTab(tab.id))
+                                },
+                                onMove = { delta ->
+                                    viewModel.onAction(
+                                        BrowserAction.MoveTab(tab.id, delta),
+                                    )
+                                },
+                            )
+                        }
+                    }
                 }
             }
 
-            if (state.recentlyClosedCount > 0) {
+            if (recentlyClosedTabs.isNotEmpty()) {
                 Surface(tonalElevation = 3.dp) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text(
-                            text = stringResource(R.string.tabs_closed_message),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        TextButton(
-                            onClick = { viewModel.onAction(BrowserAction.UndoCloseAllTabs) },
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Text(stringResource(R.string.action_undo))
+                            Text(
+                                text = stringResource(R.string.tabs_recently_closed),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            TextButton(
+                                onClick = {
+                                    viewModel.onAction(
+                                        BrowserAction.ClearRecentlyClosedTabs,
+                                    )
+                                },
+                            ) {
+                                Text(stringResource(R.string.action_clear))
+                            }
+                        }
+                        LazyColumn(
+                            modifier = Modifier.heightIn(max = 176.dp),
+                        ) {
+                            items(
+                                recentlyClosedTabs,
+                                key = { it.id },
+                            ) { closed ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = closed.title,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = closed.url,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color =
+                                                MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            viewModel.onAction(
+                                                BrowserAction.RestoreRecentlyClosedTab(
+                                                    closed.id,
+                                                ),
+                                            )
+                                            onNavigateToBrowser()
+                                        },
+                                    ) {
+                                        Text(stringResource(R.string.action_restore))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -211,8 +326,30 @@ private fun TabTile(
     thumbnailStore: TabThumbnailStore,
     onSelect: () -> Unit,
     onClose: () -> Unit,
+    onMove: (Int) -> Unit = {},
 ) {
+    var accumulatedDrag by remember(tab.id) { mutableFloatStateOf(0f) }
     Card(
+        modifier = Modifier.pointerInput(tab.id) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = { accumulatedDrag = 0f },
+                onDrag = { change, dragAmount ->
+                    change.consume()
+                    accumulatedDrag += dragAmount.x
+                    val threshold = 72.dp.toPx()
+                    while (accumulatedDrag > threshold) {
+                        onMove(1)
+                        accumulatedDrag -= threshold
+                    }
+                    while (accumulatedDrag < -threshold) {
+                        onMove(-1)
+                        accumulatedDrag += threshold
+                    }
+                },
+                onDragEnd = { accumulatedDrag = 0f },
+                onDragCancel = { accumulatedDrag = 0f },
+            )
+        },
         onClick = onSelect,
         colors = CardDefaults.cardColors(
             containerColor = if (tab.isActive) {
@@ -243,7 +380,17 @@ private fun TabTile(
                     TabThumbnail(tab.id, thumbnailVersion, thumbnailStore)
                 }
 
-                if (tab.isPrivate || tab.isSuspended) {
+                Icon(
+                    imageVector = Icons.Filled.DragHandle,
+                    contentDescription = stringResource(R.string.tab_drag_reorder),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .size(18.dp),
+                )
+
+                if (tab.isPrivate || tab.isSuspended || tab.isInactive) {
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
@@ -273,6 +420,15 @@ private fun TabTile(
                                         modifier = Modifier.padding(end = 6.dp),
                                     )
                                 }
+                            }
+                        }
+                        if (tab.isInactive) {
+                            MiniBadge {
+                                Text(
+                                    text = stringResource(R.string.tab_inactive),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                )
                             }
                         }
                     }
@@ -308,19 +464,31 @@ private fun TabTile(
             }
 
             Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                Text(
-                    text = tab.title.ifBlank { stringResource(R.string.tab_new_page) },
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = tab.url,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                if (tab.isPrivate) {
+                    // Private tabs never leak their title/URL into the grid
+                    // (the preview is already a placeholder; the text must
+                    // be one too).
+                    Text(
+                        text = stringResource(R.string.tab_private),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    Text(
+                        text = tab.title.ifBlank { stringResource(R.string.tab_new_page) },
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = tab.url,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
@@ -377,3 +545,5 @@ private fun TabThumbnail(tabId: String, version: Int, store: TabThumbnailStore) 
         }
     }
 }
+
+private const val INACTIVE_TAB_AFTER_MS = 4 * 60 * 60 * 1000L

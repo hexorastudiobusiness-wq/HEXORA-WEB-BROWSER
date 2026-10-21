@@ -3,7 +3,7 @@
 A fast, simple, and secure personal Android web browser built with
 **Kotlin**, **Jetpack Compose**, and **Mozilla GeckoView**.
 
-Current version: **0.3.3** (`versionCode` 9) — see
+Current version: **0.4.3** (`versionCode` 19) — see
 [Releases](https://github.com/hexorastudiobusiness-wq/HEXORA-WEB-BROWSER/releases).
 
 ## Guiding principles
@@ -36,15 +36,23 @@ principles are non-negotiable, and no feature may sacrifice any of them:
   `preferredColorScheme`, so websites that ship their own dark theme via
   `prefers-color-scheme` follow it
 - Room history (never for private tabs) and bookmarks
-- Downloads through Android `DownloadManager` into the Downloads folder
+- Downloads performed by Hexora itself into the Downloads folder, with
+  real progress, pause/resume (Range requests for HTTP(S)), a truthful
+  cancelled state, and persisted state so completed files can still be
+  opened after an app restart. Blob/POST/authenticated downloads consume
+  the response body the engine already received instead of replaying a
+  fresh GET
+- Site permissions (camera, microphone, location, notifications, screen
+  share, and more) with a stored-permissions manager in Settings
 - Offline password vault: logins are stored only as Android
   Keystore-backed AES-GCM ciphertext, never transmitted, never displayed,
-  and can be offered back on the exact same origin (private tabs excluded)
+  and can be offered back on the exact same origin (private tabs excluded);
+  the vault UI stays locked until device authentication succeeds
 
 ## Download and install
 
 Signed release builds are published on the
-[Releases page](https://github.com/hexorastudiobusiness-wq/HEXORA-WEB-BROWSER/releases/tag/v0.3.3).
+[Releases page](https://github.com/hexorastudiobusiness-wq/HEXORA-WEB-BROWSER/releases).
 
 Pick the APK for your device:
 
@@ -115,7 +123,7 @@ app/src/main/java/com/example/browser/
 ├── MainActivity.kt / BrowserApplication.kt / AppContainer.kt
 ├── browser/        BrowserEngine abstraction + the only GeckoView code
 ├── data/           Room database (+ migrations), repositories, settings
-├── download/       DownloadManager bridge and filename handling
+├── download/       In-app download engine (HTTP + engine streams)
 ├── ui/             Compose screens and ViewModels (browser, tabs,
 │                   bookmarks, history, downloads, passwords, settings,
 │                   theme, shared components)
@@ -152,16 +160,19 @@ Run the unit tests:
 
 ## Known limitations
 
-- Site permission prompts (camera/microphone/location) are not wired yet.
-- The JavaScript toggle applies from the next app start. The Cookies and
-  Open-links-in-new-tab toggles are stored preferences that do not change
-  engine behavior yet (their Settings summaries say so honestly).
 - GeckoView lets sites use their own dark CSS through
   `prefers-color-scheme`, but — unlike Chrome — it does not
   algorithmically recolor sites that ship no dark theme, so such pages
   can remain light in Dark/Hexora Mode.
-- Downloads are re-fetched by `DownloadManager` (no cookie/auth
-  carry-over from the browsing session).
+- Plain-URL downloads are fetched with a fresh HTTP request, so they do
+  not carry the browsing session's cookies; downloads that need the
+  session (blob, POST, authenticated responses) work because they arrive
+  through the engine's response-body path instead.
+- One-shot stream downloads (blob/POST) cannot be paused and resumed:
+  the response body exists exactly once. HTTP(S) downloads can resume.
+- "Add to Home screen" creates a launcher shortcut; GeckoView does not
+  expose installable-PWA manifests, so true standalone PWA installation
+  is not possible through the verified engine API.
 - Saved-login autofill depends on sites exposing recognizable
   username/password fields to GeckoView; with several logins for one
   origin, the most recently saved/updated one is offered first.

@@ -17,6 +17,8 @@
     <string name="secure_connection">Secure connection</string>
     <string name="insecure_connection">Connection is not secure</string>
     <string name="page_load_failed">This page could not be loaded.</string>
+    <string name="tab_crashed_message">This tab crashed. Your other tabs are unaffected.</string>
+    <string name="action_restore_tab">Restore tab</string>
     <string name="action_retry">Retry</string>
 
     <!-- Menu -->
@@ -27,6 +29,8 @@
     <string name="menu_settings">Settings</string>
     <string name="menu_clear_data">Clear browsing data</string>
     <string name="browsing_data_cleared">Browsing data cleared</string>
+    <string name="settings_clear_data_confirm_title">Clear browsing data?</string>
+    <string name="settings_clear_data_confirm_message">This removes cookies, site data, cache and browsing history. This cannot be undone.</string>
 
     <!-- Tabs -->
     <string name="tabs_title">Tabs</string>
@@ -46,6 +50,8 @@
     <string name="history_empty">No browsing history yet.</string>
     <string name="history_delete_entry">Delete from history</string>
     <string name="history_clear_all">Clear history</string>
+    <string name="history_clear_confirm_title">Clear all history?</string>
+    <string name="history_clear_confirm_message">Your entire browsing history will be permanently removed. This cannot be undone.</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -91,11 +97,14 @@
     <string name="downloads_title">Downloads</string>
     <string name="downloads_empty">No downloads yet. Files you download appear here.</string>
     <string name="downloads_clear_all">Clear list</string>
+    <string name="downloads_clear_confirm_title">Clear download list?</string>
+    <string name="downloads_clear_confirm_message">Running downloads will be cancelled and all download records will be removed. Downloaded files stay in your Downloads folder.</string>
     <string name="download_status_running">Downloading</string>
     <string name="download_status_paused">Paused</string>
     <string name="download_status_pending">Waiting</string>
     <string name="download_status_completed">Completed</string>
     <string name="download_status_failed">Failed</string>
+    <string name="download_status_cancelled">Cancelled</string>
     <string name="download_status_unknown">Unknown</string>
     <string name="file_picker_title">Choose an app</string>
     <string name="file_source_title">Choose source</string>
@@ -122,7 +131,10 @@
     <string name="passwords_manage">Manage saved logins</string>
     <string name="passwords_title">Saved logins</string>
     <string name="passwords_empty">No saved logins yet.</string>
+    <string name="passwords_unreadable">Unreadable saved login</string>
     <string name="passwords_delete_all">Delete all</string>
+    <string name="passwords_delete_all_confirm_title">Delete all saved logins?</string>
+    <string name="passwords_delete_all_confirm_message">Every saved username and password will be permanently removed from this device. This cannot be undone.</string>
     <string name="passwords_local_only_note">Saved on this device only, encrypted with Android Keystore. Passwords are never shown here or sent anywhere.</string>
     <string name="password_save_title">Save password?</string>
     <string name="password_update_title">Update password?</string>
@@ -152,4 +164,88 @@
     <string name="start_shortcuts_private">Your shortcuts are hidden in private tabs.</string>
     <string name="tabs_empty">No open tabs</string>
     <string name="tabs_empty_hint">Open a new tab or restore the tabs you closed.</string>
+
+    <!-- Site permissions and web prompts -->
+    <string name="action_allow">Allow</string>
+    <string name="action_block">Block</string>
+    <string name="action_ok">OK</string>
+    <string name="action_close">Close</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_pause">Pause download</string>
+    <string name="action_resume">Resume download</string>
+    <string name="action_restore">Restore</string>
+    <string name="permission_request_title">Allow %1$s?</string>
+    <string name="permission_request_message">%1$s wants to use %2$s.</string>
+    <string name="permission_location">your location</string>
+    <string name="permission_notifications">notifications</string>
+    <string name="permission_camera">your camera</string>
+    <string name="permission_microphone">your microphone</string>
+    <string name="permission_camera_microphone">your camera and microphone</string>
+    <string name="permission_screen_share">share your screen</string>
+    <string name="permission_persistent_storage">persistent storage</string>
+    <string name="permission_autoplay">autoplay</string>
+    <string name="permission_media_key_system">protected-media access</string>
+    <string name="permission_xr">immersive (XR) devices</string>
+    <string name="permission_storage_access">cross-site storage access</string>
+    <string name="permission_local_network">local-network devices</string>
+    <string name="permission_unknown">a device or site feature</string>
+    <string name="prompt_title">Website message</string>
+    <string name="prompt_before_unload">Leave this page? Changes you made may not be saved.</string>
+    <string name="prompt_repost">Reloading this page will resubmit the data you entered. Continue?</string>
+    <string name="prompt_folder_upload">Allow this site to upload this folder?</string>
+    <string name="prompt_popup">Allow this site to open a popup window?</string>
+    <string name="prompt_share">Share this content with another app?</string>
+    <string name="prompt_color_format">#RRGGBB</string>
+    <string name="prompt_datetime_format">YYYY-MM-DD · HH:MM</string>
+    <string name="connection_security_title">Connection security</string>
+    <string name="connection_host">Site: %1$s</string>
+    <string name="connection_exception">Secure connection with an accepted certificate exception</string>
+    <string name="connection_mixed_content">This secure page loaded content over an insecure connection.</string>
+    <string name="connection_certificate_subject">Certificate for: %1$s</string>
+    <string name="connection_certificate_issuer">Issued by: %1$s</string>
+    <string name="site_permissions_title">Site permissions</string>
+    <string name="site_permissions_empty">No stored site permissions.</string>
+    <string name="site_permissions_empty_hint">Permissions you allow or block on websites will appear here.</string>
+    <string name="site_permission_allowed">Allowed</string>
+    <string name="site_permission_blocked">Blocked</string>
+    <string name="site_permission_ask">Ask</string>
+
+    <string name="settings_custom_search_name">Custom search engine name</string>
+    <string name="settings_custom_search_template">Search URL template (use %s for the query)</string>
+    <string name="settings_custom_search_template_example">https://example.com/search?q=%s</string>
+    <string name="settings_custom_search_template_invalid">Enter a full http(s) address containing %s, e.g. the example above.</string>
+
+    <!-- Privacy controls -->
+    <string name="settings_tracking_protection">Enhanced Tracking Protection</string>
+    <string name="settings_tracking_protection_summary">Blocks known trackers on every tab</string>
+    <string name="settings_https_only">HTTPS-Only Mode</string>
+    <string name="settings_https_only_summary">Upgrades or blocks plain HTTP connections</string>
+    <string name="settings_total_cookie_protection">Total Cookie Protection</string>
+    <string name="settings_total_cookie_protection_summary">Always on: third-party cookies are partitioned by site</string>
+
+    <!-- Page actions and printing -->
+    <string name="menu_share_page">Share page</string>
+    <string name="menu_print">Print page</string>
+    <string name="menu_save_pdf">Save page as PDF</string>
+    <string name="print_failed">Could not prepare this page for printing</string>
+    <string name="download_completed">Download completed</string>
+    <string name="file_source_camera">Camera</string>
+
+    <!-- Tab management -->
+    <string name="tabs_current">Open tabs</string>
+    <string name="tabs_inactive">Inactive tabs</string>
+    <string name="tabs_recently_closed">Recently closed tabs</string>
+    <string name="tab_inactive">Inactive</string>
+    <string name="tab_drag_reorder">Drag to reorder tab</string>
+
+    <!-- Saved-login device lock -->
+    <string name="passwords_locked">Saved logins are locked</string>
+    <string name="passwords_locked_hint">Unlock with biometrics or your device credential to view and manage saved logins.</string>
+    <string name="passwords_unlock">Unlock</string>
+    <string name="passwords_unlock_title">Unlock saved logins</string>
+    <string name="passwords_unlock_subtitle">Verify it is you</string>
+    <string name="passwords_unlock_failed">Could not verify your identity</string>
+    <string name="external_link_failed">No app can open this link</string>
+    <string name="auth_username">Username</string>
+    <string name="auth_password">Password</string>
 </resources>

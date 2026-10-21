@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
@@ -67,7 +68,8 @@ fun AddressBar(
     compact: Boolean = false,
     suggestions: List<AddressSuggestion> = emptyList(),
     onQueryChange: (String) -> Unit = {},
-    onSuggestionSelected: (String) -> Unit = {},
+    onSuggestionSelected: (AddressSuggestion) -> Unit = {},
+    onSecurityClick: () -> Unit = {},
 ) {
     val focusManager = LocalFocusManager.current
     var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
@@ -109,14 +111,23 @@ fun AddressBar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Icon(
-                            imageVector = if (isSecure) Icons.Filled.Lock else Icons.Filled.LockOpen,
-                            contentDescription = stringResource(
-                                if (isSecure) R.string.secure_connection
-                                else R.string.insecure_connection,
-                            ),
-                            modifier = Modifier.size(18.dp),
-                        )
+                        IconButton(
+                            onClick = onSecurityClick,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector = if (isSecure) {
+                                    Icons.Filled.Lock
+                                } else {
+                                    Icons.Filled.LockOpen
+                                },
+                                contentDescription = stringResource(
+                                    if (isSecure) R.string.secure_connection
+                                    else R.string.insecure_connection,
+                                ),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
                         Box(
                             modifier = Modifier.weight(1f),
                             contentAlignment = Alignment.CenterStart,
@@ -152,6 +163,17 @@ fun AddressBar(
                                         val wasEditing = isEditing
                                         isEditing = focusState.isFocused
                                         if (focusState.isFocused && !wasEditing) {
+                                            // Suggestions are driven by the
+                                            // ViewModel's copy of the query,
+                                            // which is only updated while
+                                            // typing. Re-sync it with the
+                                            // text actually in the field —
+                                            // after a submit the field shows
+                                            // the page URL while the model
+                                            // would otherwise still hold the
+                                            // pre-submit query and pop up
+                                            // stale suggestions on refocus.
+                                            onQueryChange(fieldValue.text)
                                             selectAllOnFocus = true
                                             if (fieldValue.text.isNotEmpty()) {
                                                 fieldValue = selectAll(fieldValue)
@@ -237,14 +259,18 @@ fun AddressBar(
                                 .fillMaxWidth()
                                 .clickable {
                                     focusManager.clearFocus()
-                                    onSuggestionSelected(suggestion.url)
+                                    onSuggestionSelected(suggestion)
                                 }
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.History,
+                                imageVector = if (suggestion.isBookmark) {
+                                    Icons.Filled.Bookmark
+                                } else {
+                                    Icons.Filled.History
+                                },
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,

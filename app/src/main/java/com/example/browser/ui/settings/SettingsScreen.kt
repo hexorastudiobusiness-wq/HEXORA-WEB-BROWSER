@@ -13,6 +13,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -20,14 +21,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -45,10 +51,12 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onClearBrowsingData: () -> Unit,
     onOpenPasswords: () -> Unit,
+    onOpenSitePermissions: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val settings by viewModel.settings.collectAsState()
     val context = LocalContext.current
+    var showClearDataConfirm by remember { mutableStateOf(false) }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -76,10 +84,85 @@ fun SettingsScreen(
             SettingsSectionTitle(stringResource(R.string.settings_search_engine))
             SearchEngine.entries.forEach { engine ->
                 RadioRow(
-                    label = engine.displayName,
+                    label = if (engine == SearchEngine.CUSTOM &&
+                        settings.customSearchName.isNotBlank()
+                    ) {
+                        settings.customSearchName
+                    } else {
+                        engine.displayName
+                    },
                     selected = settings.searchEngine == engine,
                     onClick = { viewModel.setSearchEngine(engine) },
                 )
+            }
+            if (settings.searchEngine == SearchEngine.CUSTOM) {
+                var customName by remember(settings.customSearchName) {
+                    mutableStateOf(settings.customSearchName)
+                }
+                var customTemplate by remember(settings.customSearchTemplate) {
+                    mutableStateOf(settings.customSearchTemplate)
+                }
+                var showTemplateError by remember { mutableStateOf(false) }
+                OutlinedTextField(
+                    value = customName,
+                    onValueChange = { customName = it },
+                    label = { Text(stringResource(R.string.settings_custom_search_name)) },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                )
+                OutlinedTextField(
+                    value = customTemplate,
+                    onValueChange = {
+                        customTemplate = it
+                        showTemplateError = false
+                    },
+                    label = {
+                        Text(stringResource(R.string.settings_custom_search_template))
+                    },
+                    placeholder = {
+                        Text(stringResource(R.string.settings_custom_search_template_example))
+                    },
+                    isError = showTemplateError,
+                    supportingText = if (showTemplateError) {
+                        {
+                            Text(
+                                stringResource(
+                                    R.string.settings_custom_search_template_invalid,
+                                ),
+                            )
+                        }
+                    } else {
+                        null
+                    },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                )
+                OutlinedButton(
+                    onClick = {
+                        // Same rule the URL resolver applies: an absolute
+                        // http(s) template containing %s. Invalid input is
+                        // rejected here with feedback instead of being
+                        // saved and silently falling back to Google later.
+                        val candidate = customTemplate.trim()
+                        val valid = "%s" in candidate &&
+                            (candidate.startsWith("https://", true) ||
+                                candidate.startsWith("http://", true))
+                        if (valid) {
+                            viewModel.setCustomSearch(customName, customTemplate)
+                        } else {
+                            showTemplateError = true
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                ) {
+                    Text(stringResource(R.string.action_save))
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -114,11 +197,31 @@ fun SettingsScreen(
                 onCheckedChange = { viewModel.setJavaScriptEnabled(it) },
             )
             SwitchRow(
-                label = stringResource(R.string.settings_cookies),
-                summary = stringResource(R.string.settings_cookies_summary),
-                checked = settings.cookiesEnabled,
-                onCheckedChange = { viewModel.setCookiesEnabled(it) },
+                label = stringResource(R.string.settings_tracking_protection),
+                summary = stringResource(R.string.settings_tracking_protection_summary),
+                checked = settings.trackingProtectionEnabled,
+                onCheckedChange = { viewModel.setTrackingProtectionEnabled(it) },
             )
+            SwitchRow(
+                label = stringResource(R.string.settings_https_only),
+                summary = stringResource(R.string.settings_https_only_summary),
+                checked = settings.httpsOnlyMode,
+                onCheckedChange = { viewModel.setHttpsOnlyMode(it) },
+            )
+            ListItem(
+                headlineContent = {
+                    Text(stringResource(R.string.settings_total_cookie_protection))
+                },
+                supportingContent = {
+                    Text(stringResource(R.string.settings_total_cookie_protection_summary))
+                },
+            )
+            OutlinedButton(
+                onClick = onOpenSitePermissions,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.site_permissions_title))
+            }
             SwitchRow(
                 label = stringResource(R.string.settings_password_manager),
                 summary = stringResource(R.string.settings_password_manager_summary),
@@ -165,20 +268,47 @@ fun SettingsScreen(
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
             OutlinedButton(
-                onClick = {
-                    onClearBrowsingData()
-                    Toast.makeText(
-                        context,
-                        R.string.browsing_data_cleared,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                },
+                onClick = { showClearDataConfirm = true },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.menu_clear_data))
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (showClearDataConfirm) {
+        // Destructive and irreversible: confirm first, and only claim
+        // success after the clear has actually been issued.
+        AlertDialog(
+            onDismissRequest = { showClearDataConfirm = false },
+            title = {
+                Text(stringResource(R.string.settings_clear_data_confirm_title))
+            },
+            text = {
+                Text(stringResource(R.string.settings_clear_data_confirm_message))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearDataConfirm = false
+                        onClearBrowsingData()
+                        Toast.makeText(
+                            context,
+                            R.string.browsing_data_cleared,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                ) {
+                    Text(stringResource(R.string.menu_clear_data))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDataConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
     }
 }
 

@@ -14,7 +14,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,6 +31,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -35,24 +41,50 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.browser.R
 import com.example.browser.data.database.DownloadEntity
-import com.example.browser.download.DownloadHandler
 
 /**
- * "Recent downloads" page: lists everything the browser handed to Android's
- * DownloadManager. Tapping a completed item opens the file; the trailing
- * button removes the entry (file removal stays with the system's Downloads UI).
+ * "Recent downloads" page: lists transfers recorded by Hexora's download
+ * layer. Tapping a completed item opens the file; the trailing button
+ * removes the entry (file removal stays with the system's Downloads UI).
+ * All transfer operations go through the ViewModel — this screen never
+ * touches the download handler directly.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsScreen(
     viewModel: DownloadsViewModel,
-    downloadHandler: DownloadHandler,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val downloads by viewModel.downloads.collectAsState()
     val progressById by viewModel.progress.collectAsState()
     val context = LocalContext.current
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    if (showClearConfirm) {
+        // Clearing the list also cancels running transfers, so it is not a
+        // one-tap top-bar action.
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            title = { Text(stringResource(R.string.downloads_clear_confirm_title)) },
+            text = { Text(stringResource(R.string.downloads_clear_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearConfirm = false
+                        viewModel.clearAll()
+                    },
+                ) {
+                    Text(stringResource(R.string.downloads_clear_all))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -69,7 +101,7 @@ fun DownloadsScreen(
                 },
                 actions = {
                     if (downloads.isNotEmpty()) {
-                        TextButton(onClick = { viewModel.clearAll() }) {
+                        TextButton(onClick = { showClearConfirm = true }) {
                             Icon(Icons.Filled.Delete, contentDescription = null)
                             Text(stringResource(R.string.downloads_clear_all))
                         }
@@ -97,7 +129,7 @@ fun DownloadsScreen(
                         progress = progressById[entry.downloadManagerId]
                             ?: DownloadProgressUi(),
                         onOpen = {
-                            val uri = downloadHandler.uriFor(entry.downloadManagerId)
+                            val uri = viewModel.completedUri(entry)
                             if (uri != null) {
                                 val intent = Intent(Intent.ACTION_VIEW)
                                     .setDataAndType(uri, entry.mimeType ?: "*/*")
@@ -107,6 +139,9 @@ fun DownloadsScreen(
                         },
                         onDelete = { viewModel.delete(entry) },
                         onRetry = { viewModel.retry(entry) },
+                        onPause = { viewModel.pause(entry) },
+                        onResume = { viewModel.resume(entry) },
+                        onCancel = { viewModel.cancel(entry) },
                     )
                 }
             }
@@ -121,6 +156,9 @@ private fun DownloadRow(
     onOpen: () -> Unit,
     onDelete: () -> Unit,
     onRetry: () -> Unit,
+    onPause: () -> Unit = {},
+    onResume: () -> Unit = {},
+    onCancel: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val status = progress.status
@@ -131,6 +169,7 @@ private fun DownloadRow(
             DownloadStatus.PENDING -> R.string.download_status_pending
             DownloadStatus.COMPLETED -> R.string.download_status_completed
             DownloadStatus.FAILED -> R.string.download_status_failed
+            DownloadStatus.CANCELLED -> R.string.download_status_cancelled
             DownloadStatus.UNKNOWN -> R.string.download_status_unknown
         },
     )
@@ -199,8 +238,26 @@ private fun DownloadRow(
         },
         trailingContent = {
             Row {
+                if (status == DownloadStatus.RUNNING ||
+                    status == DownloadStatus.PENDING
+                ) {
+                    IconButton(onClick = onPause) {
+                        Icon(
+                            imageVector = Icons.Filled.Pause,
+                            contentDescription = stringResource(R.string.action_pause),
+                        )
+                    }
+                }
+                if (status == DownloadStatus.PAUSED) {
+                    IconButton(onClick = onResume) {
+                        Icon(
+                            imageVector = Icons.Filled.PlayArrow,
+                            contentDescription = stringResource(R.string.action_resume),
+                        )
+                    }
+                }
                 if (status == DownloadStatus.FAILED ||
-                    status == DownloadStatus.PENDING ||
+                    status == DownloadStatus.CANCELLED ||
                     status == DownloadStatus.UNKNOWN
                 ) {
                     IconButton(onClick = onRetry) {
@@ -210,9 +267,20 @@ private fun DownloadRow(
                         )
                     }
                 }
+                if (status == DownloadStatus.RUNNING ||
+                    status == DownloadStatus.PENDING ||
+                    status == DownloadStatus.PAUSED
+                ) {
+                    IconButton(onClick = onCancel) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = stringResource(R.string.action_cancel),
+                        )
+                    }
+                }
                 IconButton(onClick = onDelete) {
                     Icon(
-                        imageVector = Icons.Filled.Close,
+                        imageVector = Icons.Filled.Delete,
                         contentDescription = stringResource(R.string.action_remove),
                     )
                 }

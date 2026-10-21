@@ -1,7 +1,7 @@
 # Architecture Specification
 
 > Status: this document describes the architecture **as implemented**
-> (currently shipping v0.3.3), not only the original plan. When behavior
+> (currently shipping v0.4.3), not only the original plan. When behavior
 > changes, update this file in the same commit. Agent-facing working rules
 > live in `AGENTS.md`; the release-signing canon is `signing/README.md`.
 
@@ -256,14 +256,27 @@ or shown in the management UI.
 
 ## 11. Downloads
 
-Prepare a download manager layer.
+Downloads are performed by Hexora's own download layer
+(`download/DownloadHandler.kt`); Android's `DownloadManager` is only a
+legacy lookup path for entries recorded by older versions (transfers
+delegated to it stayed pending forever on real devices).
 
-It should:
+The layer:
 
-1. Receive download requests from GeckoView.
-2. Delegate appropriate downloads to Android's download facilities.
-3. Show notifications when appropriate.
-4. Save files to an appropriate user-visible Downloads location.
+1. Receives download requests from GeckoView.
+2. Fetches plain HTTP(S) URLs itself, with progress, pause, and
+   Range-based resume (Content-Range and If-Range are validated, and a
+   transfer is only published when its byte count matches the declared
+   length).
+3. Consumes the engine-provided response body for blob/POST/authenticated
+   downloads, which cannot be replayed as a fresh GET. Such one-shot
+   stream downloads cannot be resumed after interruption.
+4. Publishes finished files to the public Downloads folder (MediaStore
+   on API 29+; app-specific storage with a FileProvider URI below that)
+   and shows notifications when appropriate.
+5. Persists each transfer's source kind, last status, byte counts and
+   published file URI in Room, so the Downloads page stays truthful —
+   and completed files stay openable — after a process restart.
 
 Do not request storage permissions unless the target Android version and chosen storage API actually require them.
 
@@ -424,8 +437,8 @@ com.example.browser
 │
 ├── data/
 │   ├── database/
-│   │   ├── AppDatabase.kt (v4)
-│   │   ├── DatabaseMigrations.kt (1→4, 2→4, 3→4)
+│   │   ├── AppDatabase.kt (v5)
+│   │   ├── DatabaseMigrations.kt (1→5, 2→5, 3→5, 4→5)
 │   │   ├── *Dao.kt / *Entity.kt (history, bookmarks, downloads,
 │   │   │   credentials, start shortcuts)
 │   │   └── …
@@ -434,7 +447,7 @@ com.example.browser
 │   ├── security/CredentialCipher.kt
 │   └── settings/SettingsRepository.kt
 │
-├── download/ (DownloadManager bridge, filename sanitizing)
+├── download/ (in-app download engine, filename sanitizing)
 │
 ├── ui/
 │   ├── browser/ (BrowserScreen, BrowserViewModel, BrowserUiState)

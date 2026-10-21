@@ -27,6 +27,14 @@ interface BrowserEngine {
     var onTabSwipe: ((Int) -> Unit)?
 
     /**
+     * Called when the user performs a pull-to-refresh gesture (dragging
+     * down while the page is already at its top), in and out of fullscreen.
+     * Detected by the engine from Gecko's own overscroll reporting, so it
+     * never fires while the page can still scroll.
+     */
+    var onPullToRefresh: (() -> Unit)?
+
+    /**
      * Enables content-level tab swiping (used in fullscreen, where the
      * browser chrome — and its own swipe area — is hidden).
      */
@@ -57,6 +65,29 @@ interface BrowserEngine {
      * engine's supported text-scaling setting; pages pick it up on reload.
      */
     fun setTextZoomPercent(percent: Int)
+
+    /**
+     * Applies global/per-session content controls without restarting the
+     * engine: JavaScript is a runtime-wide switch and Enhanced Tracking
+     * Protection is enabled per session by GeckoView.
+     */
+    fun applyContentControls(
+        javaScriptEnabled: Boolean,
+        trackingProtectionEnabled: Boolean,
+        httpsOnlyMode: Boolean = false,
+    ) {}
+
+    /** Loads all stored site permissions for the permissions manager. */
+    fun loadSitePermissions(onResult: (List<SitePermissionEntry>) -> Unit) {}
+
+    /** Changes one stored site permission; ASK restores the prompt default. */
+    fun setSitePermission(
+        uri: String,
+        kind: SitePermissionKind,
+        decision: SitePermissionDecision,
+        isPrivate: Boolean = false,
+        permissionType: Int = -1,
+    ) {}
 
     /** Clears cookies/cache/storage belonging to one [host] only. */
     fun clearSiteData(host: String)

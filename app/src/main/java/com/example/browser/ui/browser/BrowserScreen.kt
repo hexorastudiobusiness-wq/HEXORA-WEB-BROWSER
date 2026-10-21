@@ -1,12 +1,16 @@
 package com.example.browser.ui.browser
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
-import android.view.View
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -33,6 +37,7 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.imeAnimationTarget
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -57,7 +62,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -91,6 +98,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -110,10 +118,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.browser.R
 import com.example.browser.browser.PageMediaKind
+import com.example.browser.browser.SitePermissionKind
+import com.example.browser.browser.WebPromptKind
 import com.example.browser.ui.components.AddressBar
 import com.example.browser.ui.components.ZoomSlider
 import com.example.browser.util.HomeScreenShortcut
@@ -122,7 +133,8 @@ import kotlinx.coroutines.delay
 /**
  * Main browser screen (ARCHITECTURE.md §6):
  * address bar on top, engine view in the middle, navigation bar at the bottom.
- * In fullscreen the chrome hides and only a small exit button remains.
+ * In fullscreen the chrome hides completely; leaving fullscreen is the
+ * system Back button's job (there is deliberately no on-screen exit button).
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -140,7 +152,57 @@ fun BrowserScreen(
     val context = LocalContext.current
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    var webContentView by remember { mutableStateOf<View?>(null) }
+    val sitePermissionRequest by viewModel.sitePermissionRequest.collectAsState()
+    val webPromptRequest by viewModel.webPromptRequest.collectAsState()
+    val androidPermissionRequest by viewModel.androidPermissionRequest.collectAsState()
+    var showConnectionInfo by remember { mutableStateOf(false) }
+    var showClearDataConfirm by remember { mutableStateOf(false) }
+    // Saveable: if Android recreates the Activity while a system runtime
+    // permission dialog is showing, the launcher callback must still know
+    // which Gecko request it belongs to; a plain remember would lose the
+    // id and leave that request pending forever.
+    var pendingSitePermissionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingAndroidPermissionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var handledAndroidPermissionId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val siteRuntimePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        val requestId = pendingSitePermissionId
+        pendingSitePermissionId = null
+        if (requestId != null) {
+            viewModel.onAction(
+                if (grants.isNotEmpty() && grants.values.all { it }) {
+                    BrowserAction.AllowSitePermission(requestId)
+                } else {
+                    BrowserAction.DenySitePermission(requestId)
+                },
+            )
+        }
+    }
+    val androidRuntimePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        val requestId = pendingAndroidPermissionId
+        pendingAndroidPermissionId = null
+        if (requestId != null) {
+            viewModel.onAction(
+                BrowserAction.CompleteAndroidPermissionRequest(
+                    id = requestId,
+                    granted = grants.isNotEmpty() && grants.values.all { it },
+                ),
+            )
+        }
+    }
+
+    LaunchedEffect(androidPermissionRequest?.id) {
+        val request = androidPermissionRequest ?: return@LaunchedEffect
+        if (handledAndroidPermissionId != request.id) {
+            handledAndroidPermissionId = request.id
+            pendingAndroidPermissionId = request.id
+            androidRuntimePermissionLauncher.launch(request.permissions.toTypedArray())
+        }
+    }
 
     // Content-level left/right tab swipes only exist in fullscreen (where
     // the chrome with its own swipe area is hidden).
@@ -227,6 +289,113 @@ fun BrowserScreen(
         )
     }
 
+    sitePermissionRequest?.let { request ->
+        SitePermissionDialog(
+            request = request,
+            onAllow = {
+                val needed = runtimePermissionsFor(request)
+                val missing = needed.filter { permission ->
+                    ContextCompat.checkSelfPermission(context, permission) !=
+                        PackageManager.PERMISSION_GRANTED
+                }
+                if (missing.isEmpty()) {
+                    viewModel.onAction(BrowserAction.AllowSitePermission(request.id))
+                } else {
+                    pendingSitePermissionId = request.id
+                    siteRuntimePermissionLauncher.launch(missing.toTypedArray())
+                }
+            },
+            onDeny = {
+                viewModel.onAction(BrowserAction.DenySitePermission(request.id))
+            },
+        )
+    }
+
+    webPromptRequest?.let { request ->
+        WebPromptDialog(
+            request = request,
+            onConfirm = { text, selectedIndices ->
+                if (request.kind == WebPromptKind.SHARE) {
+                    val shared = runCatching {
+                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_SUBJECT, request.title.orEmpty())
+                            putExtra(Intent.EXTRA_TEXT, request.message.orEmpty())
+                        }
+                        context.startActivity(
+                            Intent.createChooser(
+                                sendIntent,
+                                context.getString(R.string.menu_share_page),
+                            ),
+                        )
+                    }.isSuccess
+                    viewModel.onAction(
+                        BrowserAction.ConfirmWebPrompt(
+                            id = request.id,
+                            text = if (shared) "success" else "failure",
+                        ),
+                    )
+                } else {
+                    viewModel.onAction(
+                        BrowserAction.ConfirmWebPrompt(
+                            id = request.id,
+                            text = text,
+                            selectedIndices = selectedIndices,
+                        ),
+                    )
+                }
+            },
+            onDismiss = {
+                viewModel.onAction(BrowserAction.DismissWebPrompt(request.id))
+            },
+        )
+    }
+
+    if (showConnectionInfo) {
+        ConnectionInfoDialog(
+            state = state,
+            onDismiss = { showConnectionInfo = false },
+            onClearSiteData = {
+                showConnectionInfo = false
+                viewModel.onAction(BrowserAction.ClearSiteData)
+            },
+        )
+    }
+
+    if (showClearDataConfirm) {
+        // Same destructive-action guard as Settings: clearing browsing
+        // data from the quick menu must never be a single accidental tap.
+        AlertDialog(
+            onDismissRequest = { showClearDataConfirm = false },
+            title = {
+                Text(stringResource(R.string.settings_clear_data_confirm_title))
+            },
+            text = {
+                Text(stringResource(R.string.settings_clear_data_confirm_message))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearDataConfirm = false
+                        viewModel.onAction(BrowserAction.ClearBrowsingData)
+                        Toast.makeText(
+                            context,
+                            R.string.browsing_data_cleared,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                ) {
+                    Text(stringResource(R.string.menu_clear_data))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDataConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
     state.pageContextMenu?.let { menu ->
         PageContextMenuSheet(
             menu = menu,
@@ -271,6 +440,11 @@ fun BrowserScreen(
         if (!state.isFullscreen && state.tabs.isNotEmpty()) {
             SwipeToSwitchTabBox(
                 tabCount = state.tabs.size,
+                // Never interpret an address-bar drag as a tab switch while
+                // the keyboard is up: that drag belongs to text editing
+                // (cursor movement / selection handles), the same rule the
+                // fullscreen content swipe already follows.
+                swipeEnabled = !WindowInsets.isImeVisible,
                 onSwipe = { delta -> viewModel.onAction(BrowserAction.SwitchAdjacentTab(delta)) },
             ) {
                 AddressBar(
@@ -285,7 +459,15 @@ fun BrowserScreen(
                     onToggleBookmark = { viewModel.onAction(BrowserAction.ToggleBookmark) },
                     suggestions = state.addressSuggestions,
                     onQueryChange = { viewModel.onAction(BrowserAction.AddressQueryChanged(it)) },
-                    onSuggestionSelected = { viewModel.onAction(BrowserAction.OpenUrl(it)) },
+                    onSuggestionSelected = { suggestion ->
+                        val tabId = suggestion.tabId
+                        if (tabId != null) {
+                            viewModel.onAction(BrowserAction.SwitchTab(tabId))
+                        } else {
+                            viewModel.onAction(BrowserAction.OpenUrl(suggestion.url))
+                        }
+                    },
+                    onSecurityClick = { showConnectionInfo = true },
                 )
             }
 
@@ -310,7 +492,6 @@ fun BrowserScreen(
             onAction = viewModel::onAction,
             onOpenUrl = { url -> viewModel.onAction(BrowserAction.OpenUrl(url)) },
             onNewTab = { viewModel.onAction(BrowserAction.NewTab) },
-            onContentViewReady = { view -> webContentView = view },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
@@ -327,6 +508,7 @@ fun BrowserScreen(
                 onOpenDownloads = onOpenDownloads,
                 onOpenSettings = onOpenSettings,
                 onClearCacheAndExit = onClearCacheAndExit,
+                onClearBrowsingData = { showClearDataConfirm = true },
                 onAddToHomeScreen = {
                     val added = HomeScreenShortcut.add(context, state.pageTitle, state.currentUrl)
                     Toast.makeText(
@@ -344,13 +526,356 @@ fun BrowserScreen(
     }
 }
 
+private fun runtimePermissionsFor(request: SitePermissionRequestUi): List<String> =
+    when (request.kind) {
+        SitePermissionKind.GEOLOCATION -> listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        SitePermissionKind.NOTIFICATIONS ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                listOf(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                emptyList()
+            }
+        SitePermissionKind.CAMERA -> listOf(Manifest.permission.CAMERA)
+        SitePermissionKind.MICROPHONE -> listOf(Manifest.permission.RECORD_AUDIO)
+        SitePermissionKind.CAMERA_AND_MICROPHONE ->
+            listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+        SitePermissionKind.SCREEN_SHARE ->
+            // Screen capture itself needs no Android runtime permission,
+            // but a simultaneous microphone request still does.
+            if (request.wantsMicrophone) {
+                listOf(Manifest.permission.RECORD_AUDIO)
+            } else {
+                emptyList()
+            }
+        else -> emptyList()
+    }
+
+@Composable
+private fun SitePermissionDialog(
+    request: SitePermissionRequestUi,
+    onAllow: () -> Unit,
+    onDeny: () -> Unit,
+) {
+    val permissionLabel = stringResource(
+        when (request.kind) {
+            SitePermissionKind.GEOLOCATION -> R.string.permission_location
+            SitePermissionKind.NOTIFICATIONS -> R.string.permission_notifications
+            SitePermissionKind.CAMERA -> R.string.permission_camera
+            SitePermissionKind.MICROPHONE -> R.string.permission_microphone
+            SitePermissionKind.CAMERA_AND_MICROPHONE ->
+                R.string.permission_camera_microphone
+            SitePermissionKind.SCREEN_SHARE -> R.string.permission_screen_share
+            SitePermissionKind.PERSISTENT_STORAGE -> R.string.permission_persistent_storage
+            SitePermissionKind.AUTOPLAY -> R.string.permission_autoplay
+            SitePermissionKind.MEDIA_KEY_SYSTEM -> R.string.permission_media_key_system
+            SitePermissionKind.XR -> R.string.permission_xr
+            SitePermissionKind.STORAGE_ACCESS -> R.string.permission_storage_access
+            SitePermissionKind.LOCAL_NETWORK -> R.string.permission_local_network
+            SitePermissionKind.UNKNOWN -> R.string.permission_unknown
+        },
+    )
+    AlertDialog(
+        onDismissRequest = onDeny,
+        title = { Text(stringResource(R.string.permission_request_title, permissionLabel)) },
+        text = {
+            Text(
+                stringResource(
+                    R.string.permission_request_message,
+                    request.origin,
+                    permissionLabel,
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onAllow) {
+                Text(stringResource(R.string.action_allow))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDeny) {
+                Text(stringResource(R.string.action_block))
+            }
+        },
+    )
+}
+
+@Composable
+private fun WebPromptDialog(
+    request: WebPromptUi,
+    onConfirm: (String?, List<Int>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember(request.id) { mutableStateOf(request.defaultValue.orEmpty()) }
+    var authPassword by remember(request.id) { mutableStateOf("") }
+    var selectedIndices by remember(request.id) {
+        mutableStateOf(
+            run {
+                val preselected = request.options.indices.filter { index ->
+                    request.optionSelected.getOrNull(index) == true &&
+                        request.optionEnabled.getOrNull(index) != false
+                }
+                when {
+                    preselected.isNotEmpty() -> preselected.toSet()
+                    request.allowMultiple -> emptySet()
+                    else -> setOfNotNull(
+                        request.options.indices.firstOrNull { index ->
+                            request.optionEnabled.getOrNull(index) != false
+                        },
+                    )
+                }
+            },
+        )
+    }
+    val fallbackMessage = when (request.kind) {
+        WebPromptKind.BEFORE_UNLOAD -> stringResource(R.string.prompt_before_unload)
+        WebPromptKind.REPOST_CONFIRM -> stringResource(R.string.prompt_repost)
+        WebPromptKind.FOLDER_UPLOAD -> stringResource(R.string.prompt_folder_upload)
+        WebPromptKind.POPUP -> stringResource(R.string.prompt_popup)
+        WebPromptKind.SHARE -> stringResource(R.string.prompt_share)
+        else -> ""
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                request.title?.takeIf { it.isNotBlank() }
+                    ?: stringResource(R.string.prompt_title),
+            )
+        },
+        text = {
+            Column {
+                val message = request.message?.takeIf { it.isNotBlank() }
+                    ?: fallbackMessage
+                if (message.isNotBlank()) {
+                    Text(message)
+                }
+                if (request.kind == WebPromptKind.CHOICE) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(320.dp)
+                            .padding(top = 12.dp),
+                    ) {
+                        items(request.options.indices.toList()) { index ->
+                            val enabled = request.optionEnabled.getOrNull(index) != false
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = enabled) {
+                                        selectedIndices = if (request.allowMultiple) {
+                                            if (index in selectedIndices) {
+                                                selectedIndices - index
+                                            } else {
+                                                selectedIndices + index
+                                            }
+                                        } else {
+                                            setOf(index)
+                                        }
+                                    }
+                                    .padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (index in selectedIndices) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                } else {
+                                    Spacer(Modifier.width(18.dp))
+                                }
+                                Text(
+                                    text = request.options[index],
+                                    modifier = Modifier.padding(start = 8.dp),
+                                    color = if (enabled) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+                if (request.kind == WebPromptKind.COLOR &&
+                    request.options.isNotEmpty()
+                ) {
+                    Column(modifier = Modifier.padding(top = 12.dp)) {
+                        request.options.forEach { option ->
+                            Text(
+                                text = option,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { text = option }
+                                    .padding(vertical = 8.dp),
+                            )
+                        }
+                    }
+                }
+                if (request.kind == WebPromptKind.TEXT ||
+                    request.kind == WebPromptKind.COLOR ||
+                    request.kind == WebPromptKind.DATE_TIME ||
+                    (request.kind == WebPromptKind.AUTH && !request.passwordOnly)
+                ) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        label = when (request.kind) {
+                            WebPromptKind.AUTH -> {
+                                { Text(stringResource(R.string.auth_username)) }
+                            }
+                            WebPromptKind.COLOR -> {
+                                { Text(stringResource(R.string.prompt_color_format)) }
+                            }
+                            WebPromptKind.DATE_TIME -> {
+                                { Text(stringResource(R.string.prompt_datetime_format)) }
+                            }
+                            else -> null
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        singleLine = true,
+                    )
+                }
+                if (request.kind == WebPromptKind.AUTH) {
+                    OutlinedTextField(
+                        value = authPassword,
+                        onValueChange = { authPassword = it },
+                        label = { Text(stringResource(R.string.auth_password)) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        singleLine = true,
+                        visualTransformation =
+                            androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Password,
+                        ),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = request.kind != WebPromptKind.CHOICE ||
+                    selectedIndices.isNotEmpty(),
+                onClick = {
+                    onConfirm(
+                        when (request.kind) {
+                            WebPromptKind.TEXT,
+                            WebPromptKind.COLOR,
+                            WebPromptKind.DATE_TIME -> text
+                            WebPromptKind.AUTH -> text + '\u001F' + authPassword
+                            else -> null
+                        },
+                        if (request.kind == WebPromptKind.CHOICE) {
+                            selectedIndices.sorted()
+                        } else {
+                            emptyList()
+                        },
+                    )
+                },
+            ) {
+                Text(
+                    stringResource(
+                        when (request.kind) {
+                            WebPromptKind.SHARE -> R.string.menu_share_page
+                            WebPromptKind.POPUP -> R.string.action_allow
+                            else -> R.string.action_ok
+                        },
+                    ),
+                )
+            }
+        },
+        dismissButton = {
+            if (request.kind != WebPromptKind.ALERT) {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun ConnectionInfoDialog(
+    state: BrowserUiState,
+    onDismiss: () -> Unit,
+    onClearSiteData: () -> Unit,
+) {
+    val host = state.certificateHost.ifBlank {
+        runCatching { Uri.parse(state.currentUrl).host }
+            .getOrNull()
+            .orEmpty()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.connection_security_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (host.isNotBlank()) {
+                    Text(stringResource(R.string.connection_host, host))
+                }
+                Text(
+                    stringResource(
+                        when {
+                            state.isSecurityException ->
+                                R.string.connection_exception
+                            state.isSecure -> R.string.secure_connection
+                            else -> R.string.insecure_connection
+                        },
+                    ),
+                )
+                if (state.hasMixedContent) {
+                    Text(stringResource(R.string.connection_mixed_content))
+                }
+                if (state.certificateSubject.isNotBlank()) {
+                    Text(
+                        stringResource(
+                            R.string.connection_certificate_subject,
+                            state.certificateSubject,
+                        ),
+                    )
+                }
+                if (state.certificateIssuer.isNotBlank()) {
+                    Text(
+                        stringResource(
+                            R.string.connection_certificate_issuer,
+                            state.certificateIssuer,
+                        ),
+                    )
+                }
+                if (state.currentUrl.isNotBlank()) {
+                    Text(
+                        text = state.currentUrl,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        },
+        dismissButton = {
+            if (state.currentUrl.isNotBlank()) {
+                TextButton(onClick = onClearSiteData) {
+                    Text(stringResource(R.string.menu_clear_site_data))
+                }
+            }
+        },
+    )
+}
+
 @Composable
 private fun BrowserPageContent(
     state: BrowserUiState,
     onAction: (BrowserAction) -> Unit,
     onOpenUrl: (String) -> Unit,
     onNewTab: () -> Unit,
-    onContentViewReady: (View) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
@@ -360,6 +885,24 @@ private fun BrowserPageContent(
         // switch tabs while staying in fullscreen; those are detected by
         // the engine's native content view, because touch events over the
         // web surface never reach Compose.
+
+        val bootstrapError = state.errorMessage
+        if (bootstrapError != null && state.tabs.isEmpty()) {
+            // Engine bootstrap failed before any tab existed. This must win
+            // over the Start Page: with zero tabs the state also reports
+            // showStartPage, which previously hid the error completely and
+            // left the user on a normal-looking start screen whose every
+            // action silently did nothing.
+            Text(
+                text = bootstrapError,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp),
+                color = MaterialTheme.colorScheme.error,
+                textAlign = TextAlign.Center,
+            )
+            return
+        }
 
         if (state.showStartPage) {
             StartPage(
@@ -380,19 +923,42 @@ private fun BrowserPageContent(
             return
         }
 
+        if (state.activeTabCrashed) {
+            // Firefox-style crashed tab: the page is gone but the tab (and
+            // its saved state) survived; restoring is an explicit action so
+            // a crashing site cannot loop the browser.
+            Card(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(24.dp),
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.tab_crashed_message),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Button(
+                        onClick = { onAction(BrowserAction.RestoreCrashedTab) },
+                    ) {
+                        Text(stringResource(R.string.action_restore_tab))
+                    }
+                }
+            }
+            return
+        }
+
         val session = state.activeSession
         if (session != null) {
             // One shared GeckoView stays attached while browsing. Tabs are
             // switched with renderContentView(), matching GeckoView's
             // intended session-swap model instead of swapping surfaces.
             AndroidView(
-                factory = { ctx ->
-                    session.createContentView(ctx).also(onContentViewReady)
-                },
-                update = { view ->
-                    onContentViewReady(view)
-                    session.renderContentView(view)
-                },
+                factory = { ctx -> session.createContentView(ctx) },
+                update = { view -> session.renderContentView(view) },
                 onRelease = { view -> session.releaseContentView(view) },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -418,18 +984,6 @@ private fun BrowserPageContent(
                     }
                 }
             }
-        }
-
-        val error = state.errorMessage
-        if (error != null && state.tabs.isEmpty()) {
-            Text(
-                text = error,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(24.dp),
-                color = MaterialTheme.colorScheme.error,
-                textAlign = TextAlign.Center,
-            )
         }
     }
 }
@@ -1003,12 +1557,14 @@ private fun ImmersiveSystemBars(enabled: Boolean) {
 @Composable
 private fun SwipeToSwitchTabBox(
     tabCount: Int,
+    swipeEnabled: Boolean = true,
     onSwipe: (Int) -> Unit,
     content: @Composable () -> Unit,
 ) {
     var dragTotal by remember { mutableFloatStateOf(0f) }
     Box(
-        modifier = Modifier.pointerInput(tabCount) {
+        modifier = Modifier.pointerInput(tabCount, swipeEnabled) {
+            if (!swipeEnabled) return@pointerInput
             detectHorizontalDragGestures(
                 onDragStart = { dragTotal = 0f },
                 onHorizontalDrag = { _, dragAmount -> dragTotal += dragAmount },
@@ -1121,11 +1677,13 @@ private fun BrowserBottomBar(
     onOpenDownloads: () -> Unit,
     onOpenSettings: () -> Unit,
     onClearCacheAndExit: () -> Unit,
+    onClearBrowsingData: () -> Unit,
     onAddToHomeScreen: () -> Unit,
     onSiteDataCleared: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     // Nine actions share this bar; keep every button on narrow phones.
     val buttonSize = if (compact) 36.dp else 38.dp
 
@@ -1318,6 +1876,42 @@ private fun BrowserBottomBar(
                         },
                     )
                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_share_page)) },
+                        leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, state.pageTitle)
+                                putExtra(Intent.EXTRA_TEXT, state.currentUrl)
+                            }
+                            runCatching {
+                                context.startActivity(
+                                    Intent.createChooser(
+                                        sendIntent,
+                                        context.getString(R.string.menu_share_page),
+                                    ),
+                                )
+                            }
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_print)) },
+                        leadingIcon = { Icon(Icons.Filled.Print, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onAction(BrowserAction.PrintPage)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_save_pdf)) },
+                        leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onAction(BrowserAction.SavePageAsPdf)
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text(stringResource(R.string.menu_add_to_home)) },
                         leadingIcon = {
                             Icon(Icons.Filled.AddToHomeScreen, contentDescription = null)
@@ -1375,7 +1969,9 @@ private fun BrowserBottomBar(
                         leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
-                            onAction(BrowserAction.ClearBrowsingData)
+                            // Confirmation lives in BrowserScreen; this
+                            // destructive action must not run on one tap.
+                            onClearBrowsingData()
                         },
                     )
                     DropdownMenuItem(

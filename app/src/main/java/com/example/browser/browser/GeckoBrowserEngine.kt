@@ -3,16 +3,22 @@ package com.example.browser.browser
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.util.Log
 import android.util.SparseArray
 import android.view.MotionEvent
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import java.io.IOException
+import java.util.Collections
 import java.util.UUID
+import java.util.WeakHashMap
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -20,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.Autofill
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -27,10 +34,12 @@ import org.mozilla.geckoview.GeckoRuntimeSettings
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.GeckoView
+import org.mozilla.geckoview.PanZoomController
 import org.mozilla.geckoview.GeckoSession.PermissionDelegate
 import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.WebResponse
 import com.example.browser.download.DownloadFileName
+import com.example.browser.util.CredentialOrigin
 
 /**
  * [BrowserEngine] implementation backed by Mozilla GeckoView.
@@ -56,6 +65,8 @@ class GeckoBrowserEngine(
 
     override var onTabSwipe: ((Int) -> Unit)? = null
 
+    override var onPullToRefresh: (() -> Unit)? = null
+
     @Volatile
     override var tabSwipeEnabled: Boolean = false
 
@@ -64,6 +75,20 @@ class GeckoBrowserEngine(
 
     @Volatile
     private var preferredColorScheme: Int = GeckoRuntimeSettings.COLOR_SCHEME_SYSTEM
+
+    @Volatile
+    private var trackingProtectionEnabled: Boolean = true
+
+    @Volatile
+    private var httpsOnlyMode: Boolean = false
+
+    /** Live session wrappers, used only to apply per-session controls. */
+    private val liveSessions: MutableSet<GeckoBrowserSession> =
+        Collections.newSetFromMap(WeakHashMap())
+
+    /** Last loaded Gecko permission objects, needed by StorageController. */
+    private val storedPermissionObjects =
+        mutableMapOf<String, PermissionDelegate.ContentPermission>()
 
     /**
      * The Gecko runtime is a process-wide singleton: GeckoView throws if a
@@ -83,7 +108,20 @@ class GeckoBrowserEngine(
                     .fontSizeFactor(textZoomPercent / 100f)
                     .preferredColorScheme(preferredColorScheme)
                     .build(),
-            ).also { processRuntime = it }
+            ).also { created ->
+                processRuntime = created
+                // Firefox-style Total Cookie Protection: partition
+                // third-party cookie storage instead of sharing one jar.
+                created.settings.setCookieBehaviorOptInPartitioning(true)
+                created.settings.setCookieBehaviorOptInPartitioningPBM(true)
+                created.settings.setAllowInsecureConnections(
+                    if (httpsOnlyMode) {
+                        GeckoRuntimeSettings.HTTPS_ONLY
+                    } else {
+                        GeckoRuntimeSettings.ALLOW_ALL
+                    },
+                )
+            }
         }
 
     override fun createSession(config: BrowserSessionConfig): BrowserSession =
@@ -99,14 +137,21 @@ class GeckoBrowserEngine(
         // remembers it for re-attach; adding the view back re-acquires a
         // fresh display via handleSharedViewAttached -> bindContentView.
         // The page is repainted from the live session, not reloaded.
+        // The re-add is posted to the next frame: removing and re-adding in
+        // the same synchronous pass can race Gecko's asynchronous display
+        // release and leave the new surface just as dead as the old one.
         (geckoView.parent as? ViewGroup)?.removeView(geckoView)
-        host.addView(
-            geckoView,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            ),
-        )
+        host.post {
+            if (geckoView.parent == null && sharedContentHost === host) {
+                host.addView(
+                    geckoView,
+                    FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    ),
+                )
+            }
+        }
     }
 
     override fun restoreSession(
@@ -136,6 +181,102 @@ class GeckoBrowserEngine(
         // theme. It does not algorithmically recolor sites without one.
         processRuntime?.settings?.setPreferredColorScheme(geckoScheme)
     }
+
+    override fun applyContentControls(
+        javaScriptEnabled: Boolean,
+        trackingProtectionEnabled: Boolean,
+        httpsOnlyMode: Boolean,
+    ) {
+        this.trackingProtectionEnabled = trackingProtectionEnabled
+        this.httpsOnlyMode = httpsOnlyMode
+        processRuntime?.settings?.let { runtimeSettings ->
+            runtimeSettings.setJavaScriptEnabled(javaScriptEnabled)
+            runtimeSettings.setAllowInsecureConnections(
+                if (httpsOnlyMode) {
+                    GeckoRuntimeSettings.HTTPS_ONLY
+                } else {
+                    GeckoRuntimeSettings.ALLOW_ALL
+                },
+            )
+        }
+        synchronized(liveSessions) {
+            liveSessions.toList()
+        }.forEach { session ->
+            session.applyTrackingProtection(trackingProtectionEnabled)
+        }
+    }
+
+    override fun loadSitePermissions(
+        onResult: (List<SitePermissionEntry>) -> Unit,
+    ) {
+        val runtime = processRuntime
+        if (runtime == null) {
+            onResult(emptyList())
+            return
+        }
+        runtime.storageController.getAllPermissions().accept(
+            { permissions ->
+                val entries = permissions.orEmpty()
+                    .filterNot { it.privateMode }
+                    .mapNotNull { permission ->
+                    val kind = permission.toAppPermissionKind() ?: return@mapNotNull null
+                    storedPermissionObjects[
+                        permissionKey(
+                            permission.uri,
+                            kind,
+                            permission.privateMode,
+                            permission.permission,
+                        )
+                    ] = permission
+                    SitePermissionEntry(
+                        uri = permission.uri,
+                        kind = kind,
+                        state = when (permission.value) {
+                            PermissionDelegate.ContentPermission.VALUE_ALLOW ->
+                                SitePermissionState.ALLOW
+                            PermissionDelegate.ContentPermission.VALUE_DENY ->
+                                SitePermissionState.DENY
+                            else -> SitePermissionState.PROMPT
+                        },
+                        isPrivate = permission.privateMode,
+                        permissionType = permission.permission,
+                    )
+                }.sortedWith(compareBy({ it.uri }, { it.kind.name }))
+                onResult(entries)
+            },
+            { onResult(emptyList()) },
+        )
+    }
+
+    override fun setSitePermission(
+        uri: String,
+        kind: SitePermissionKind,
+        decision: SitePermissionDecision,
+        isPrivate: Boolean,
+        permissionType: Int,
+    ) {
+        if (uri.isBlank()) return
+        val permission = storedPermissionObjects[
+            permissionKey(uri, kind, isPrivate, permissionType)
+        ] ?: return
+        val value = when (decision) {
+            SitePermissionDecision.ASK ->
+                PermissionDelegate.ContentPermission.VALUE_PROMPT
+            SitePermissionDecision.ALLOW ->
+                PermissionDelegate.ContentPermission.VALUE_ALLOW
+            SitePermissionDecision.DENY ->
+                PermissionDelegate.ContentPermission.VALUE_DENY
+        }
+        processRuntime?.storageController?.setPermission(permission, value)
+    }
+
+    private fun permissionKey(
+        uri: String,
+        kind: SitePermissionKind,
+        isPrivate: Boolean,
+        permissionType: Int,
+    ): String = "$uri|$kind|$isPrivate|$permissionType"
+
 
     override fun clearSiteData(host: String) {
         if (host.isBlank()) return
@@ -190,6 +331,11 @@ class GeckoBrowserEngine(
             HexoraGeckoView(context).also { newView ->
                 newView.onViewDetached = { handleSharedViewDetached(newView) }
                 newView.onViewAttached = { handleSharedViewAttached(newView) }
+                newView.onPullToRefreshGesture = { onPullToRefresh?.invoke() }
+                newView.onPullProgress = { progress ->
+                    (sharedContentHost as? SwipeableHostLayout)?.pullProgress =
+                        progress
+                }
                 sharedContentView = newView
             }
         } else {
@@ -313,7 +459,7 @@ class GeckoBrowserEngine(
     ): GeckoBrowserSession {
         val settings = GeckoSessionSettings.Builder()
             .usePrivateMode(config.isPrivate)
-            .useTrackingProtection(true)
+            .useTrackingProtection(trackingProtectionEnabled)
             .userAgentMode(
                 if (config.desktopMode) {
                     GeckoSessionSettings.USER_AGENT_MODE_DESKTOP
@@ -334,8 +480,15 @@ class GeckoBrowserEngine(
             geckoSession = GeckoSession(settings),
             config = config,
             pendingRestore = pendingRestore,
-        )
+        ).also { session ->
+            synchronized(liveSessions) { liveSessions += session }
+        }
     }
+
+    internal fun unregisterSession(session: GeckoBrowserSession) {
+        synchronized(liveSessions) { liveSessions -= session }
+    }
+
 
     internal fun notifyNewSessionCreated(session: BrowserSession, openerSessionId: String?) {
         newSessionCreatedListener?.invoke(session, openerSessionId)
@@ -351,6 +504,24 @@ class GeckoBrowserEngine(
         private val COVER_DARK: Int = 0xFF100B0F.toInt()
     }
 }
+
+internal fun PermissionDelegate.ContentPermission.toAppPermissionKind(): SitePermissionKind? =
+    when (permission) {
+        PermissionDelegate.PERMISSION_GEOLOCATION -> SitePermissionKind.GEOLOCATION
+        PermissionDelegate.PERMISSION_DESKTOP_NOTIFICATION -> SitePermissionKind.NOTIFICATIONS
+        PermissionDelegate.PERMISSION_PERSISTENT_STORAGE -> SitePermissionKind.PERSISTENT_STORAGE
+        PermissionDelegate.PERMISSION_XR -> SitePermissionKind.XR
+        PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE,
+        PermissionDelegate.PERMISSION_AUTOPLAY_AUDIBLE,
+        -> SitePermissionKind.AUTOPLAY
+        PermissionDelegate.PERMISSION_MEDIA_KEY_SYSTEM_ACCESS ->
+            SitePermissionKind.MEDIA_KEY_SYSTEM
+        PermissionDelegate.PERMISSION_STORAGE_ACCESS -> SitePermissionKind.STORAGE_ACCESS
+        PermissionDelegate.PERMISSION_LOCAL_DEVICE_ACCESS,
+        PermissionDelegate.PERMISSION_LOCAL_NETWORK_ACCESS,
+        -> SitePermissionKind.LOCAL_NETWORK
+        else -> null
+    }
 
 /**
  * Host of the shared GeckoView that can intercept a deliberate horizontal
@@ -368,9 +539,18 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
     /** Consulted on every gesture start; swipes are ignored while false. */
     var swipeEnabledProvider: () -> Boolean = { false }
 
+    /** Pull-to-refresh progress 0f..1f, drawn as an indicator at the top. */
+    var pullProgress: Float = 0f
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val density = context.resources.displayMetrics.density
     private var downX = 0f
     private var downY = 0f
+    private var downTime = 0L
     private var swiping = false
     private var fired = false
 
@@ -379,15 +559,21 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
             MotionEvent.ACTION_DOWN -> {
                 downX = event.x
                 downY = event.y
+                downTime = event.eventTime
                 swiping = false
                 fired = false
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!swiping && swipeEnabledProvider()) {
+                // A tab swipe must be a quick, deliberate flick — and it is
+                // never active while the keyboard is up. Slow, careful drags
+                // (moving the text cursor or a selection handle while
+                // typing) belong to the page and must not switch tabs.
+                if (!swiping && swipeEnabledProvider() && !isKeyboardVisible()) {
                     val dx = event.x - downX
                     val dy = event.y - downY
-                    if (kotlin.math.abs(dx) > touchSlop * 3 &&
-                        kotlin.math.abs(dx) > kotlin.math.abs(dy) * 2f
+                    if (event.eventTime - downTime <= SWIPE_MAX_DURATION_MS &&
+                        kotlin.math.abs(dx) > touchSlop * 4 &&
+                        kotlin.math.abs(dx) > kotlin.math.abs(dy) * 3f
                     ) {
                         swiping = true
                         return true
@@ -404,7 +590,10 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
             when (event.actionMasked) {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.x - downX
-                    if (!fired && kotlin.math.abs(dx) > SWIPE_THRESHOLD_PX) {
+                    if (!fired &&
+                        kotlin.math.abs(dx) > SWIPE_DISTANCE_DP * density &&
+                        event.eventTime - downTime <= SWIPE_MAX_DURATION_MS
+                    ) {
                         fired = true
                         onSwipeTab?.invoke(if (dx < 0) 1 else -1)
                     }
@@ -416,8 +605,47 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
         return super.onTouchEvent(event)
     }
 
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        if (pullProgress > 0f) {
+            drawPullIndicator(canvas)
+        }
+    }
+
+    /** Small circular pull-to-refresh indicator tracking the page's top. */
+    private fun drawPullIndicator(canvas: Canvas) {
+        val radius = 18f * density
+        val cx = width / 2f
+        val cy = radius + 26f * density * pullProgress
+        val alpha = (90 + 140 * pullProgress).toInt().coerceIn(0, 255)
+        indicatorPaint.color = android.graphics.Color.argb(alpha, 28, 28, 32)
+        canvas.drawCircle(cx, cy, radius, indicatorPaint)
+        indicatorPaint.color = android.graphics.Color.argb(230, 255, 255, 255)
+        arrowPaint.strokeWidth = 2.2f * density
+        val arrow = radius * 0.52f
+        // Downward chevron: refresh affordance, like mainstream browsers.
+        canvas.drawLine(cx - arrow * 0.7f, cy - arrow * 0.35f, cx, cy + arrow * 0.45f, arrowPaint)
+        canvas.drawLine(cx + arrow * 0.7f, cy - arrow * 0.35f, cx, cy + arrow * 0.45f, arrowPaint)
+        canvas.drawLine(cx, cy - arrow * 0.75f, cx, cy + arrow * 0.45f, arrowPaint)
+    }
+
+    private val indicatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+
+    private fun isKeyboardVisible(): Boolean =
+        ViewCompat.getRootWindowInsets(this)
+            ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+
     private companion object {
-        const val SWIPE_THRESHOLD_PX = 96f
+        const val SWIPE_DISTANCE_DP = 64f
+
+        /** Longer than this and the gesture is a drag, not a tab swipe. */
+        const val SWIPE_MAX_DURATION_MS = 700L
     }
 }
 
@@ -438,6 +666,93 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
 
     var onViewAttached: ((HexoraGeckoView) -> Unit)? = null
     var onViewDetached: ((HexoraGeckoView) -> Unit)? = null
+
+    /** Fired once per gesture when the user pulls down past the threshold. */
+    var onPullToRefreshGesture: (() -> Unit)? = null
+
+    /** Pull progress 0f..1f for the host's indicator; 0 when released. */
+    var onPullProgress: ((Float) -> Unit)? = null
+
+    private val pullThresholdPx =
+        PULL_THRESHOLD_DP * context.resources.displayMetrics.density
+    private var pullStartY = 0f
+    private var pullTracking = false
+    private var pullFired = false
+
+    /**
+     * Pull-to-refresh, the way Mozilla's Android Components implements it:
+     * touch input is routed through `onTouchEventForDetailResult`, whose
+     * result reports whether Gecko overscrolled vertically (the page is at
+     * its top and the drag is pulling past it). Only then is a downward
+     * drag a refresh gesture; ordinary page scrolling, text selection and
+     * in-page interactions are untouched, because the event itself is
+     * delivered to Gecko exactly as before.
+     */
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (session == null || onPullToRefreshGesture == null) {
+            return super.onTouchEvent(event)
+        }
+        val action = event.actionMasked
+        val y = event.y
+        onTouchEventForDetailResult(event).accept(
+            { detail -> onPullDetail(action, y, detail) },
+            { _ -> },
+        )
+        return true
+    }
+
+    private fun onPullDetail(
+        action: Int,
+        y: Float,
+        detail: PanZoomController.InputResultDetail,
+    ) {
+        when (action) {
+            MotionEvent.ACTION_DOWN -> {
+                pullStartY = y
+                pullTracking = false
+                pullFired = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val overscrolled =
+                    detail.overscrollDirections() and
+                        PanZoomController.OVERSCROLL_FLAG_VERTICAL != 0
+                if (overscrolled) {
+                    if (!pullTracking) {
+                        // Measure the pull from where overscroll began,
+                        // not from the original touch-down.
+                        pullTracking = true
+                        pullStartY = y
+                    }
+                    val pull = y - pullStartY
+                    if (pull > 0f) {
+                        onPullProgress?.invoke(
+                            (pull / pullThresholdPx).coerceIn(0f, 1f),
+                        )
+                        if (!pullFired && pull >= pullThresholdPx) {
+                            pullFired = true
+                            onPullToRefreshGesture?.invoke()
+                        }
+                    }
+                } else {
+                    // The page is scrolling (or can still scroll): keep
+                    // re-baselining so no pull is credited mid-scroll.
+                    pullStartY = y
+                    if (pullTracking) {
+                        pullTracking = false
+                        onPullProgress?.invoke(0f)
+                    }
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                pullTracking = false
+                onPullProgress?.invoke(0f)
+            }
+        }
+    }
+
+    private companion object {
+        const val PULL_THRESHOLD_DP = 72f
+    }
 
     override fun onAttachedToWindow() {
         // GeckoView would create and open a brand-new session here when it
@@ -482,8 +797,15 @@ internal class GeckoBrowserSession(
         SessionPageState(isDesktopMode = config.desktopMode),
     )
 
+    /**
+     * Latest Gecko session snapshot. Kept as the engine object and only
+     * JSON-serialized when the tab is actually suspended or persisted:
+     * serializing on every state-change callback (scroll/form updates can
+     * arrive constantly) burned CPU and battery for a string nobody reads
+     * until suspension.
+     */
     @Volatile
-    private var latestStateString: String? = null
+    private var latestSessionState: GeckoSession.SessionState? = null
 
     @Volatile
     private var latestFindQuery: String = ""
@@ -540,9 +862,15 @@ internal class GeckoBrowserSession(
     }
 
     override fun latestSavedState(): SavedTabState? =
-        latestStateString?.let { SavedTabState(it) }
+        latestSessionState?.toString()?.let { SavedTabState(it) }
 
     override fun isUsable(): Boolean = !closed && geckoSession.isOpen
+
+    internal fun applyTrackingProtection(enabled: Boolean) {
+        if (!closed && geckoSession.isOpen) {
+            geckoSession.settings.setUseTrackingProtection(enabled)
+        }
+    }
 
     override fun setDesktopMode(enabled: Boolean) {
         if (closed || _state.value.isDesktopMode == enabled) return
@@ -646,6 +974,58 @@ internal class GeckoBrowserSession(
         if (!closed && geckoSession.isOpen) geckoSession.exitFullScreen()
     }
 
+    override fun saveAsPdf(onResult: (java.io.InputStream?) -> Unit) {
+        if (closed || !geckoSession.isOpen) {
+            onResult(null)
+            return
+        }
+        geckoSession.saveAsPdf().accept(
+            { stream -> onResult(stream) },
+            { onResult(null) },
+        )
+    }
+
+    override fun requestPrint(onResult: (java.io.InputStream?) -> Unit) {
+        if (closed || !geckoSession.isOpen) {
+            onResult(null)
+            return
+        }
+        // A second print request must not strand the first one's callback
+        // forever; fail the superseded request instead.
+        pendingPrintCallback?.invoke(null)
+        pendingPrintCallback = onResult
+        geckoSession.didPrintPageContent().accept(
+            { },
+            {
+                pendingPrintCallback = null
+                onResult(null)
+            },
+        )
+    }
+
+    private var pendingPrintCallback: ((java.io.InputStream?) -> Unit)? = null
+
+    private val printDelegate = object : GeckoSession.PrintDelegate {
+        override fun onPrintWithStatus(
+            pdfInputStream: java.io.InputStream,
+        ): GeckoResult<Boolean> {
+            val callback = pendingPrintCallback
+            pendingPrintCallback = null
+            if (callback == null) {
+                val emitted = _events.tryEmit(
+                    BrowserSessionEvent.PrintRequested(
+                        sessionId = id,
+                        bodySource = pdfInputStream,
+                    ),
+                )
+                if (!emitted) runCatching { pdfInputStream.close() }
+                return GeckoResult.fromValue(emitted)
+            }
+            callback(pdfInputStream)
+            return GeckoResult.fromValue(true)
+        }
+    }
+
     override fun loadUrl(url: String) {
         if (closed || url.isBlank()) return
         ensureOpen()
@@ -716,6 +1096,11 @@ internal class GeckoBrowserSession(
         autofillCredential = null
         cancelAllFilePickers()
         geckoSession.setPromptDelegate(null)
+        geckoSession.setPermissionDelegate(null)
+        geckoSession.setPrintDelegate(null)
+        pendingPrintCallback?.invoke(null)
+        pendingPrintCallback = null
+        engine.unregisterSession(this)
         geckoSession.setNavigationDelegate(null)
         geckoSession.setProgressDelegate(null)
         geckoSession.setContentDelegate(null)
@@ -752,6 +1137,7 @@ internal class GeckoBrowserSession(
                     isFolder =
                         prompt.type == GeckoSession.PromptDelegate.FilePrompt.Type.FOLDER,
                     mimeTypes = prompt.mimeTypes?.filterNotNull()?.take(16) ?: emptyList(),
+                    captureMode = prompt.capture,
                 ),
             )
             if (!emitted) {
@@ -759,6 +1145,401 @@ internal class GeckoBrowserSession(
                 return GeckoResult.fromValue(prompt.dismiss())
             }
             return result
+        }
+
+        override fun onAlertPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.AlertPrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.ALERT,
+                title = prompt.title,
+                message = prompt.message,
+                confirm = { prompt.dismiss() },
+                dismiss = { prompt.dismiss() },
+            )
+
+        override fun onButtonPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.ButtonPrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.CONFIRM,
+                title = prompt.title,
+                message = prompt.message,
+                confirm = {
+                    prompt.confirm(
+                        GeckoSession.PromptDelegate.ButtonPrompt.Type.POSITIVE,
+                    )
+                },
+                dismiss = {
+                    prompt.confirm(
+                        GeckoSession.PromptDelegate.ButtonPrompt.Type.NEGATIVE,
+                    )
+                },
+            )
+
+        override fun onTextPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.TextPrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.TEXT,
+                title = prompt.title,
+                message = prompt.message,
+                defaultValue = prompt.defaultValue,
+                confirmWithText = { text -> prompt.confirm(text.orEmpty()) },
+                dismiss = { prompt.dismiss() },
+            )
+
+        override fun onBeforeUnloadPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.BeforeUnloadPrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.BEFORE_UNLOAD,
+                title = null,
+                message = null,
+                confirm = {
+                    prompt.confirm(AllowOrDeny.ALLOW)
+                },
+                dismiss = {
+                    prompt.confirm(AllowOrDeny.DENY)
+                },
+            )
+
+        override fun onRepostConfirmPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.RepostConfirmPrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.REPOST_CONFIRM,
+                title = null,
+                message = null,
+                confirm = {
+                    prompt.confirm(AllowOrDeny.ALLOW)
+                },
+                dismiss = {
+                    prompt.confirm(AllowOrDeny.DENY)
+                },
+            )
+
+        override fun onFolderUploadPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.FolderUploadPrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.FOLDER_UPLOAD,
+                title = null,
+                message = prompt.directoryName,
+                confirm = {
+                    prompt.confirm(AllowOrDeny.ALLOW)
+                },
+                dismiss = {
+                    prompt.confirm(AllowOrDeny.DENY)
+                },
+            )
+
+        override fun onPopupPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.PopupPrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.POPUP,
+                title = null,
+                message = prompt.targetUri,
+                confirm = {
+                    prompt.confirm(AllowOrDeny.ALLOW)
+                },
+                dismiss = {
+                    prompt.confirm(AllowOrDeny.DENY)
+                },
+            )
+
+        override fun onAuthPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.AuthPrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.AUTH,
+                title = prompt.title,
+                message = prompt.message,
+                defaultValue = prompt.authOptions.username,
+                confirmWithText = { credentials ->
+                    val parts = credentials.orEmpty().split('\u001F', limit = 2)
+                    val username = parts.getOrNull(0).orEmpty()
+                    val password = parts.getOrNull(1).orEmpty()
+                    if (prompt.authOptions.flags and
+                        GeckoSession.PromptDelegate.AuthPrompt.AuthOptions.Flags.ONLY_PASSWORD != 0
+                    ) {
+                        prompt.confirm(password)
+                    } else {
+                        prompt.confirm(username, password)
+                    }
+                },
+                dismiss = { prompt.dismiss() },
+                passwordOnly =
+                    prompt.authOptions.flags and
+                        GeckoSession.PromptDelegate.AuthPrompt.AuthOptions.Flags.ONLY_PASSWORD != 0,
+            )
+
+        override fun onChoicePrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.ChoicePrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> {
+            val flat = mutableListOf<GeckoSession.PromptDelegate.ChoicePrompt.Choice>()
+            fun addChoices(
+                choices: Array<GeckoSession.PromptDelegate.ChoicePrompt.Choice>,
+            ) {
+                choices.forEach { choice ->
+                    val children = choice.items
+                    if (children == null) {
+                        flat += choice
+                    } else {
+                        addChoices(children)
+                    }
+                }
+            }
+            addChoices(prompt.choices)
+            return webPrompt(
+                kind = WebPromptKind.CHOICE,
+                title = prompt.title,
+                message = prompt.message,
+                confirmWithSelection = { selectedIndices ->
+                    // Indices travel from the UI; page-controlled option
+                    // ids are only ever read here, never parsed back out
+                    // of a delimited string.
+                    val ids = selectedIndices
+                        .mapNotNull { index -> flat.getOrNull(index)?.id }
+                        .toTypedArray()
+                    when {
+                        ids.isEmpty() -> prompt.dismiss()
+                        prompt.type == GeckoSession.PromptDelegate.ChoicePrompt.Type.MULTIPLE ->
+                            prompt.confirm(ids)
+                        else -> prompt.confirm(ids.first())
+                    }
+                },
+                dismiss = { prompt.dismiss() },
+                options = flat.map { it.label },
+                optionIds = flat.map { it.id },
+                optionEnabled = flat.map { !it.disabled && !it.separator },
+                optionSelected = flat.map { it.selected },
+                allowMultiple =
+                    prompt.type ==
+                        GeckoSession.PromptDelegate.ChoicePrompt.Type.MULTIPLE,
+            )
+        }
+
+        override fun onColorPrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.ColorPrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.COLOR,
+                title = prompt.title,
+                message = null,
+                defaultValue = prompt.defaultValue,
+                confirmWithText = { color -> prompt.confirm(color.orEmpty()) },
+                dismiss = { prompt.dismiss() },
+                options = prompt.predefinedValues?.filterNotNull().orEmpty(),
+                optionIds = prompt.predefinedValues?.filterNotNull().orEmpty(),
+                optionEnabled = prompt.predefinedValues
+                    ?.map { true }
+                    .orEmpty(),
+            )
+
+        override fun onDateTimePrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.DateTimePrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.DATE_TIME,
+                title = prompt.title,
+                message = null,
+                defaultValue = prompt.defaultValue,
+                confirmWithText = { value -> prompt.confirm(value.orEmpty()) },
+                dismiss = { prompt.dismiss() },
+            )
+
+        override fun onSharePrompt(
+            session: GeckoSession,
+            prompt: GeckoSession.PromptDelegate.SharePrompt,
+        ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> =
+            webPrompt(
+                kind = WebPromptKind.SHARE,
+                title = prompt.title,
+                message = listOfNotNull(prompt.text, prompt.uri)
+                    .joinToString("\n")
+                    .ifBlank { null },
+                confirmWithText = { outcome ->
+                    prompt.confirm(
+                        when (outcome) {
+                            "success" -> GeckoSession.PromptDelegate.SharePrompt.Result.SUCCESS
+                            "failure" -> GeckoSession.PromptDelegate.SharePrompt.Result.FAILURE
+                            else -> GeckoSession.PromptDelegate.SharePrompt.Result.ABORT
+                        },
+                    )
+                },
+                dismiss = { prompt.dismiss() },
+            )
+    }
+
+    private fun webPrompt(
+        kind: WebPromptKind,
+        title: String?,
+        message: String?,
+        defaultValue: String? = null,
+        confirm: (() -> GeckoSession.PromptDelegate.PromptResponse)? = null,
+        confirmWithText: ((String?) -> GeckoSession.PromptDelegate.PromptResponse)? = null,
+        confirmWithSelection: ((List<Int>) -> GeckoSession.PromptDelegate.PromptResponse)? = null,
+        dismiss: () -> GeckoSession.PromptDelegate.PromptResponse,
+        options: List<String> = emptyList(),
+        optionIds: List<String> = emptyList(),
+        optionEnabled: List<Boolean> = emptyList(),
+        optionSelected: List<Boolean> = emptyList(),
+        allowMultiple: Boolean = false,
+        passwordOnly: Boolean = false,
+    ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> {
+        if (closed) return GeckoResult.fromValue(dismiss())
+        val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+        var completed = false
+        val emitted = _events.tryEmit(
+            BrowserSessionEvent.WebPromptRequested(
+                sessionId = id,
+                kind = kind,
+                title = title,
+                message = message,
+                defaultValue = defaultValue,
+                confirm = { text, selectedIndices ->
+                    if (!completed) {
+                        completed = true
+                        result.complete(
+                            confirmWithSelection?.invoke(selectedIndices)
+                                ?: confirmWithText?.invoke(text)
+                                ?: confirm?.invoke()
+                                ?: dismiss(),
+                        )
+                    }
+                },
+                dismiss = {
+                    if (!completed) {
+                        completed = true
+                        result.complete(dismiss())
+                    }
+                },
+                options = options,
+                optionIds = optionIds,
+                optionEnabled = optionEnabled,
+                optionSelected = optionSelected,
+                allowMultiple = allowMultiple,
+                passwordOnly = passwordOnly,
+            ),
+        )
+        if (!emitted) return GeckoResult.fromValue(dismiss())
+        return result
+    }
+
+    private val permissionDelegate = object : PermissionDelegate {
+        override fun onAndroidPermissionsRequest(
+            session: GeckoSession,
+            permissions: Array<out String>?,
+            callback: PermissionDelegate.Callback,
+        ) {
+            val requested = permissions?.filter { it.isNotBlank() }.orEmpty()
+            if (closed || requested.isEmpty()) {
+                callback.reject()
+                return
+            }
+            val emitted = _events.tryEmit(
+                BrowserSessionEvent.AndroidPermissionRequested(
+                    sessionId = id,
+                    permissions = requested,
+                    grant = { runCatching { callback.grant() } },
+                    deny = { runCatching { callback.reject() } },
+                ),
+            )
+            if (!emitted) callback.reject()
+        }
+
+        override fun onContentPermissionRequest(
+            session: GeckoSession,
+            permission: PermissionDelegate.ContentPermission,
+        ): GeckoResult<Int> {
+            val kind = permission.toAppPermissionKind()
+            if (closed || kind == null) {
+                return GeckoResult.fromValue(
+                    PermissionDelegate.ContentPermission.VALUE_DENY,
+                )
+            }
+            val result = GeckoResult<Int>()
+            var completed = false
+            fun completeOnce(value: Int) {
+                if (!completed) {
+                    completed = true
+                    result.complete(value)
+                }
+            }
+            val emitted = _events.tryEmit(
+                BrowserSessionEvent.SitePermissionRequested(
+                    sessionId = id,
+                    origin = permission.uri.ifBlank { _state.value.url },
+                    kind = kind,
+                    allow = {
+                        completeOnce(
+                            PermissionDelegate.ContentPermission.VALUE_ALLOW,
+                        )
+                    },
+                    deny = {
+                        completeOnce(
+                            PermissionDelegate.ContentPermission.VALUE_DENY,
+                        )
+                    },
+                ),
+            )
+            if (!emitted) {
+                result.complete(PermissionDelegate.ContentPermission.VALUE_DENY)
+            }
+            return result
+        }
+
+        override fun onMediaPermissionRequest(
+            session: GeckoSession,
+            uri: String,
+            video: Array<out PermissionDelegate.MediaSource>?,
+            audio: Array<out PermissionDelegate.MediaSource>?,
+            callback: PermissionDelegate.MediaCallback,
+        ) {
+            val videoSource = video?.firstOrNull()
+            val audioSource = audio?.firstOrNull()
+            if (closed || (videoSource == null && audioSource == null)) {
+                callback.reject()
+                return
+            }
+            val emitted = _events.tryEmit(
+                BrowserSessionEvent.MediaPermissionRequested(
+                    sessionId = id,
+                    origin = uri.ifBlank { _state.value.url },
+                    wantsVideo = videoSource != null,
+                    wantsAudio = audioSource != null,
+                    videoLabels = video?.map {
+                        it.name?.ifBlank { null } ?: it.id
+                    }.orEmpty(),
+                    audioLabels = audio?.map {
+                        it.name?.ifBlank { null } ?: it.id
+                    }.orEmpty(),
+                    videoFromScreen = video?.any {
+                        it.source == PermissionDelegate.MediaSource.SOURCE_SCREEN
+                    } == true,
+                    wantsMicrophone = audio?.any {
+                        it.source == PermissionDelegate.MediaSource.SOURCE_MICROPHONE
+                    } == true,
+                    grant = {
+                        runCatching { callback.grant(videoSource, audioSource) }
+                    },
+                    reject = { runCatching { callback.reject() } },
+                ),
+            )
+            if (!emitted) callback.reject()
         }
     }
 
@@ -810,14 +1591,17 @@ internal class GeckoBrowserSession(
     private fun nodeMatchesCurrentPage(node: Autofill.Node): Boolean {
         val pageHost = runCatching {
             android.net.Uri.parse(_state.value.url).host
-        }.getOrNull()?.lowercase()?.removePrefix("www.") ?: return false
+        }.getOrNull()?.lowercase() ?: return false
         val nodeDomain = node.domain.trim().lowercase()
         if (nodeDomain.isBlank()) return false
         val nodeHost = runCatching {
             android.net.Uri.parse(
                 if ("://" in nodeDomain) nodeDomain else "https://$nodeDomain",
             ).host
-        }.getOrNull()?.lowercase()?.removePrefix("www.") ?: nodeDomain.removePrefix("www.")
+        }.getOrNull()?.lowercase() ?: nodeDomain
+        // Exact host only. Treating www.example.com and example.com as the
+        // same node would let the exact-origin credential gate be bypassed
+        // by a same-site-but-different-origin frame/document.
         return nodeHost == pageHost
     }
 
@@ -864,6 +1648,17 @@ internal class GeckoBrowserSession(
     private fun fillSavedCredential(session: GeckoSession, focused: Autofill.Node) {
         val credential = autofillCredential ?: return
         if (closed || config.isPrivate) return
+        // Exact-origin gate at fill time (scheme + host + port). The
+        // ViewModel loads a credential for the page's origin at navigation
+        // time, but a focus event can race a navigation; the looser
+        // host-only node check below must never let an HTTPS login leak
+        // into the same host over HTTP or a different port.
+        val expectedOrigin = credential.origin
+        if (expectedOrigin != null &&
+            CredentialOrigin.fromUrl(_state.value.url) != expectedOrigin
+        ) {
+            return
+        }
         if (focused.hint != Autofill.Hint.USERNAME &&
             focused.hint != Autofill.Hint.EMAIL_ADDRESS &&
             focused.hint != Autofill.Hint.PASSWORD
@@ -901,6 +1696,38 @@ internal class GeckoBrowserSession(
     // ---- GeckoView delegates -------------------------------------------------
 
     private val navigationDelegate = object : GeckoSession.NavigationDelegate {
+        override fun onLoadRequest(
+            session: GeckoSession,
+            request: GeckoSession.NavigationDelegate.LoadRequest,
+        ): GeckoResult<AllowOrDeny> {
+            val uri = request.uri
+            val scheme = uri.substringBefore(':', missingDelimiterValue = "")
+                .lowercase()
+            // data: is deliberately not an in-page navigation scheme: a
+            // top-level data document can spoof arbitrary trusted UI.
+            val webScheme = scheme in setOf(
+                "http", "https", "about", "blob", "view-source",
+                "moz-extension", "resource", "chrome",
+            )
+            if (webScheme || scheme.isBlank()) {
+                return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+            }
+            if (scheme in setOf("file", "data", "javascript", "vbscript")) {
+                // Dangerous/local schemes are blocked outright. Forwarding
+                // them to Android as ACTION_VIEW could hand a local file or
+                // an attacker-controlled document to another app; they are
+                // not external links in any useful sense.
+                return GeckoResult.fromValue(AllowOrDeny.DENY)
+            }
+            _events.tryEmit(
+                BrowserSessionEvent.ExternalLinkRequested(
+                    sessionId = id,
+                    uri = uri,
+                ),
+            )
+            return GeckoResult.fromValue(AllowOrDeny.DENY)
+        }
+
         override fun onLocationChange(
             session: GeckoSession,
             url: String?,
@@ -922,7 +1749,15 @@ internal class GeckoBrowserSession(
             // GeckoView requires the returned session to be *unopened* — it
             // opens and navigates it itself. We only create + register it.
             val sibling = engine.createSessionInternal(
-                BrowserSessionConfig(isPrivate = config.isPrivate, desktopMode = config.desktopMode),
+                BrowserSessionConfig(
+                    isPrivate = config.isPrivate,
+                    // The opener may have been switched between mobile and
+                    // desktop after its session was created; inherit the
+                    // mode it is actually rendering with, not the stale
+                    // creation-time config, so the ViewModel and the new
+                    // session cannot disagree about this tab's mode.
+                    desktopMode = _state.value.isDesktopMode,
+                ),
             )
             engine.notifyNewSessionCreated(sibling, id)
             return GeckoResult.fromValue(sibling.geckoSession)
@@ -941,7 +1776,9 @@ internal class GeckoBrowserSession(
             sessionState: GeckoSession.SessionState,
         ) {
             // Continuously kept so the tab can be suspended at any moment.
-            latestStateString = sessionState.toString()
+            // Gecko hands us a snapshot copy; serialization is deferred to
+            // latestSavedState() instead of running on every callback.
+            latestSessionState = sessionState
         }
 
         override fun onPageStart(session: GeckoSession, url: String) {
@@ -977,7 +1814,28 @@ internal class GeckoBrowserSession(
             session: GeckoSession,
             securityInfo: GeckoSession.ProgressDelegate.SecurityInformation,
         ) {
-            _state.update { it.copy(isSecure = securityInfo.isSecure) }
+            _state.update {
+                it.copy(
+                    isSecure = securityInfo.isSecure,
+                    isSecurityException = securityInfo.isException,
+                    hasMixedContent =
+                        securityInfo.mixedModeActive ==
+                            GeckoSession.ProgressDelegate.SecurityInformation.CONTENT_LOADED ||
+                            securityInfo.mixedModePassive ==
+                            GeckoSession.ProgressDelegate.SecurityInformation.CONTENT_LOADED,
+                    certificateHost = securityInfo.host,
+                    certificateSubject =
+                        securityInfo.certificate
+                            ?.subjectX500Principal
+                            ?.name
+                            .orEmpty(),
+                    certificateIssuer =
+                        securityInfo.certificate
+                            ?.issuerX500Principal
+                            ?.name
+                            .orEmpty(),
+                )
+            }
         }
     }
 
@@ -1088,6 +1946,8 @@ internal class GeckoBrowserSession(
 
     init {
         geckoSession.setPromptDelegate(promptDelegate)
+        geckoSession.setPermissionDelegate(permissionDelegate)
+        geckoSession.setPrintDelegate(printDelegate)
         geckoSession.setNavigationDelegate(navigationDelegate)
         geckoSession.setProgressDelegate(progressDelegate)
         geckoSession.setContentDelegate(contentDelegate)

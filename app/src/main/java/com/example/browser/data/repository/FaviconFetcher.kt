@@ -74,7 +74,20 @@ class FaviconFetcher {
 
     private fun downloadBitmap(url: String): Bitmap? = runCatching {
         val bytes = downloadBytes(url, MAX_ICON_BYTES) ?: return@runCatching null
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        // The encoded-size cap does not bound decoded memory: a small PNG
+        // can expand to thousands of pixels per side. Probe bounds first
+        // and subsample toward a small target before decoding for real.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+        var sampleSize = 1
+        while (bounds.outWidth / (sampleSize * 2) >= TARGET_ICON_SIZE &&
+            bounds.outHeight / (sampleSize * 2) >= TARGET_ICON_SIZE
+        ) {
+            sampleSize *= 2
+        }
+        val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
     }.getOrNull()
 
     private fun downloadText(url: String, maxBytes: Int): String? = runCatching {
@@ -144,9 +157,10 @@ class FaviconFetcher {
         const val MAX_REDIRECTS = 3
         const val MAX_CANDIDATES = 5
         const val MIN_ICON_SIZE = 16
+        const val TARGET_ICON_SIZE = 128
         const val MAX_HTML_BYTES = 192 * 1024
         const val MAX_ICON_BYTES = 1024 * 1024
-        const val USER_AGENT = "HexoraBrowser/0.3 Android"
+        const val USER_AGENT = "HexoraBrowser/1.0 (Android)"
         val LINK_TAG_REGEX = Regex("<link\\b[^>]*>", RegexOption.IGNORE_CASE)
     }
 }

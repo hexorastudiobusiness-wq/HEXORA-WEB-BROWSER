@@ -1,7 +1,9 @@
 package com.example.browser.data.settings
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -23,8 +25,14 @@ enum class ThemeMode {
 data class BrowserSettingsState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val searchEngine: SearchEngine = SearchEngine.GOOGLE,
+    /** User-supplied search URL template containing `%s`, for CUSTOM. */
+    val customSearchTemplate: String = "",
+    val customSearchName: String = "",
     val javaScriptEnabled: Boolean = true,
-    val cookiesEnabled: Boolean = true,
+    /** Gecko Enhanced Tracking Protection for every session. */
+    val trackingProtectionEnabled: Boolean = true,
+    /** Upgrade/block plain HTTP navigations through Gecko HTTPS-Only Mode. */
+    val httpsOnlyMode: Boolean = false,
     val desktopMode: Boolean = false,
     val openLinksInNewTab: Boolean = true,
     /** Global text zoom in percent (50..200). */
@@ -34,7 +42,12 @@ data class BrowserSettingsState(
 ) {
 }
 
-private val Context.dataStore by preferencesDataStore(name = "browser_settings")
+private val Context.dataStore by preferencesDataStore(
+    name = "browser_settings",
+    // A corrupt settings file must degrade to defaults, never crash every
+    // collector (including the one that creates the browsing engine).
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /**
  * DataStore-backed settings. UI talks to this class, never to DataStore
@@ -48,8 +61,11 @@ class SettingsRepository(context: Context) {
         BrowserSettingsState(
             themeMode = ThemeMode.fromName(prefs[KEY_THEME]),
             searchEngine = SearchEngine.fromId(prefs[KEY_SEARCH_ENGINE]),
+            customSearchTemplate = prefs[KEY_CUSTOM_SEARCH_TEMPLATE] ?: "",
+            customSearchName = prefs[KEY_CUSTOM_SEARCH_NAME] ?: "",
             javaScriptEnabled = prefs[KEY_JAVASCRIPT] ?: true,
-            cookiesEnabled = prefs[KEY_COOKIES] ?: true,
+            trackingProtectionEnabled = prefs[KEY_TRACKING_PROTECTION] ?: true,
+            httpsOnlyMode = prefs[KEY_HTTPS_ONLY] ?: false,
             desktopMode = prefs[KEY_DESKTOP_MODE] ?: false,
             openLinksInNewTab = prefs[KEY_OPEN_LINKS_NEW_TAB] ?: true,
             textZoomPercent = (prefs[KEY_TEXT_ZOOM] ?: 100).coerceIn(50, 200),
@@ -65,12 +81,23 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[KEY_SEARCH_ENGINE] = engine.id }
     }
 
+    suspend fun setCustomSearch(name: String, template: String) {
+        dataStore.edit { prefs ->
+            prefs[KEY_CUSTOM_SEARCH_NAME] = name.trim()
+            prefs[KEY_CUSTOM_SEARCH_TEMPLATE] = template.trim()
+        }
+    }
+
     suspend fun setJavaScriptEnabled(enabled: Boolean) {
         dataStore.edit { it[KEY_JAVASCRIPT] = enabled }
     }
 
-    suspend fun setCookiesEnabled(enabled: Boolean) {
-        dataStore.edit { it[KEY_COOKIES] = enabled }
+    suspend fun setTrackingProtectionEnabled(enabled: Boolean) {
+        dataStore.edit { it[KEY_TRACKING_PROTECTION] = enabled }
+    }
+
+    suspend fun setHttpsOnlyMode(enabled: Boolean) {
+        dataStore.edit { it[KEY_HTTPS_ONLY] = enabled }
     }
 
     suspend fun setDesktopMode(enabled: Boolean) {
@@ -92,8 +119,11 @@ class SettingsRepository(context: Context) {
     private companion object {
         val KEY_THEME = stringPreferencesKey("theme_mode")
         val KEY_SEARCH_ENGINE = stringPreferencesKey("search_engine")
+        val KEY_CUSTOM_SEARCH_TEMPLATE = stringPreferencesKey("custom_search_template")
+        val KEY_CUSTOM_SEARCH_NAME = stringPreferencesKey("custom_search_name")
         val KEY_JAVASCRIPT = booleanPreferencesKey("javascript_enabled")
-        val KEY_COOKIES = booleanPreferencesKey("cookies_enabled")
+        val KEY_TRACKING_PROTECTION = booleanPreferencesKey("tracking_protection_enabled")
+        val KEY_HTTPS_ONLY = booleanPreferencesKey("https_only_mode")
         val KEY_DESKTOP_MODE = booleanPreferencesKey("desktop_mode")
         val KEY_OPEN_LINKS_NEW_TAB = booleanPreferencesKey("open_links_in_new_tab")
         val KEY_TEXT_ZOOM = intPreferencesKey("text_zoom_percent")

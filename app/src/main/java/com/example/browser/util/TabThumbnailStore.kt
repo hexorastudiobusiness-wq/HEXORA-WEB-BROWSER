@@ -61,7 +61,9 @@ class TabThumbnailStore(context: Context) {
         const val MAX_MEMORY_ENTRIES = 24
     }
 
-    private fun scaleDown(bitmap: Bitmap, maxWidth: Int = 400): Bitmap {
+    // Matches the engine's capture-time cap (480px), so bitmaps arriving
+    // from a session are stored as-is instead of being scaled twice.
+    private fun scaleDown(bitmap: Bitmap, maxWidth: Int = 480): Bitmap {
         if (bitmap.width <= maxWidth) return bitmap
         val scale = maxWidth.toFloat() / bitmap.width
         return Bitmap.createScaledBitmap(
