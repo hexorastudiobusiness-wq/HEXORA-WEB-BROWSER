@@ -663,6 +663,14 @@ class BrowserViewModel(
         )
     }
 
+    // Declared before init: the init block immediately starts collecting
+    // this flow (debounced). Kotlin initialises properties in declaration
+    // order, so declaring it further down (as it originally was, next to
+    // its only writer) left it null during init and crashed the app at
+    // ViewModel creation with an NPE inside Flow.debounce.
+    private val persistRequests =
+        MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
     init {
         // Tab thumbnails are not restored after process death, so screenshots
         // from a previous process would only be orphaned page images. (The
@@ -1547,9 +1555,6 @@ class BrowserViewModel(
             )
         }
     }
-
-    private val persistRequests =
-        MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
     /** Asks for a (debounced) tab-strip write; cheap to call from anywhere. */
     private fun requestPersistTabs() {
