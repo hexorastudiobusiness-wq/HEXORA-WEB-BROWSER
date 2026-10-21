@@ -2,7 +2,9 @@ name: Emulator smoke test
 
 # Reproduces the upgrade path (previous shipped build -> current build)
 # on an emulator and captures the real logcat crash trace, because the
-# dev sandbox has no Android device attached.
+# dev sandbox has no Android device attached. The emulator is created
+# and booted by hand: the ready-made emulator actions timed out waiting
+# for boot on the hosted runners.
 
 on:
   push:
@@ -18,8 +20,8 @@ permissions:
 
 jobs:
   smoke:
-    # Apple-silicon runners boot the ARM emulator natively (Linux hosted
-    # runners timed out booting an x86_64 emulator), and ARM matches phones.
+    # Apple-silicon runners run the ARM emulator natively, and ARM is
+    # the architecture real phones use.
     runs-on: macos-14
     steps:
       - name: Check out sources
@@ -37,7 +39,7 @@ jobs:
           path: ~/.android/debug.keystore
           key: hexora-debug-keystore-v1
 
-      - name: Install Android SDK platform 37
+      - name: Install Android SDK packages
         run: |
           set -o pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
@@ -45,7 +47,9 @@ jobs:
           PLATFORM_PKG=$("$SDKMANAGER" --list 2>/dev/null | grep -oE "platforms;android-37[0-9.]*" | sort -Vu | tail -1 || true)
           echo "PLATFORM_PKG=$PLATFORM_PKG" | tee -a setup.log
           test -n "$PLATFORM_PKG"
-          "$SDKMANAGER" "$PLATFORM_PKG" "build-tools;37.0.0" 2>&1 | tee -a setup.log
+          "$SDKMANAGER" "$PLATFORM_PKG" "build-tools;37.0.0" \
+            "emulator" "platform-tools" \
+            "system-images;android-34;google_apis;arm64-v8a" 2>&1 | tee -a setup.log
 
       - name: Build current debug APK
         run: |
@@ -61,35 +65,50 @@ jobs:
             --pattern 'app-arm64-v8a-debug.apk' \
             --dir old
 
-      - name: Run upgrade smoke test on emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          arch: arm64-v8a
-          profile: pixel_6
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          disable-animations: true
-          script: |
-            echo "=== fresh install of CURRENT build ==="
-            adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
-            adb shell am start -W -n com.example.browser/.MainActivity || true
-            sleep 15
-            adb shell pidof com.example.browser && echo FRESH_CURRENT_RUNNING || echo FRESH_CURRENT_DEAD
-            adb logcat -d > fresh-logcat.txt
-            adb uninstall com.example.browser || true
-            adb logcat -c || true
-            echo "=== install previous build v0.4.2 ==="
-            adb install -r old/app-arm64-v8a-debug.apk
-            adb shell am start -W -n com.example.browser/.MainActivity || true
-            sleep 15
-            adb shell pidof com.example.browser && echo OLD_RUNNING || echo OLD_DEAD
-            adb logcat -c || true
-            echo "=== upgrade to CURRENT build ==="
-            adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
-            adb shell am start -W -n com.example.browser/.MainActivity || true
-            sleep 15
-            adb shell pidof com.example.browser && echo UPGRADED_RUNNING || echo UPGRADED_DEAD
-            adb logcat -d > upgrade-logcat.txt
+      - name: Create and boot emulator
+        run: |
+          set -o pipefail
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd \
+            -n smoke -k "system-images;android-34;google_apis;arm64-v8a" \
+            --device "pixel_6" --force
+          "$ANDROID_HOME/emulator/emulator" -avd smoke \
+            -no-window -no-audio -no-boot-anim \
+            -gpu swiftshader_indirect -no-snapshot -wipe-data \
+            > emulator.log 2>&1 &
+          echo $! > emulator.pid
+          adb wait-for-device
+          for i in $(seq 1 90); do
+            if [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+              echo "emulator booted after ~$((i * 10))s"
+              break
+            fi
+            sleep 10
+          done
+          adb shell getprop sys.boot_completed
+          adb shell input keyevent 82 || true
+
+      - name: Run upgrade smoke test
+        run: |
+          echo "=== fresh install of CURRENT build ==="
+          adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+          adb shell am start -W -n com.example.browser/.MainActivity || true
+          sleep 20
+          adb shell pidof com.example.browser && echo FRESH_CURRENT_RUNNING || echo FRESH_CURRENT_DEAD
+          adb logcat -d > fresh-logcat.txt
+          adb uninstall com.example.browser || true
+          adb logcat -c || true
+          echo "=== install previous build v0.4.2 ==="
+          adb install -r old/app-arm64-v8a-debug.apk
+          adb shell am start -W -n com.example.browser/.MainActivity || true
+          sleep 20
+          adb shell pidof com.example.browser && echo OLD_RUNNING || echo OLD_DEAD
+          adb logcat -c || true
+          echo "=== upgrade to CURRENT build ==="
+          adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+          adb shell am start -W -n com.example.browser/.MainActivity || true
+          sleep 20
+          adb shell pidof com.example.browser && echo UPGRADED_RUNNING || echo UPGRADED_DEAD
+          adb logcat -d > upgrade-logcat.txt
 
       - name: Report crash traces in an issue
         if: always()
@@ -105,12 +124,15 @@ jobs:
                 echo '```text'
                 grep -n "FATAL EXCEPTION" -A 45 "$f" | head -200 || echo "(no FATAL EXCEPTION found)"
                 echo '```'
-                echo "## $f — AndroidRuntime lines"
+                echo "## $f — RUNNING/DEAD markers are in the run log; AndroidRuntime:"
                 echo '```text'
                 grep -n "AndroidRuntime" "$f" | head -60 || true
                 echo '```'
               else
                 echo "## $f missing"
+                echo '```text'
+                tail -50 emulator.log 2>/dev/null || true
+                echo '```'
               fi
             done
           } > smoke-report.md
