@@ -2,7 +2,9 @@ package com.example.browser.data.repository
 
 import com.example.browser.data.database.ShortcutDao
 import com.example.browser.data.database.ShortcutEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 

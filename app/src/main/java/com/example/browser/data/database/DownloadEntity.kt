@@ -1,5 +1,6 @@
 package com.example.browser.data.database
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -25,10 +26,19 @@ data class DownloadEntity(
     /** Published content/file URI of a completed transfer, when known. */
     val localUri: String? = null,
     /** How the transfer can be produced again: HTTP, STREAM or LEGACY. */
+    // The @ColumnInfo defaultValue values must mirror the DEFAULT clauses
+    // in DatabaseMigrations' ALTER TABLE statements exactly: Room compares
+    // the migrated table's definition against the entity schema, and a
+    // default declared only in SQL (or only in Kotlin) makes validation
+    // fail with "Migration didn't properly handle" — a crash on first DB
+    // access right after an app update.
+    @ColumnInfo(defaultValue = "LEGACY")
     val sourceKind: String = SOURCE_LEGACY,
     /** Last persisted transfer status (DownloadManager STATUS_* or -2). */
     val lastStatus: Int? = null,
+    @ColumnInfo(defaultValue = "0")
     val downloadedBytes: Long = 0L,
+    @ColumnInfo(defaultValue = "-1")
     val totalBytes: Long = -1L,
 ) {
     companion object {

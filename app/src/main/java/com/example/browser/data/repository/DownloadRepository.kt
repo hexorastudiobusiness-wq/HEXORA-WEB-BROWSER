@@ -13,6 +13,10 @@ import kotlinx.coroutines.flow.Flow
 class DownloadRepository(private val dao: DownloadDao) {
 
     val downloads: Flow<List<DownloadEntity>> = dao.observeAll()
+        .catch { error ->
+            if (error is CancellationException) throw error
+            emit(emptyList())
+        }
 
     suspend fun record(
         downloadManagerId: Long,

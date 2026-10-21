@@ -9,7 +9,13 @@ import kotlinx.coroutines.sync.withLock
 /** Application-facing bookmarks API. Hides Room from ViewModels (ARCHITECTURE.md §20). */
 class BookmarkRepository(private val dao: BookmarkDao) {
 
+    // Degrade to empty on a database read failure instead of crashing at
+    // launch (see HistoryRepository).
     val bookmarks: Flow<List<BookmarkEntity>> = dao.observeAll()
+        .catch { error ->
+            if (error is CancellationException) throw error
+            emit(emptyList())
+        }
 
     /** Serializes check-then-act writes (see [toggle]). */
     private val writeMutex = Mutex()
