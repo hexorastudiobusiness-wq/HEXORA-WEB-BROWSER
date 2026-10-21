@@ -22,7 +22,6 @@ import android.print.PrintDocumentInfo
 import android.print.PrintManager
 import android.webkit.MimeTypeMap
 import android.widget.Toast
-import com.example.browser.util.CrashReporter
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
@@ -316,15 +315,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        // If the previous process died from an uncaught exception, show
-        // the saved trace (with share/clear actions) instead of marching
-        // straight back into whatever killed it. Nothing else in the app
-        // is touched on this path, so the report can always be displayed.
-        CrashReporter.lastCrash(this)?.let { crash ->
-            showCrashReport(crash)
-            return
-        }
-
         savedInstanceState?.let { state ->
             state.getString(KEY_PENDING_CAMERA_PHOTO)?.let { path ->
                 pendingCameraPhotoFile = File(path)
@@ -412,61 +402,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-    }
-
-    /**
-     * Plain-View crash screen (no Compose, no ViewModels, no database):
-     * it must render even when the normal startup path is what crashed.
-     */
-    private fun showCrashReport(crash: String) {
-        val padding = (16 * resources.displayMetrics.density).toInt()
-        val traceView = android.widget.TextView(this).apply {
-            text = crash
-            setTextIsSelectable(true)
-            setPadding(padding, padding, padding, padding)
-            textSize = 11f
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-        val shareButton = android.widget.Button(this).apply {
-            text = getString(R.string.crash_share)
-            setOnClickListener {
-                val send = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, crash)
-                }
-                startActivity(Intent.createChooser(send, null))
-            }
-        }
-        val retryButton = android.widget.Button(this).apply {
-            text = getString(R.string.crash_clear_retry)
-            setOnClickListener {
-                CrashReporter.clear(this@MainActivity)
-                recreate()
-            }
-        }
-        val root = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            addView(
-                android.widget.TextView(this@MainActivity).apply {
-                    text = getString(R.string.crash_title)
-                    setPadding(padding, padding, padding, 0)
-                    textSize = 16f
-                },
-            )
-            addView(shareButton)
-            addView(retryButton)
-            addView(
-                android.widget.ScrollView(this@MainActivity).apply {
-                    addView(traceView)
-                },
-                android.widget.LinearLayout.LayoutParams(
-                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                    0,
-                    1f,
-                ),
-            )
-        }
-        setContentView(root)
     }
 
     override fun onTrimMemory(level: Int) {

@@ -207,7 +207,20 @@ class BrowserViewModel(
         val tabId: String,
         val allow: () -> Unit,
         val deny: () -> Unit,
+        /** tabId|origin|kind for site permissions; null for media prompts. */
+        val cacheKey: String? = null,
+        /** Identical requests that arrived while the dialog was showing. */
+        val waiters: MutableList<PendingDecision> = mutableListOf(),
     )
+
+    /**
+     * Decisions the user already made for (tab, origin, permission kind)
+     * in this session. Gecko asks again on every page load and for every
+     * media element because a single VALUE_ALLOW/DENY answers only that
+     * one request; without this cache a site like Digikala re-prompts in
+     * a loop after every refresh, whatever the user taps.
+     */
+    private val sitePermissionDecisionCache = mutableMapOf<String, Boolean>()
 
     private val _sitePermissionRequest =
         MutableStateFlow<SitePermissionRequestUi?>(null)
@@ -500,7 +513,11 @@ class BrowserViewModel(
         if (_sitePermissionRequest.value?.id == id) {
             _sitePermissionRequest.value = null
         }
+        pending.cacheKey?.let { sitePermissionDecisionCache[it] = allowed }
         if (allowed) pending.allow() else pending.deny()
+        pending.waiters.forEach { waiter ->
+            if (allowed) waiter.allow() else waiter.deny()
+        }
     }
 
     private fun resolveWebPrompt(
@@ -524,6 +541,7 @@ class BrowserViewModel(
 
     /** Denies/dismisses shell prompts owned by a tab that is going away. */
     private fun clearPendingForTab(tabId: String) {
+        sitePermissionDecisionCache.keys.removeAll { it.startsWith("$tabId|") }
         val siteIds = pendingSitePermissions
             .filterValues { it.tabId == tabId }
             .keys
@@ -566,12 +584,32 @@ class BrowserViewModel(
             event.deny()
             return
         }
+        val cacheKey = "$tabId|${event.origin}|${event.kind}"
+        // Already decided for this tab+origin+kind: answer immediately
+        // instead of asking again (the autoplay re-prompt loop).
+        sitePermissionDecisionCache[cacheKey]?.let { allowed ->
+            if (allowed) event.allow() else event.deny()
+            return
+        }
+        // The same question is already on screen: answer this request
+        // together with it instead of denying it behind the dialog (a
+        // denial the user never made makes sites retry and re-ask).
+        pendingSitePermissions.values.firstOrNull { it.cacheKey == cacheKey }
+            ?.let { pending ->
+                pending.waiters += PendingDecision(tabId, event.allow, event.deny)
+                return
+            }
         if (_sitePermissionRequest.value != null) {
             event.deny()
             return
         }
         val id = UUID.randomUUID().toString()
-        pendingSitePermissions[id] = PendingDecision(tabId, event.allow, event.deny)
+        pendingSitePermissions[id] = PendingDecision(
+            tabId,
+            event.allow,
+            event.deny,
+            cacheKey = cacheKey,
+        )
         _sitePermissionRequest.value = SitePermissionRequestUi(
             id = id,
             origin = event.origin,
@@ -1561,6 +1599,19 @@ class BrowserViewModel(
         if (tabRestoreComplete) persistRequests.tryEmit(Unit)
     }
 
+    /**
+     * Immediate tab-strip write for structural changes (tab opened or
+     * closed). The 400ms debounce is fine for navigation bursts, but a
+     * tab closed and the app killed inside that window used to come back
+     * on the next cold start — a tab "opening by itself". Structural
+     * changes therefore write right away; both writers read the latest
+     * state at execution time, so they can never resurrect a stale list.
+     */
+    private fun persistTabsNow() {
+        if (!tabRestoreComplete) return
+        viewModelScope.launch { persistTabsSnapshot() }
+    }
+
     // ---- Action helpers ------------------------------------------------------
 
     private fun printActivePage() {
@@ -1694,6 +1745,7 @@ class BrowserViewModel(
         dismissPendingCredential()
         pendingFilePickerSessions.clear()
         viewModelScope.launch(Dispatchers.IO) { thumbnailStore.clearAll() }
+        persistTabsNow()
         // No replacement tab: zero tabs is a valid state. BrowserScreen
         // shows the Start Page until the user opens a site or a new tab.
     }
@@ -1774,6 +1826,7 @@ class BrowserViewModel(
         }
         if (makeActive) activateTab(entry.tabId)
         updateWarmPriorities()
+        persistTabsNow()
         return entry.tabId
     }
 
@@ -2082,6 +2135,13 @@ class BrowserViewModel(
         // Private tabs never get a persisted screenshot: a thumbnail would
         // leak page content into the tab switcher and onto disk.
         if (tabEntry.isPrivate) return
+        // Pixel capture is a GPU readback: doing it on every rapid
+        // back-and-forth tab switch visibly stutters the switch itself.
+        // A preview at most a couple of seconds old is indistinguishable
+        // in the tab switcher.
+        val now = System.currentTimeMillis()
+        if (now - (lastThumbnailCaptureAt[tabId] ?: 0L) < 2_000L) return
+        lastThumbnailCaptureAt[tabId] = now
         val session = tabEntry.session ?: return
         session.captureThumbnail { bitmap ->
             if (bitmap == null) return@captureThumbnail

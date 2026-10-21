@@ -728,10 +728,6 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
                         onPullProgress?.invoke(
                             (pull / pullThresholdPx).coerceIn(0f, 1f),
                         )
-                        if (!pullFired && pull >= pullThresholdPx) {
-                            pullFired = true
-                            onPullToRefreshGesture?.invoke()
-                        }
                     }
                 } else {
                     // The page is scrolling (or can still scroll): keep
@@ -743,7 +739,22 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
                     }
                 }
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+            MotionEvent.ACTION_UP -> {
+                // Refresh only on release, like mainstream browsers: a
+                // downward drag that is still in progress (scrolling back
+                // up, selecting text, flinging the page) must not refresh
+                // mid-gesture. Firing the moment the threshold was crossed
+                // made the gesture feel hair-triggered.
+                if (pullTracking && !pullFired &&
+                    y - pullStartY >= pullThresholdPx
+                ) {
+                    pullFired = true
+                    onPullToRefreshGesture?.invoke()
+                }
+                pullTracking = false
+                onPullProgress?.invoke(0f)
+            }
+            MotionEvent.ACTION_CANCEL -> {
                 pullTracking = false
                 onPullProgress?.invoke(0f)
             }
@@ -751,7 +762,7 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
     }
 
     private companion object {
-        const val PULL_THRESHOLD_DP = 72f
+        const val PULL_THRESHOLD_DP = 110f
     }
 
     override fun onAttachedToWindow() {

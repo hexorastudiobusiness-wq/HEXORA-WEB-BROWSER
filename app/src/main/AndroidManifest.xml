@@ -52,15 +52,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Shows the stack trace after a fatal crash. Separate process
-             so it survives the death of the crashing main process, and a
-             plain framework theme because app UI code may be broken. -->
-        <activity
-            android:name=".util.CrashReportActivity"
-            android:exported="false"
-            android:process=":crashreport"
-            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
-
         <service
             android:name=".download.DownloadForegroundService"
             android:exported="false"
