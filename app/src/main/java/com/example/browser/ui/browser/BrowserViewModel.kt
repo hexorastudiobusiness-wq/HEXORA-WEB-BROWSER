@@ -154,6 +154,7 @@ class BrowserViewModel(
 
     private val sessionJobs = mutableMapOf<String, Job>()
     private val lastThumbnailUrl = mutableMapOf<String, String>()
+    private val lastThumbnailCaptureAt = mutableMapOf<String, Long>()
 
     private val _downloadEvents =
         MutableSharedFlow<BrowserSessionEvent.DownloadRequested>(extraBufferCapacity = 16)
