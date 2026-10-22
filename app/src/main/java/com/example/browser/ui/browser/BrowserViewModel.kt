@@ -1500,9 +1500,12 @@ class BrowserViewModel(
     }
 
     /** Recreates tab entries (no sessions yet) from the persisted tab strip. */
-    private suspend fun restorePersistedTabs(desktopMode: Boolean) {
+    private suspend fun restorePersistedTabs(
+        desktopMode: Boolean,
+        skipEngineState: Boolean = false,
+    ) {
         try {
-            restorePersistedTabsInternal(desktopMode)
+            restorePersistedTabsInternal(desktopMode, skipEngineState)
         } finally {
             // Whatever happened above, the initial restore is over: tab
             // persistence must never stay blocked for the whole process.
@@ -1530,6 +1533,11 @@ class BrowserViewModel(
                 startPage = true,
             )
             tabRestoreComplete = true
+            // A Start Page with no session to restore is already a usable
+            // launch; without this, crash-loop detection would degrade the
+            // next (healthy) launch for no reason.
+            launchMarkedStable = true
+            tabSessionStore.markLaunchStable()
             requestPersistTabs()
             return
         }
@@ -1610,7 +1618,7 @@ class BrowserViewModel(
      */
     private fun persistTabsNow() {
         if (!tabRestoreComplete) return
-        viewModelScope.launch { persistTabsSnapshot() }
+        viewModelScope.launch(Dispatchers.IO) { persistTabsSnapshot() }
     }
 
     // ---- Action helpers ------------------------------------------------------
@@ -1832,6 +1840,11 @@ class BrowserViewModel(
     }
 
     private fun restoreTab(entry: TabEntry) {
+        // A Start Page tab has no page to restore. Creating an engine
+        // session for it (which fullscreen tab-switching did when it
+        // landed on an empty tab) binds a blank Gecko surface that has
+        // nothing to render — and costs a content process for nothing.
+        if (entry.showStartPage) return
         val currentEngine = engine ?: return
         val config = BrowserSessionConfig(
             isPrivate = entry.isPrivate,
@@ -1954,7 +1967,13 @@ class BrowserViewModel(
                 var autofillOrigin: String? = null
                 session.state.collect { state ->
                     _pageStates.update { it + (entry.tabId to state) }
-                    if (state.url.isNotBlank()) entry.lastUrl = state.url
+                    if (state.url.isNotBlank()) {
+                        entry.lastUrl = state.url
+                        if (!launchMarkedStable) {
+                            launchMarkedStable = true
+                            tabSessionStore.markLaunchStable()
+                        }
+                    }
                     if (state.title.isNotBlank()) entry.lastTitle = state.title
                     val newOrigin = CredentialOrigin.fromUrl(state.url)
                     if (newOrigin != autofillOrigin) {

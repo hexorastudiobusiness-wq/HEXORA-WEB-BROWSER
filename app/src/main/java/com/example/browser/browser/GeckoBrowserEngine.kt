@@ -678,6 +678,7 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
     private var pullStartY = 0f
     private var pullTracking = false
     private var pullFired = false
+    private var pullDistance = 0f
 
     /**
      * Pull-to-refresh, the way Mozilla's Android Components implements it:
@@ -693,6 +694,26 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
             return super.onTouchEvent(event)
         }
         val action = event.actionMasked
+        // The refresh decision is made HERE, synchronously with the real
+        // finger events. GeckoResult detail answers arrive asynchronously:
+        // deciding on the UP event's own answer made refresh fire only
+        // sometimes (the tracker could be reset first, or the answer
+        // could be null) and left the pull indicator stuck on screen,
+        // because those same paths also skipped the progress reset.
+        if (action == MotionEvent.ACTION_UP ||
+            action == MotionEvent.ACTION_CANCEL
+        ) {
+            if (action == MotionEvent.ACTION_UP &&
+                pullTracking && !pullFired &&
+                pullDistance >= pullThresholdPx
+            ) {
+                pullFired = true
+                onPullToRefreshGesture?.invoke()
+            }
+            pullTracking = false
+            pullDistance = 0f
+            onPullProgress?.invoke(0f)
+        }
         val y = event.y
         onTouchEventForDetailResult(event).accept(
             { detail -> detail?.let { onPullDetail(action, y, it) } },
@@ -711,6 +732,7 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
                 pullStartY = y
                 pullTracking = false
                 pullFired = false
+                pullDistance = 0f
             }
             MotionEvent.ACTION_MOVE -> {
                 val overscrolled =
@@ -724,6 +746,7 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
                         pullStartY = y
                     }
                     val pull = y - pullStartY
+                    pullDistance = pull.coerceAtLeast(0f)
                     if (pull > 0f) {
                         onPullProgress?.invoke(
                             (pull / pullThresholdPx).coerceIn(0f, 1f),
@@ -733,31 +756,18 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
                     // The page is scrolling (or can still scroll): keep
                     // re-baselining so no pull is credited mid-scroll.
                     pullStartY = y
+                    pullDistance = 0f
                     if (pullTracking) {
                         pullTracking = false
                         onPullProgress?.invoke(0f)
                     }
                 }
             }
-            MotionEvent.ACTION_UP -> {
-                // Refresh only on release, like mainstream browsers: a
-                // downward drag that is still in progress (scrolling back
-                // up, selecting text, flinging the page) must not refresh
-                // mid-gesture. Firing the moment the threshold was crossed
-                // made the gesture feel hair-triggered.
-                if (pullTracking && !pullFired &&
-                    y - pullStartY >= pullThresholdPx
-                ) {
-                    pullFired = true
-                    onPullToRefreshGesture?.invoke()
-                }
-                pullTracking = false
-                onPullProgress?.invoke(0f)
-            }
-            MotionEvent.ACTION_CANCEL -> {
-                pullTracking = false
-                onPullProgress?.invoke(0f)
-            }
+            // ACTION_UP / ACTION_CANCEL are handled synchronously in
+            // onTouchEvent; this asynchronous answer must not touch the
+            // tracker (it used to reset it before the refresh decision
+            // was made, and skipped the indicator reset when null).
+            else -> Unit
         }
     }
 
@@ -1481,6 +1491,46 @@ internal class GeckoBrowserSession(
                 return GeckoResult.fromValue(
                     PermissionDelegate.ContentPermission.VALUE_DENY,
                 )
+            }
+            // Permissions mainstream browsers decide internally are
+            // answered right here and never become a user prompt: asking
+            // "allow autoplay?" (and friends) on every site is the single
+            // biggest prompt annoyance there is. What remains for the
+            // user dialog is only what genuinely needs their judgement:
+            // geolocation, notifications, and device media (handled by
+            // the media/Android permission flows).
+            val silentValue: Int? = when (kind) {
+                // Chrome/Firefox policy: muted autoplay is harmless and
+                // expected to just work; audible autoplay is blocked
+                // until the user interacts with the page (which Gecko
+                // then no longer treats as autoplay).
+                SitePermissionKind.AUTOPLAY -> {
+                    if (permission.permission ==
+                        PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE
+                    ) {
+                        PermissionDelegate.ContentPermission.VALUE_ALLOW
+                    } else {
+                        PermissionDelegate.ContentPermission.VALUE_DENY
+                    }
+                }
+                // Eviction protection only: no data leaves the device.
+                SitePermissionKind.PERSISTENT_STORAGE ->
+                    PermissionDelegate.ContentPermission.VALUE_ALLOW
+                // DRM module access; playback breaks without it and no
+                // user data is exposed by allowing it.
+                SitePermissionKind.MEDIA_KEY_SYSTEM_ACCESS ->
+                    PermissionDelegate.ContentPermission.VALUE_ALLOW
+                // Privacy-sensitive capabilities default to no, quietly:
+                // sites must work without unpartitioned third-party
+                // storage, VR, or local-network probing.
+                SitePermissionKind.STORAGE_ACCESS,
+                SitePermissionKind.XR,
+                SitePermissionKind.LOCAL_NETWORK,
+                -> PermissionDelegate.ContentPermission.VALUE_DENY
+                else -> null
+            }
+            if (silentValue != null) {
+                return GeckoResult.fromValue(silentValue)
             }
             val result = GeckoResult<Int>()
             var completed = false

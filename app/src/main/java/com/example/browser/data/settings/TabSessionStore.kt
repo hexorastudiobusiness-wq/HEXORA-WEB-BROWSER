@@ -61,6 +61,29 @@ class TabSessionStore(context: Context) {
 
     private val dataStore = context.applicationContext.tabDataStore
 
+    private val guardPrefs = context.applicationContext
+        .getSharedPreferences("hexora_startup_guard", Context.MODE_PRIVATE)
+
+    /**
+     * Crash-loop circuit breaker. Marks a launch as "in progress" and
+     * reports whether the PREVIOUS launch ended while still in progress
+     * (crashed or froze before the browser became usable). The caller can
+     * then degrade gracefully — e.g. restore tab URLs without their saved
+     * engine states — instead of dying on the same persisted state on
+     * every launch, a loop only "Clear data" used to break.
+     */
+    fun beginLaunch(): Boolean {
+        val previousLaunchDiedEarly =
+            guardPrefs.getBoolean(KEY_LAUNCH_IN_PROGRESS, false)
+        guardPrefs.edit().putBoolean(KEY_LAUNCH_IN_PROGRESS, true).apply()
+        return previousLaunchDiedEarly
+    }
+
+    /** The browser reached a usable state; the next launch starts clean. */
+    fun markLaunchStable() {
+        guardPrefs.edit().putBoolean(KEY_LAUNCH_IN_PROGRESS, false).apply()
+    }
+
     suspend fun load(): PersistedTabs {
         val prefs = dataStore.data.first()
         val recentlyClosed = parseTabs(prefs[KEY_RECENTLY_CLOSED])
@@ -145,6 +168,7 @@ class TabSessionStore(context: Context) {
     }
 
     private companion object {
+        const val KEY_LAUNCH_IN_PROGRESS = "launch_in_progress"
         val KEY_TABS = stringPreferencesKey("tabs_json")
         val KEY_ACTIVE = intPreferencesKey("active_index")
         val KEY_RECENTLY_CLOSED = stringPreferencesKey("recently_closed_json")
