@@ -55,7 +55,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -119,6 +122,8 @@ class BrowserViewModel(
     )
 
     private val _tabs = MutableStateFlow<List<TabEntry>>(emptyList())
+    private val _tabRevision = MutableStateFlow(0L)
+    private val persistenceMutex = Mutex()
     private val _activeTabId = MutableStateFlow<String?>(null)
     private val _pageStates = MutableStateFlow<Map<String, SessionPageState>>(emptyMap())
     private val _thumbnailVersions = MutableStateFlow<Map<String, Int>>(emptyMap())
@@ -258,8 +263,9 @@ class BrowserViewModel(
         _activeTabId,
         _pageStates,
         _thumbnailVersions,
-    ) { tabs, activeId, states, thumbs ->
-        TabsSlice(tabs, activeId, states, thumbs)
+        _tabRevision,
+    ) { tabs, activeId, states, thumbs, revision ->
+        TabsSlice(tabs, activeId, states, thumbs, revision)
     }
 
     private val chromeSlice = combine(
@@ -355,7 +361,12 @@ class BrowserViewModel(
             loadFailed = activeState.loadFailed,
             isBookmarked = bookmarked && activeEntry?.isPrivate != true,
             isDesktopMode = activeEntry?.desktopMode ?: false,
-            isFullscreen = start.chrome.userFullscreen || activeState.isPageFullscreen,
+            isFullscreen = BrowserPresentationPolicy.isFullscreen(
+                hasActiveTab = activeEntry != null,
+                showStartPage = activeEntry?.showStartPage != false,
+                userFullscreen = start.chrome.userFullscreen,
+                pageFullscreen = activeState.isPageFullscreen,
+            ),
             findVisible = start.chrome.findVisible,
             findResult = activeState.findResult,
             textZoomPercent = currentSettings.textZoomPercent,
@@ -423,9 +434,9 @@ class BrowserViewModel(
     @Volatile
     private var tabRestoreComplete: Boolean = false
 
-    /** Set once any live session proves this launch reached usable state. */
+    /** Whether the delayed "this launch is stable" mark has been scheduled. */
     @Volatile
-    private var launchMarkedStable: Boolean = false
+    private var launchStabilityMarkScheduled: Boolean = false
 
     /**
      * Whether the app is currently in the foreground. Distinguishes a
@@ -761,7 +772,12 @@ class BrowserViewModel(
             }
             createdEngine.onTabSwipe = { delta -> handleFullscreenTabSwipe(delta) }
             createdEngine.onPullToRefresh = { handlePullToRefresh() }
-            restorePersistedTabs(initialSettings.desktopMode)
+            // If the previous launch died before becoming usable, the
+            // persisted engine state of some tab is the prime suspect:
+            // restore URLs only, so the same state cannot kill every
+            // subsequent launch (the loop only Clear Data used to break).
+            val degradedRestore = tabSessionStore.beginLaunch()
+            restorePersistedTabs(initialSettings.desktopMode, degradedRestore)
             pendingExternalUrl?.let { url ->
                 pendingExternalUrl = null
                 if (initialSettings.openLinksInNewTab) {
@@ -936,8 +952,15 @@ class BrowserViewModel(
             is BrowserAction.FindNext -> activeSession()?.findText(action.query, forward = true)
             is BrowserAction.FindPrevious ->
                 activeSession()?.findText(action.query, forward = false)
-            BrowserAction.ToggleFullscreen ->
-                _userFullscreen.update { !it }
+            BrowserAction.ToggleFullscreen -> {
+                // Fullscreen is meaningless on the Start Page: the UI
+                // force-reports it off there, so toggling would only arm
+                // an invisible fullscreen that suddenly appears the moment
+                // a site is opened in this tab.
+                if (activeEntry()?.showStartPage == false) {
+                    _userFullscreen.update { !it }
+                }
+            }
             BrowserAction.ExitFullscreen -> {
                 _userFullscreen.value = false
                 activeSession()?.exitFullscreen()
@@ -1275,7 +1298,9 @@ class BrowserViewModel(
     private fun setShowStartPage(entry: TabEntry, show: Boolean) {
         if (entry.showStartPage == show) return
         entry.showStartPage = show
-        _tabs.update { it.toList() }
+        if (show) _userFullscreen.value = false
+        _tabRevision.update { it + 1 }
+        requestPersistTabs()
     }
 
     /**
@@ -1503,6 +1528,16 @@ class BrowserViewModel(
         switchAdjacentTab(delta)
     }
 
+    /** Runs on the main dispatcher; a blocked UI cannot clear the guard. */
+    private fun scheduleLaunchStableMark() {
+        if (launchStabilityMarkScheduled) return
+        launchStabilityMarkScheduled = true
+        viewModelScope.launch {
+            delay(LAUNCH_STABLE_DELAY_MS)
+            tabSessionStore.markLaunchStable()
+        }
+    }
+
     /** Recreates tab entries (no sessions yet) from the persisted tab strip. */
     private suspend fun restorePersistedTabs(
         desktopMode: Boolean,
@@ -1543,8 +1578,7 @@ class BrowserViewModel(
             // A Start Page with no session to restore is already a usable
             // launch; without this, crash-loop detection would degrade the
             // next (healthy) launch for no reason.
-            launchMarkedStable = true
-            tabSessionStore.markLaunchStable()
+            scheduleLaunchStableMark()
             requestPersistTabs()
             return
         }
@@ -1556,8 +1590,9 @@ class BrowserViewModel(
                 desktopMode = saved.desktopMode ?: desktopMode,
                 lastUrl = saved.url,
                 lastTitle = saved.title,
-                savedState = saved.engineState?.let { SavedTabState(it) },
-                showStartPage = false,
+                savedState = saved.engineState?.takeUnless { skipEngineState }
+                    ?.let { SavedTabState(it) },
+                showStartPage = saved.showStartPage,
             )
         }
         _tabs.update { it + entries }
@@ -1565,6 +1600,7 @@ class BrowserViewModel(
         val active = entries[persisted.activeIndex.coerceIn(entries.indices)]
         _activeTabId.value = active.tabId
         restoreTab(active)
+        if (active.showStartPage) scheduleLaunchStableMark()
         updateWarmPriorities()
         tabRestoreComplete = true
         requestPersistTabs()
@@ -1577,36 +1613,34 @@ class BrowserViewModel(
      * [requestPersistTabs] and debounced, so bursts of navigation events
      * coalesce into a single store write.
      */
-    private suspend fun persistTabsSnapshot() {
+    private suspend fun persistTabsSnapshot() = persistenceMutex.withLock {
         // Defense in depth: never let a collector that started before the
         // first restore turn the initial empty tab list into stored state.
-        if (!tabRestoreComplete) return
-        val entries = _tabs.value.filterNot { it.isPrivate || it.lastUrl.isBlank() }
+        if (!tabRestoreComplete) return@withLock
+        val entries = _tabs.value.filterNot { it.isPrivate }
         val activeIndex = entries.indexOfFirst { it.tabId == _activeTabId.value }
-        runCatching {
-            tabSessionStore.save(
-                tabs = entries.map { entry ->
-                    PersistedTab(
-                        url = entry.lastUrl,
-                        title = entry.lastTitle,
-                        engineState = (
-                            entry.session?.latestSavedState()
-                                ?: entry.savedState
-                            )?.serialized,
-                        desktopMode = entry.desktopMode,
-                    )
-                },
-                activeIndex = if (activeIndex >= 0) activeIndex else 0,
-                recentlyClosed = _recentlyClosed.value
-                    .filterNot { it.isPrivate }
-                    .map { closed ->
-                        PersistedTab(
-                            url = closed.url,
-                            title = closed.title,
-                            desktopMode = closed.desktopMode,
-                        )
-                    },
+        val tabs = entries.map { entry ->
+            PersistedTab(
+                url = entry.lastUrl,
+                title = entry.lastTitle,
+                engineState = (entry.session?.latestSavedState() ?: entry.savedState)?.serialized,
+                desktopMode = entry.desktopMode,
+                showStartPage = entry.showStartPage,
             )
+        }
+        val closed = _recentlyClosed.value.filterNot { it.isPrivate }.map {
+            PersistedTab(url = it.url, title = it.title, desktopMode = it.desktopMode)
+        }
+        // All callers capture snapshots on Main, in order. DataStore serializes
+        // writes; no mutable TabEntry or engine session crosses into IO.
+        try {
+            withContext(Dispatchers.IO) {
+                tabSessionStore.save(tabs, activeIndex.coerceAtLeast(0), closed)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: java.io.IOException) {
+            // A full/unavailable disk must not crash the active browser.
         }
     }
 
@@ -1625,7 +1659,7 @@ class BrowserViewModel(
      */
     private fun persistTabsNow() {
         if (!tabRestoreComplete) return
-        viewModelScope.launch(Dispatchers.IO) { persistTabsSnapshot() }
+        viewModelScope.launch { persistTabsSnapshot() }
     }
 
     // ---- Action helpers ------------------------------------------------------
@@ -1706,7 +1740,8 @@ class BrowserViewModel(
         entry.desktopMode = !entry.desktopMode
         entry.session?.setDesktopMode(entry.desktopMode)
         // Refresh derived UI (tab item state) even though session state also updates.
-        _tabs.update { it.toList() }
+        _tabRevision.update { it + 1 }
+        requestPersistTabs()
     }
 
     private fun switchAdjacentTab(delta: Int) {
@@ -1808,8 +1843,11 @@ class BrowserViewModel(
         // Firefox-style lazy sessions: tab *state* exists immediately, but
         // an engine session is only created when the tab is actually going
         // to be rendered. A background tab therefore costs no content
-        // process until the user first selects it.
-        val session = if (makeActive) {
+        // process until the user first selects it. A Start Page tab needs
+        // no session at all until a URL is opened in it — creating a live
+        // blank session for every "+" tab wasted a content process and
+        // gave fullscreen tab-switching a blank surface to land on.
+        val session = if (makeActive && !showStart) {
             try {
                 currentEngine.createSession(
                     BrowserSessionConfig(
@@ -1891,6 +1929,14 @@ class BrowserViewModel(
     private fun activateTab(tabId: String) {
         val previousId = _activeTabId.value
         if (previousId == tabId) return
+        // Fullscreen is a property of rendered web content. Landing on a
+        // Start Page (empty) tab must end it: keeping app-level fullscreen
+        // alive over the Start Page hid all chrome and the system bars
+        // with no web surface underneath — the app looked (and behaved)
+        // completely hung, and there was no way out but killing it.
+        if (entry(tabId)?.showStartPage == true) {
+            _userFullscreen.value = false
+        }
         // Snapshot the outgoing tab for the tab switcher while it is still
         // the rendered one (Firefox captures tab thumbnails on switch,
         // not after every page load).
@@ -1976,10 +2022,7 @@ class BrowserViewModel(
                     _pageStates.update { it + (entry.tabId to state) }
                     if (state.url.isNotBlank()) {
                         entry.lastUrl = state.url
-                        if (!launchMarkedStable) {
-                            launchMarkedStable = true
-                            tabSessionStore.markLaunchStable()
-                        }
+                        scheduleLaunchStableMark()
                     }
                     if (state.title.isNotBlank()) entry.lastTitle = state.title
                     val newOrigin = CredentialOrigin.fromUrl(state.url)
@@ -2296,6 +2339,7 @@ class BrowserViewModel(
         val activeId: String?,
         val states: Map<String, SessionPageState>,
         val thumbnails: Map<String, Int>,
+        val revision: Long,
     )
 
     private data class ChromeSlice(
@@ -2328,6 +2372,9 @@ class BrowserViewModel(
 
         /** Quiet period after which requested tab-strip writes are flushed. */
         const val PERSIST_DEBOUNCE_MS = 400L
+
+        /** A launch must survive this long before it counts as stable. */
+        const val LAUNCH_STABLE_DELAY_MS = 10_000L
         const val MAX_ADDRESS_SUGGESTIONS = 6
         const val INACTIVE_TAB_AFTER_MS = 4 * 60 * 60 * 1000L
         const val MAX_RECENTLY_CLOSED_TABS = 20

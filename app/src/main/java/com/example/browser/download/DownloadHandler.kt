@@ -284,7 +284,10 @@ class DownloadHandler(context: Context) {
             }
             throw cancelled
         } catch (error: Exception) {
-            if (id in pausedIds) {
+            if (id in cancelledIds) {
+                tempFile.delete()
+                setProgress(id, Progress(Progress.STATUS_CANCELLED))
+            } else if (id in pausedIds) {
                 setProgress(
                     id,
                     Progress(
@@ -412,7 +415,10 @@ class DownloadHandler(context: Context) {
             }
             throw cancelled
         } catch (error: Exception) {
-            if (id in pausedIds) {
+            if (id in cancelledIds) {
+                tempFile.delete()
+                setProgress(id, Progress(Progress.STATUS_CANCELLED))
+            } else if (id in pausedIds) {
                 setProgress(
                     id,
                     Progress(
@@ -656,7 +662,11 @@ class DownloadHandler(context: Context) {
     }
 
     /** Resumes a paused HTTP(S) transfer; false when it cannot be resumed. */
+    /** True while the original HTTP request is retained, including stop unwinding. */
+    fun hasRetainedRequest(downloadId: Long): Boolean = networkRequests.containsKey(downloadId)
+
     fun resume(downloadId: Long): Boolean {
+        if (progressById[downloadId]?.status == DownloadManager.STATUS_SUCCESSFUL) return true
         // The previous job is still unwinding after pause/cancel; starting
         // another writer on the same temp file now could corrupt it. The
         // caller can retry once the completion event lands.

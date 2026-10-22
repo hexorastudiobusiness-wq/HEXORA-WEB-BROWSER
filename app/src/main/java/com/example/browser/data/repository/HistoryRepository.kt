@@ -12,6 +12,10 @@ import kotlinx.coroutines.sync.withLock
 class HistoryRepository(private val dao: HistoryDao) {
 
     val history: Flow<List<HistoryEntity>> = dao.observeAll()
+        .catch { error ->
+            if (error is CancellationException) throw error
+            emit(emptyList())
+        }
 
     /**
      * Serializes the check-then-insert/update in [recordVisit]. The history

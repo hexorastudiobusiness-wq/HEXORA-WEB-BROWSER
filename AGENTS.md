@@ -34,7 +34,7 @@ Hard technical identity:
 
 Current shipped state (update this section on every release):
 
-- Working-tree version **0.4.3**, `versionCode` **19** (not yet built or
+- Working-tree version **0.4.4**, `versionCode` **20** (not yet built or
   device-verified; do not describe it as shipped until CI and the owner
   confirm it)
 - Last owner-tested debug line: **0.4.2** (`debug-799c44b`); signed
@@ -313,3 +313,5 @@ The essentials, so nobody has to argue about this again:
 - [ ] Version bumped if shipping a build
 - [ ] CI run watched to success and output assets verified
 - [ ] Persian final report with limitations stated honestly
+
+Debug audit 0.4.4 (versionCode 20): see [AUDIT.md](AUDIT.md) for fixes and verification boundaries.

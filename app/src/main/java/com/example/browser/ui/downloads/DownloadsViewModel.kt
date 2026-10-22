@@ -235,6 +235,9 @@ class DownloadsViewModel(
                     (entry.downloadManagerId to snapshotOf(entry))
                 return@launch
             }
+            // A paused job still unwinding is not an absent request. Do
+            // not create a second transfer/file while its writer stops.
+            if (downloadHandler.hasRetainedRequest(entry.downloadManagerId)) return@launch
             val newId = withContext(Dispatchers.IO) {
                 downloadHandler.cancel(entry.downloadManagerId)
                 downloadHandler.download(

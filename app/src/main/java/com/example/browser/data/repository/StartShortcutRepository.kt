@@ -12,6 +12,10 @@ import kotlinx.coroutines.sync.withLock
 class StartShortcutRepository(private val dao: ShortcutDao) {
 
     val shortcuts: Flow<List<ShortcutEntity>> = dao.observeAll()
+        .catch { error ->
+            if (error is CancellationException) throw error
+            emit(emptyList())
+        }
 
     /**
      * Serializes check-then-act writes: the count/duplicate checks in [add]

@@ -28,6 +28,7 @@ data class PersistedTab(
      * back to the global default.
      */
     val desktopMode: Boolean? = null,
+    val showStartPage: Boolean = false,
 )
 
 /** The persisted tab strip: open tabs plus which one was active. */
@@ -109,11 +110,13 @@ class TabSessionStore(context: Context) {
                 for (i in 0 until array.length()) {
                     val item = array.optJSONObject(i) ?: continue
                     val url = item.optString("u")
-                    if (url.isBlank()) continue
+                    val showStartPage = item.optBoolean("h", false)
+                    if (url.isBlank() && !showStartPage) continue
                     add(
                         PersistedTab(
                             url = url,
                             title = item.optString("t"),
+                            showStartPage = showStartPage,
                             engineState = item.optString("s")
                                 .takeIf { it.isNotBlank() },
                             desktopMode = if (item.has("d")) {
@@ -140,6 +143,7 @@ class TabSessionStore(context: Context) {
                     .put("u", tab.url)
                     .put("t", tab.title)
                     .apply {
+                        put("h", tab.showStartPage)
                         tab.engineState?.let { put("s", it) }
                         tab.desktopMode?.let { put("d", it) }
                     },
