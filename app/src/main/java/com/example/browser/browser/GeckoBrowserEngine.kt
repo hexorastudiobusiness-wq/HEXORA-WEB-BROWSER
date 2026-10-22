@@ -1518,7 +1518,7 @@ internal class GeckoBrowserSession(
                     PermissionDelegate.ContentPermission.VALUE_ALLOW
                 // DRM module access; playback breaks without it and no
                 // user data is exposed by allowing it.
-                SitePermissionKind.MEDIA_KEY_SYSTEM_ACCESS ->
+                SitePermissionKind.MEDIA_KEY_SYSTEM ->
                     PermissionDelegate.ContentPermission.VALUE_ALLOW
                 // Privacy-sensitive capabilities default to no, quietly:
                 // sites must work without unpartitioned third-party

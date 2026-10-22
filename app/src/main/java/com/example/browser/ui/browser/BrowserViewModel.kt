@@ -423,6 +423,10 @@ class BrowserViewModel(
     @Volatile
     private var tabRestoreComplete: Boolean = false
 
+    /** Set once any live session proves this launch reached usable state. */
+    @Volatile
+    private var launchMarkedStable: Boolean = false
+
     /**
      * Whether the app is currently in the foreground. Distinguishes a
      * crash the user witnessed (mark the tab crashed, Firefox-style) from
@@ -1513,7 +1517,10 @@ class BrowserViewModel(
         }
     }
 
-    private suspend fun restorePersistedTabsInternal(desktopMode: Boolean) {
+    private suspend fun restorePersistedTabsInternal(
+        desktopMode: Boolean,
+        skipEngineState: Boolean = false,
+    ) {
         val persisted = runCatching { tabSessionStore.load() }.getOrNull()
         // Recently Closed survives process death too (non-private only,
         // exactly like the tab strip itself).
