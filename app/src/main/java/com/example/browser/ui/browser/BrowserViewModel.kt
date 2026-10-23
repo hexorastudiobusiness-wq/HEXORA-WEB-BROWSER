@@ -123,6 +123,7 @@ class BrowserViewModel(
 
     private val _tabs = MutableStateFlow<List<TabEntry>>(emptyList())
     private val _tabRevision = MutableStateFlow(0L)
+    private var contentViewGeneration = 0L
     private val persistenceMutex = Mutex()
     private val _activeTabId = MutableStateFlow<String?>(null)
     private val _pageStates = MutableStateFlow<Map<String, SessionPageState>>(emptyMap())
@@ -374,6 +375,7 @@ class BrowserViewModel(
             thumbnailVersions = slice.thumbnails,
             errorMessage = error,
             activeSession = activeEntry?.session,
+            contentViewGeneration = contentViewGeneration,
             showStartPage = activeEntry?.showStartPage ?: slice.tabs.isEmpty(),
             activeTabCrashed = activeEntry?.crashed == true,
             hasWebPage = activeState.url.isNotBlank() ||
@@ -1473,24 +1475,19 @@ class BrowserViewModel(
     }
 
     /**
-     * Called once the Activity is fully resumed (posted past the first
-     * frame, so the window surface exists again). After a long stay in the
-     * background the sessions can all be alive while the native rendering
-     * surface is dead: pages keep loading yet paint white, Refresh cannot
-     * revive them, and tab cycling cannot either — only recreating the
-     * surface (what a round trip to the tab switcher incidentally did)
-     * helps. Doing this at `onStart` proved too early (it still failed in
-     * about one minimise in ten), so it runs here, after resume.
+     * Recreate the entire AndroidView host after a long background interval,
+     * exactly as leaving content for the tab selector and selecting a tab does.
+     * Reattaching the SAME child to the SAME host did not reproduce that path.
+     * The engine session stays open; this only resets the display/view lifecycle.
      */
     fun onBrowserResumed(backgroundDurationMs: Long) {
         if (backgroundDurationMs < REBIND_AFTER_BACKGROUND_MS) return
         val active = activeEntry() ?: return
-        if (active.session == null) {
-            if (!active.crashed) restoreTab(active)
-            return
-        }
+        if (active.showStartPage || active.crashed) return
+        if (active.session == null) restoreTab(active)
         if (active.session?.isUsable() == true) {
-            engine?.rebindRenderedContentView()
+            contentViewGeneration++
+            _tabRevision.update { it + 1 }
         }
     }
 

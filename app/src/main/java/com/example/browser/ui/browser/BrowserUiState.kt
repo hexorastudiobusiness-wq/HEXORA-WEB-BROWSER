@@ -133,6 +133,7 @@ data class BrowserUiState(
     val errorMessage: String? = null,
     /** Engine session of the active tab; used only to create its native view. */
     val activeSession: BrowserSession? = null,
+    val contentViewGeneration: Long = 0L,
     /** True when the Chrome-like Hexora Start Page covers the web content. */
     val showStartPage: Boolean = true,
     /** True when a real web page exists underneath the Start Page. */

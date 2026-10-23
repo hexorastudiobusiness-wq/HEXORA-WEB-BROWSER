@@ -127,33 +127,6 @@ class GeckoBrowserEngine(
     override fun createSession(config: BrowserSessionConfig): BrowserSession =
         createSessionInternal(config).also { it.ensureOpen() }
 
-    override fun rebindRenderedContentView() {
-        val geckoView = sharedContentView ?: return
-        val host = sharedContentHost ?: return
-        if (renderedSession == null) return
-        if (geckoView.parent !== host) return
-        // Recreate the native surface exactly the way a round trip to the
-        // tab switcher does: detach releases (never closes) the session and
-        // remembers it for re-attach; adding the view back re-acquires a
-        // fresh display via handleSharedViewAttached -> bindContentView.
-        // The page is repainted from the live session, not reloaded.
-        // The re-add is posted to the next frame: removing and re-adding in
-        // the same synchronous pass can race Gecko's asynchronous display
-        // release and leave the new surface just as dead as the old one.
-        (geckoView.parent as? ViewGroup)?.removeView(geckoView)
-        host.post {
-            if (geckoView.parent == null && sharedContentHost === host) {
-                host.addView(
-                    geckoView,
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    ),
-                )
-            }
-        }
-    }
-
     override fun restoreSession(
         config: BrowserSessionConfig,
         savedState: SavedTabState,
@@ -331,6 +304,10 @@ class GeckoBrowserEngine(
             HexoraGeckoView(context).also { newView ->
                 newView.onViewDetached = { handleSharedViewDetached(newView) }
                 newView.onViewAttached = { handleSharedViewAttached(newView) }
+                // No root scroll callback is guaranteed on an unscrolled/SPA
+                // document. Unknown is delegated to APZ, NOT treated as "not
+                // at top"; APZ also knows the nested container under the finger.
+                newView.rootScrollYProvider = { renderedSession?.rootScrollY }
                 newView.onPullToRefreshGesture = { onPullToRefresh?.invoke() }
                 newView.onPullProgress = { progress ->
                     (sharedContentHost as? SwipeableHostLayout)?.pullProgress =
@@ -675,100 +652,109 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
 
     private val pullThresholdPx =
         PULL_THRESHOLD_DP * context.resources.displayMetrics.density
-    private var pullStartY = 0f
-    private var pullTracking = false
-    private var pullFired = false
-    private var pullDistance = 0f
+    var rootScrollYProvider: () -> Int? = { null }
 
-    /**
-     * Pull-to-refresh, the way Mozilla's Android Components implements it:
-     * touch input is routed through `onTouchEventForDetailResult`, whose
-     * result reports whether Gecko overscrolled vertically (the page is at
-     * its top and the drag is pulling past it). Only then is a downward
-     * drag a refresh gesture; ordinary page scrolling, text selection and
-     * in-page interactions are untouched, because the event itself is
-     * delivered to Gecko exactly as before.
-     */
+    private val pullGesture = PullToRefreshGesture(
+        threshold = pullThresholdPx,
+        slop = ViewConfiguration.get(context).scaledTouchSlop.toFloat(),
+    )
+    private var gestureGeneration = 0L
+    private var pendingDetails = 0
+    private var released = false
+    private var gestureSession: GeckoSession? = null
+    private var firstMoveChecked = false
+    private var downX = 0f
+    private var downY = 0f
+    private val pullTouchSlop = ViewConfiguration.get(context).scaledTouchSlop
+
+    // Chromium locks top-at-scroll-start for the entire gesture. Mozilla's
+    // NestedGeckoView additionally checks APZ scrollable directions and touch
+    // ownership. Vertical overscroll capability alone does NOT mean "at top".
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (session == null || onPullToRefreshGesture == null) {
+            cancelPull()
             return super.onTouchEvent(event)
         }
         val action = event.actionMasked
-        // The refresh decision is made HERE, synchronously with the real
-        // finger events. GeckoResult detail answers arrive asynchronously:
-        // deciding on the UP event's own answer made refresh fire only
-        // sometimes (the tracker could be reset first, or the answer
-        // could be null) and left the pull indicator stuck on screen,
-        // because those same paths also skipped the progress reset.
-        if (action == MotionEvent.ACTION_UP ||
-            action == MotionEvent.ACTION_CANCEL
+        if (action == MotionEvent.ACTION_DOWN) {
+            cancelPull()
+            gestureSession = session
+            downX = event.x
+            downY = event.y
+            firstMoveChecked = false
+            pullGesture.begin(event.x, event.y, rootScrollYProvider())
+        }
+        if (session !== gestureSession || event.pointerCount != 1 ||
+            action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_CANCEL
         ) {
-            if (action == MotionEvent.ACTION_UP &&
-                pullTracking && !pullFired &&
-                pullDistance >= pullThresholdPx
-            ) {
-                pullFired = true
-                onPullToRefreshGesture?.invoke()
-            }
-            pullTracking = false
-            pullDistance = 0f
+            cancelPull()
+        }
+        if (action == MotionEvent.ACTION_MOVE) {
+            pullGesture.move(event.x, event.y)
+            if (!released) onPullProgress?.invoke(pullGesture.progress)
+        }
+        if (action == MotionEvent.ACTION_UP) {
+            released = true
+            // UI feedback always ends with the finger, even if APZ replies late.
             onPullProgress?.invoke(0f)
         }
-        val y = event.y
+        val generation = gestureGeneration
+        // Gecko explicitly warns against a GeckoResult allocation per MOVE.
+        // Like NestedGeckoView, check DOWN and the first significant MOVE;
+        // subsequent motion uses the ordinary Gecko touch path exactly once.
+        val firstMove = action == MotionEvent.ACTION_MOVE && !firstMoveChecked &&
+            (kotlin.math.abs(event.x - downX) > pullTouchSlop ||
+                kotlin.math.abs(event.y - downY) > pullTouchSlop)
+        if (firstMove) firstMoveChecked = true
+        val checksDetail = action == MotionEvent.ACTION_DOWN || firstMove
+        if (!checksDetail) {
+            val handled = super.onTouchEvent(event)
+            finishPullIfReady()
+            return handled
+        }
+        pendingDetails++
         onTouchEventForDetailResult(event).accept(
-            { detail -> detail?.let { onPullDetail(action, y, it) } },
-            { _ -> },
+            { detail ->
+                if (generation == gestureGeneration && checksDetail) {
+                    pendingDetails--
+                    val handled = detail?.handledResult()
+                    val ownedByBrowser = handled == PanZoomController.INPUT_RESULT_HANDLED ||
+                        handled == PanZoomController.INPUT_RESULT_UNHANDLED
+                    val atTop = detail != null &&
+                        detail.scrollableDirections() and PanZoomController.SCROLLABLE_FLAG_TOP == 0
+                    val permitsOverscroll = detail != null &&
+                        detail.overscrollDirections() and PanZoomController.OVERSCROLL_FLAG_VERTICAL != 0
+                    pullGesture.confirm(ownedByBrowser && atTop && permitsOverscroll)
+                    if (!released) onPullProgress?.invoke(pullGesture.progress)
+                    finishPullIfReady()
+                }
+            },
+            { _ ->
+                if (generation == gestureGeneration && checksDetail) {
+                    pendingDetails--
+                    pullGesture.confirm(false)
+                    finishPullIfReady()
+                }
+            },
         )
+        finishPullIfReady()
         return true
     }
 
-    private fun onPullDetail(
-        action: Int,
-        y: Float,
-        detail: PanZoomController.InputResultDetail,
-    ) {
-        when (action) {
-            MotionEvent.ACTION_DOWN -> {
-                pullStartY = y
-                pullTracking = false
-                pullFired = false
-                pullDistance = 0f
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val overscrolled =
-                    detail.overscrollDirections() and
-                        PanZoomController.OVERSCROLL_FLAG_VERTICAL != 0
-                if (overscrolled) {
-                    if (!pullTracking) {
-                        // Measure the pull from where overscroll began,
-                        // not from the original touch-down.
-                        pullTracking = true
-                        pullStartY = y
-                    }
-                    val pull = y - pullStartY
-                    pullDistance = pull.coerceAtLeast(0f)
-                    if (pull > 0f) {
-                        onPullProgress?.invoke(
-                            (pull / pullThresholdPx).coerceIn(0f, 1f),
-                        )
-                    }
-                } else {
-                    // The page is scrolling (or can still scroll): keep
-                    // re-baselining so no pull is credited mid-scroll.
-                    pullStartY = y
-                    pullDistance = 0f
-                    if (pullTracking) {
-                        pullTracking = false
-                        onPullProgress?.invoke(0f)
-                    }
-                }
-            }
-            // ACTION_UP / ACTION_CANCEL are handled synchronously in
-            // onTouchEvent; this asynchronous answer must not touch the
-            // tracker (it used to reset it before the refresh decision
-            // was made, and skipped the indicator reset when null).
-            else -> Unit
-        }
+    private fun finishPullIfReady() {
+        if (!released || pendingDetails != 0) return
+        val refresh = session === gestureSession && pullGesture.shouldRefresh
+        cancelPull()
+        if (refresh) onPullToRefreshGesture?.invoke()
+    }
+
+    private fun cancelPull() {
+        gestureGeneration++
+        pendingDetails = 0
+        released = false
+        gestureSession = null
+        pullGesture.cancel()
+        onPullProgress?.invoke(0f)
     }
 
     private companion object {
@@ -793,6 +779,7 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
     }
 
     override fun onDetachedFromWindow() {
+        cancelPull()
         // Release first: prevents GeckoView from closing the session.
         if (session != null) releaseSession()
         onViewDetached?.invoke(this)
@@ -810,6 +797,9 @@ internal class GeckoBrowserSession(
     private val config: BrowserSessionConfig,
     private var pendingRestore: SavedTabState? = null,
 ) : BrowserSession {
+
+    internal var rootScrollY: Int? = null
+        private set
 
     override val id: String = UUID.randomUUID().toString()
     override val isPrivate: Boolean = config.isPrivate
@@ -1125,6 +1115,7 @@ internal class GeckoBrowserSession(
         geckoSession.setNavigationDelegate(null)
         geckoSession.setProgressDelegate(null)
         geckoSession.setContentDelegate(null)
+        geckoSession.setScrollDelegate(null)
         geckoSession.setAutofillDelegate(null)
         contentView?.let { releaseContentView(it) }
         if (geckoSession.isOpen) geckoSession.close()
@@ -1843,6 +1834,7 @@ internal class GeckoBrowserSession(
         }
 
         override fun onPageStart(session: GeckoSession, url: String) {
+            rootScrollY = null
             // A new document invalidates any previous Find result; the UI
             // re-issues the visible query once loading finishes.
             latestFindQuery = ""
@@ -1897,6 +1889,12 @@ internal class GeckoBrowserSession(
                             .orEmpty(),
                 )
             }
+        }
+    }
+
+    private val scrollDelegate = object : GeckoSession.ScrollDelegate {
+        override fun onScrollChanged(session: GeckoSession, scrollX: Int, scrollY: Int) {
+            rootScrollY = scrollY
         }
     }
 
@@ -2012,6 +2010,7 @@ internal class GeckoBrowserSession(
         geckoSession.setNavigationDelegate(navigationDelegate)
         geckoSession.setProgressDelegate(progressDelegate)
         geckoSession.setContentDelegate(contentDelegate)
+        geckoSession.setScrollDelegate(scrollDelegate)
         geckoSession.setAutofillDelegate(autofillDelegate)
     }
 

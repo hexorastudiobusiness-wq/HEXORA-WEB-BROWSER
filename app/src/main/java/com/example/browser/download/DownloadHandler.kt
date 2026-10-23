@@ -839,16 +839,32 @@ class DownloadForegroundService : Service() {
             .setContentText(getString(R.string.download_status_running))
             .setOngoing(true)
             .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (error: SecurityException) {
+            // Promotion can fail asynchronously inside the service even
+            // though startForegroundService() succeeded in the caller.
+            Log.w("HexoraDownloads", "Download service permission denied", error)
+            stopSelf(startId)
+        } catch (error: IllegalStateException) {
+            Log.w("HexoraDownloads", "Download service promotion disallowed", error)
+            stopSelf(startId)
         }
         return START_NOT_STICKY
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        // Android otherwise terminates the whole process for an expired
+        // dataSync budget. Stop the service within the system grace period.
+        stopSelf(startId)
     }
 
     private companion object {

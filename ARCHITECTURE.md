@@ -1,7 +1,7 @@
 # Architecture Specification
 
 > Status: this document describes the architecture **as implemented**
-> (currently shipping v0.4.4), not only the original plan. When behavior
+> (currently shipping v0.4.5), not only the original plan. When behavior
 > changes, update this file in the same commit. Agent-facing working rules
 > live in `AGENTS.md`; the release-signing canon is `signing/README.md`.
 
@@ -557,4 +557,4 @@ A change is done only when:
 Docs that contradict the code are bugs. Fix them in the same commit as
 the behavior change.
 
-Debug audit 0.4.4 (versionCode 20): see [AUDIT.md](AUDIT.md) for fixes and verification boundaries.
+Debug audit 0.4.5 (versionCode 21): see [AUDIT.md](AUDIT.md) for fixes and verification boundaries.

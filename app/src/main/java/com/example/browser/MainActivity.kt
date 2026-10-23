@@ -838,28 +838,37 @@ class MainActivity : ComponentActivity() {
                         ) != PackageManager.PERMISSION_GRANTED
                     ) {
                         requestedDownloadNotificationPermission = true
-                        downloadNotificationPermissionLauncher.launch(
-                            Manifest.permission.POST_NOTIFICATIONS,
-                        )
+                        runCatching {
+                            downloadNotificationPermissionLauncher.launch(
+                                Manifest.permission.POST_NOTIFICATIONS,
+                            )
+                        }
                     }
                     val bodySource = event.bodySource
-                    val downloadId = if (bodySource != null) {
-                        // The engine already received this response; consume
-                        // its body. A fresh GET could not reproduce blob,
-                        // POST or authenticated downloads.
-                        container.downloadHandler.downloadStream(
-                            bodySource = bodySource,
-                            fileName = event.fileName,
-                            mimeType = event.mimeType,
-                            contentLength = event.contentLength,
-                        )
-                    } else {
-                        container.downloadHandler.download(
-                            url = event.url,
-                            fileName = event.fileName,
-                            mimeType = event.mimeType,
-                            pageUrl = event.pageUrl,
-                        )
+                    val downloadId = try {
+                        if (bodySource != null) {
+                            // The engine already received this response; consume
+                            // its body. A fresh GET could not reproduce blob,
+                            // POST or authenticated downloads.
+                            container.downloadHandler.downloadStream(
+                                bodySource = bodySource,
+                                fileName = event.fileName,
+                                mimeType = event.mimeType,
+                                contentLength = event.contentLength,
+                            )
+                        } else {
+                            container.downloadHandler.download(
+                                url = event.url,
+                                fileName = event.fileName,
+                                mimeType = event.mimeType,
+                                pageUrl = event.pageUrl,
+                            )
+                        }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        android.util.Log.w("HexoraDownloads", "Could not start download: ${error.javaClass.simpleName}")
+                        -1L
                     }
                     val started = downloadId >= 0
                     if (started && !event.isPrivate) {
@@ -867,20 +876,28 @@ class MainActivity : ComponentActivity() {
                         // user asked for, but their URL is not persisted in
                         // the browser's own download history.
                         launch {
-                            container.downloadRepository.record(
-                                downloadManagerId = downloadId,
-                                url = event.url,
-                                fileName = event.fileName,
-                                mimeType = event.mimeType,
-                                // Stream transfers consume a one-shot
-                                // response body and can never be replayed;
-                                // the Downloads page needs to know that.
-                                sourceKind = if (bodySource != null) {
-                                    DownloadEntity.SOURCE_STREAM
-                                } else {
-                                    DownloadEntity.SOURCE_HTTP
-                                },
-                            )
+                            try {
+                                container.downloadRepository.record(
+                                    downloadManagerId = downloadId,
+                                    url = event.url,
+                                    fileName = event.fileName,
+                                    mimeType = event.mimeType,
+                                    // Stream transfers consume a one-shot
+                                    // response body and can never be replayed;
+                                    // the Downloads page needs to know that.
+                                    sourceKind = if (bodySource != null) {
+                                        DownloadEntity.SOURCE_STREAM
+                                    } else {
+                                        DownloadEntity.SOURCE_HTTP
+                                    },
+                                )
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                // Recording metadata must never crash browsing
+                                // or stop the already-running transfer.
+                                android.util.Log.w("HexoraDownloads", "Could not record download: ${error.javaClass.simpleName}")
+                            }
                         }
                     }
                     Toast.makeText(

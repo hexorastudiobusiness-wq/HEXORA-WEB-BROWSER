@@ -43,17 +43,6 @@ interface BrowserEngine {
     /** Creates a new, independent session. Not thread-confined, but cheap. */
     fun createSession(config: BrowserSessionConfig): BrowserSession
 
-    /**
-     * Forces the shared content view through a detach/attach cycle and
-     * rebinds the currently rendered session. After a long stay in the
-     * background the native surface can be dead even though every session
-     * is alive and loading (pages "load" but paint white, and Refresh
-     * cannot revive them); recreating the surface is what revives the
-     * rendering. The session itself is not closed or reloaded. No-op when
-     * nothing is rendered.
-     */
-    fun rebindRenderedContentView()
-
     /** Preferred color scheme exposed to web content (`prefers-color-scheme`). */
     fun setPreferredColorScheme(scheme: WebColorScheme)
 

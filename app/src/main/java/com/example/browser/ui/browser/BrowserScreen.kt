@@ -117,6 +117,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.key
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsCompat
@@ -956,12 +957,14 @@ private fun BrowserPageContent(
             // One shared GeckoView stays attached while browsing. Tabs are
             // switched with renderContentView(), matching GeckoView's
             // intended session-swap model instead of swapping surfaces.
-            AndroidView(
-                factory = { ctx -> session.createContentView(ctx) },
-                update = { view -> session.renderContentView(view) },
-                onRelease = { view -> session.releaseContentView(view) },
-                modifier = Modifier.fillMaxSize(),
-            )
+            key(state.contentViewGeneration) {
+                AndroidView(
+                    factory = { ctx -> session.createContentView(ctx) },
+                    update = { view -> session.renderContentView(view) },
+                    onRelease = { view -> session.releaseContentView(view) },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
         if (state.loadFailed && session != null && !state.isFullscreen) {
