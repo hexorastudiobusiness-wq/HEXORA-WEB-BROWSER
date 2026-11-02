@@ -63,6 +63,26 @@ class UrlUtilsTest {
     }
 
     @Test
+    fun `valid custom search template is used and invalid falls back`() {
+        assertEquals(
+            "https://search.example/?q=hello+world",
+            UrlUtils.resolveInput(
+                "hello world",
+                SearchEngine.CUSTOM,
+                "https://search.example/?q=%s",
+            ),
+        )
+        assertEquals(
+            "https://www.google.com/search?q=cats",
+            UrlUtils.resolveInput(
+                "cats",
+                SearchEngine.CUSTOM,
+                "search.example/?q=",
+            ),
+        )
+    }
+
+    @Test
     fun `isHttpUrl only accepts http and https`() {
         assertTrue(UrlUtils.isHttpUrl("https://example.com"))
         assertTrue(UrlUtils.isHttpUrl("http://example.com"))

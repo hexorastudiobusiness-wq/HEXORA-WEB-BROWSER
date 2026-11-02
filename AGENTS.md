@@ -34,10 +34,14 @@ Hard technical identity:
 
 Current shipped state (update this section on every release):
 
-- Version **0.3.3**, `versionCode` **9**
-- Signed release: GitHub Release **`v0.3.3`**
+- Working-tree version **0.4.5**, `versionCode` **21** (not yet built or
+  device-verified; do not describe it as shipped until CI and the owner
+  confirm it)
+- Last owner-tested debug line: **0.4.2** (`debug-799c44b`); signed
+  release: GitHub Release **`v0.3.3`**
 - Debug builds: GitHub prereleases named `debug-<short-sha>`
-- Room database version **4** (migrations 1→4, 2→4, 3→4 exist)
+- Room database version **5** (direct migrations 1→5, 2→5, 3→5 and 4→5
+  exist in `DatabaseMigrations.kt`)
 - `minSdk` 26, `targetSdk`/`compileSdk` 37 — the supported/tested focus is
   Android 12–17, across OEM skins and screen sizes
 
@@ -93,10 +97,13 @@ Current shipped state (update this section on every release):
   released *before* the new one is set. This exact arrangement fixed a
   confirmed white/black-tab bug. **Do not regress it** (no per-tab
   `GeckoView`, no priority demotion of live sessions).
-- Memory control is **tab suspension**: at most 6 live sessions
-  (`MAX_LIVE_SESSIONS`); LRU inactive tabs are suspended (saved state +
-  thumbnail kept in memory/files, session closed) and restored on switch.
-  `onTrimMemory(RUNNING_CRITICAL)` suspends all inactive tabs.
+- Memory control is **tab suspension** following Firefox's model:
+  sessions are created lazily, the selected tab gets high priority, and
+  low-memory/trim signals suspend colder inactive tabs (engine state
+  saved, session closed, restored on switch). The selected tab plus the
+  3 most recently used inactive tabs stay warm
+  (`SUSPEND_KEEP_INACTIVE_TABS`); there is no fixed cap on live sessions
+  in normal use.
 - Closing the **last tab is allowed**: zero tabs is a valid state and shows
   the Start Page.
 - `window.open` / `target=_blank` sessions are created by the engine; the
@@ -111,9 +118,12 @@ Current shipped state (update this section on every release):
 - History is recorded only on a loading true→false transition, for
   successful, non-private, http(s) pages.
 - Downloads flow: Gecko `onExternalResponse` → `BrowserSessionEvent` →
-  ViewModel event → `MainActivity` → `DownloadHandler` (Android
-  `DownloadManager`, public Downloads folder, no storage permission).
-  Downloads are re-fetched without cookies/auth — a known limitation.
+  ViewModel event → `MainActivity` → `DownloadHandler` (Hexora's own
+  transfer engine, public Downloads folder, no storage permission).
+  Plain HTTP(S) downloads are fresh requests without session cookies;
+  blob/POST/authenticated downloads consume the engine's response body
+  instead (one-shot: not resumable). Transfer state is persisted in Room
+  so the Downloads page survives process restarts.
 - Text zoom is one global persisted setting (50–200%, default 100%),
   applied via `GeckoRuntimeSettings.fontSizeFactor`, effective on next
   reload/navigation. UI control: `ui/components/ZoomSlider.kt` (shared by
@@ -151,11 +161,11 @@ app/src/main/java/com/example/browser/
 │   ├── BrowserSettings.kt   session config
 │   └── GeckoBrowserEngine.kt  ONLY file importing GeckoView
 ├── data/
-│   ├── database/            Room entities, DAOs, AppDatabase (v4), DatabaseMigrations
+│   ├── database/            Room entities, DAOs, AppDatabase (v5), DatabaseMigrations
 │   ├── repository/          history/bookmarks/downloads/credentials/shortcuts/favicon
 │   ├── security/            CredentialCipher (Keystore AES-GCM)
 │   └── settings/            DataStore SettingsRepository + ThemeMode
-├── download/                DownloadHandler (DownloadManager), DownloadFileName
+├── download/                DownloadHandler (own transfer engine), DownloadFileName
 ├── ui/                      Compose screens + ViewModels per feature
 │   └── components/          AddressBar, ZoomSlider (shared controls only)
 └── util/                    UrlUtils, stores (thumbnails/shortcut icons), shortcuts
@@ -278,20 +288,19 @@ The essentials, so nobody has to argue about this again:
 
 ## 9. Known limitations (honest list — keep current)
 
-- Site permission prompts (camera/microphone/location) are not wired.
-- The JavaScript toggle applies from the next app start.
-- The Cookies and Open-links-in-new-tab settings are stored preferences
-  only and do not change engine behavior yet; their Settings summaries say
-  so. Do not present them as working features.
 - Sites without their own dark CSS stay light in Dark/Hexora Mode
   (no algorithmic forced-dark in GeckoView).
-- Downloads are re-fetched by DownloadManager without cookie/auth
-  carry-over.
+- Plain-URL downloads are fresh HTTP requests without cookie/auth
+  carry-over from the browsing session; blob/POST/authenticated
+  downloads work through the engine's one-shot response body, which
+  cannot be paused/resumed or replayed after interruption.
 - Saved-login autofill depends on sites exposing recognizable fields to
   GeckoView's autofill tree; the most recently saved login per exact
   origin is offered.
-- No tab restore across process death; thumbnails from a previous process
-  are cleared at startup.
+- "Add to Home screen" is a launcher shortcut, not an installable PWA
+  (GeckoView does not expose web-app manifests to the embedder).
+- No embedder-facing Safe Browsing or web-notification display surface
+  was found in the pinned GeckoView API; do not claim either feature.
 - On-device runtime behavior (rendering, Back flows, Find, theming) must
   be verified by the owner on real hardware — CI cannot prove it.
 
@@ -304,3 +313,5 @@ The essentials, so nobody has to argue about this again:
 - [ ] Version bumped if shipping a build
 - [ ] CI run watched to success and output assets verified
 - [ ] Persian final report with limitations stated honestly
+
+Debug audit 0.4.5 (versionCode 21): see [AUDIT.md](AUDIT.md) for fixes and verification boundaries.

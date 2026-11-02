@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path
+        name="camera_captures"
+        path="camera_captures/" />
+    <!-- Completed downloads published on API 26-28 (app-specific storage). -->
+    <external-files-path
+        name="app_downloads"
+        path="Download/" />
+    <files-path
+        name="internal_downloads"
+        path="Downloads/" />
+</paths>

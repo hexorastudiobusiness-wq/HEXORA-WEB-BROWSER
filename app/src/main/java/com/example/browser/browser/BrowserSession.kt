@@ -2,7 +2,9 @@ package com.example.browser.browser
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import android.view.View
+import java.io.InputStream
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -19,6 +21,15 @@ data class SessionPageState(
     val canGoBack: Boolean = false,
     val canGoForward: Boolean = false,
     val isSecure: Boolean = false,
+    /** True when the user previously accepted a certificate exception. */
+    val isSecurityException: Boolean = false,
+    /** True when active/passive mixed content was loaded on an HTTPS page. */
+    val hasMixedContent: Boolean = false,
+    /** Host covered by the current TLS identity, when known. */
+    val certificateHost: String = "",
+    /** X.509 subject / issuer summaries for the connection dialog. */
+    val certificateSubject: String = "",
+    val certificateIssuer: String = "",
     val loadFailed: Boolean = false,
     val isDesktopMode: Boolean = false,
     /** The page itself requested fullscreen (e.g. a video player). */
@@ -39,7 +50,9 @@ data class FindResultUi(
 
 /**
  * Opaque saved state of a suspended tab (engine-serialized navigation
- * history, scroll position and form data). Kept in memory only.
+ * history, scroll position and form data). The ViewModel may persist it in
+ * private app storage for non-private tabs so a cold start can restore the
+ * tab; it is never created for private tabs.
  */
 class SavedTabState internal constructor(internal val serialized: String)
 
@@ -47,7 +60,67 @@ class SavedTabState internal constructor(internal val serialized: String)
 data class AutofillCredential(
     val username: String,
     val password: String,
+    /**
+     * Exact origin this credential belongs to. The engine must re-check it
+     * at fill time: a credential loaded for one origin must never be filled
+     * after the same session has navigated to another scheme/host/port.
+     */
+    val origin: String? = null,
 )
+
+/** Kind of media found under a long press, if any. */
+enum class PageMediaKind { NONE, IMAGE, VIDEO, AUDIO }
+
+/** Web permissions that require an explicit in-browser decision. */
+enum class SitePermissionKind {
+    GEOLOCATION,
+    NOTIFICATIONS,
+    CAMERA,
+    MICROPHONE,
+    CAMERA_AND_MICROPHONE,
+    SCREEN_SHARE,
+    PERSISTENT_STORAGE,
+    AUTOPLAY,
+    MEDIA_KEY_SYSTEM,
+    XR,
+    STORAGE_ACCESS,
+    LOCAL_NETWORK,
+    UNKNOWN,
+}
+
+/** Stored state of one site permission (mirrors the engine's values). */
+enum class SitePermissionState { ALLOW, DENY, PROMPT }
+
+/** A stored site permission shown in the site-permissions manager. */
+data class SitePermissionEntry(
+    val uri: String,
+    val kind: SitePermissionKind,
+    val state: SitePermissionState,
+    val isPrivate: Boolean = false,
+    /** Raw engine permission type; distinguishes autoplay variants. */
+    val permissionType: Int = -1,
+) {
+    val allowed: Boolean get() = state == SitePermissionState.ALLOW
+}
+
+/** Decision for a stored site permission. */
+enum class SitePermissionDecision { ASK, ALLOW, DENY }
+
+/** Standard JavaScript / Web Share / navigation prompts shown by the shell. */
+enum class WebPromptKind {
+    ALERT,
+    CONFIRM,
+    TEXT,
+    BEFORE_UNLOAD,
+    REPOST_CONFIRM,
+    FOLDER_UPLOAD,
+    POPUP,
+    SHARE,
+    CHOICE,
+    COLOR,
+    DATE_TIME,
+    AUTH,
+}
 
 /** One-time events coming out of a session (not part of persistent state). */
 sealed interface BrowserSessionEvent {
@@ -60,6 +133,107 @@ sealed interface BrowserSessionEvent {
         val fileName: String,
         val mimeType: String?,
         val isPrivate: Boolean = false,
+        /** Page that initiated the download; used only as a referer hint. */
+        val pageUrl: String? = null,
+        /** Total body size in bytes when the engine reported one, else -1. */
+        val contentLength: Long = -1L,
+        /**
+         * Opens the response body the engine already received, when it handed
+         * one over. Consuming this stream is the only way to download
+         * blob/data/POST/authenticated responses: they cannot be replayed as
+         * a fresh GET. The stream may be opened at most once and must be
+         * closed by the consumer. Null means "re-fetch [url] instead".
+         */
+        val bodySource: (() -> InputStream?)? = null,
+    ) : BrowserSessionEvent
+
+    /**
+     * The session's content process crashed or was killed by the system
+     * (Gecko `onCrash`/`onKill`). The session is closed and unusable; the
+     * tab itself must survive and be restored from its saved state, the way
+     * Firefox's crash handling recreates a dead tab's engine session.
+     */
+    data class SessionDied(
+        override val sessionId: String,
+    ) : BrowserSessionEvent
+
+    /** The page requested a file picker (for example an upload input). */
+    data class FilePickerRequested(
+        override val sessionId: String,
+        val requestId: String,
+        val allowMultiple: Boolean,
+        val isFolder: Boolean,
+        val mimeTypes: List<String>,
+        /** Gecko capture mode: 0 none, 1 any camera, 2 front, 3 rear. */
+        val captureMode: Int = 0,
+    ) : BrowserSessionEvent
+
+    /** A site asked for a content permission (location, notifications, …). */
+    data class SitePermissionRequested(
+        override val sessionId: String,
+        val origin: String,
+        val kind: SitePermissionKind,
+        val allow: () -> Unit,
+        val deny: () -> Unit,
+    ) : BrowserSessionEvent
+
+    /** A site asked to capture camera and/or microphone media. */
+    data class MediaPermissionRequested(
+        override val sessionId: String,
+        val origin: String,
+        val wantsVideo: Boolean,
+        val wantsAudio: Boolean,
+        val videoLabels: List<String>,
+        val audioLabels: List<String>,
+        /** True when Gecko classified a video source as screen/window. */
+        val videoFromScreen: Boolean = false,
+        /** True when an audio source is a microphone (not system audio). */
+        val wantsMicrophone: Boolean = false,
+        val grant: () -> Unit,
+        val reject: () -> Unit,
+    ) : BrowserSessionEvent
+
+    /** Gecko needs Android runtime permissions before a device can be used. */
+    data class AndroidPermissionRequested(
+        override val sessionId: String,
+        val permissions: List<String>,
+        val grant: () -> Unit,
+        val deny: () -> Unit,
+    ) : BrowserSessionEvent
+
+    /** A JavaScript/Web Share/navigation prompt needs a shell dialog. */
+    data class WebPromptRequested(
+        override val sessionId: String,
+        val kind: WebPromptKind,
+        val title: String?,
+        val message: String?,
+        val defaultValue: String?,
+        /**
+         * Confirm with optional text (text prompts / share result). CHOICE
+         * prompts also pass selected option *indices*: option ids are
+         * page-controlled strings and must not be packed into a delimited
+         * string, where commas or spaces inside an id would corrupt them.
+         */
+        val confirm: (String?, List<Int>) -> Unit,
+        /** Dismiss/cancel the prompt. */
+        val dismiss: () -> Unit,
+        /** Labels for CHOICE/COLOR prompts, aligned with [optionIds]. */
+        val options: List<String> = emptyList(),
+        val optionIds: List<String> = emptyList(),
+        val optionEnabled: List<Boolean> = emptyList(),
+        val optionSelected: List<Boolean> = emptyList(),
+        val allowMultiple: Boolean = false,
+        /** AUTH prompts that ask only for a password. */
+        val passwordOnly: Boolean = false,
+    ) : BrowserSessionEvent
+
+    /** The user long-pressed a link or media element on the page. */
+    data class ContextMenuRequested(
+        override val sessionId: String,
+        val linkUri: String?,
+        val mediaUri: String?,
+        val mediaKind: PageMediaKind,
+        val label: String?,
     ) : BrowserSessionEvent
 
     /** A login form was submitted; the app may ask whether to save it. */
@@ -68,6 +242,18 @@ sealed interface BrowserSessionEvent {
         val pageUrl: String,
         val username: String,
         val password: String,
+    ) : BrowserSessionEvent
+
+    /** A page tried to open a non-web URI in an external application. */
+    data class ExternalLinkRequested(
+        override val sessionId: String,
+        val uri: String,
+    ) : BrowserSessionEvent
+
+    /** The page itself asked to print (window.print()); caller owns stream. */
+    data class PrintRequested(
+        override val sessionId: String,
+        val bodySource: InputStream,
     ) : BrowserSessionEvent
 
     /** The page asked to close its own tab (window.close()). */
@@ -92,6 +278,14 @@ interface BrowserSession {
     /** Latest saved state for suspending this tab, if the engine has one. */
     fun latestSavedState(): SavedTabState?
 
+    /**
+     * True while the underlying engine session is open and can render/load.
+     * A session whose content process was killed in the background reports
+     * false here even when no crash event was delivered, so the tab layer
+     * can recreate it instead of binding a dead session.
+     */
+    fun isUsable(): Boolean
+
     /** Switches desktop/mobile rendering for this tab and reloads the page. */
     fun setDesktopMode(enabled: Boolean)
 
@@ -101,8 +295,23 @@ interface BrowserSession {
     /** Clears the current in-page search highlights. */
     fun clearFind()
 
+    /** Delivers files selected in the system picker to a pending prompt. */
+    fun completeFilePicker(requestId: String, uris: List<Uri>)
+
+    /** Cancels a pending system file-picker prompt. */
+    fun cancelFilePicker(requestId: String)
+
     /** Captures a small snapshot of the visible page for tab previews. */
     fun captureThumbnail(onCaptured: (Bitmap?) -> Unit)
+
+    /** Asks the page to leave HTML fullscreen (no-op when not fullscreen). */
+    fun exitFullscreen()
+
+    /** Generates a PDF of the current page; the caller owns the stream. */
+    fun saveAsPdf(onResult: (InputStream?) -> Unit)
+
+    /** Generates the current page PDF for Android printing. */
+    fun requestPrint(onResult: (InputStream?) -> Unit)
 
     fun loadUrl(url: String)
     fun reload()
@@ -110,8 +319,14 @@ interface BrowserSession {
     fun goBack()
     fun goForward()
 
-    /** Active sessions render/paint; inactive ones are paused by the engine. */
-    fun setActive(active: Boolean)
+    /**
+     * Marks this session high priority (Gecko should keep its content
+     * process alive as long as possible) or returns it to default
+     * priority. Only the selected tab is high priority at any time,
+     * mirroring Mozilla's SessionPrioritizationMiddleware; GeckoView
+     * itself manages active/inactive from the surface.
+     */
+    fun setPriorityHigh(high: Boolean)
 
     /**
      * Returns the browser's single shared native content view and binds this

@@ -16,6 +16,7 @@ import com.example.browser.data.security.CredentialCipher
 import com.example.browser.util.ShortcutIconStore
 import com.example.browser.util.TabThumbnailStore
 import com.example.browser.data.settings.SettingsRepository
+import com.example.browser.data.settings.TabSessionStore
 import com.example.browser.download.DownloadHandler
 
 /**
@@ -46,6 +47,10 @@ class AppContainer(context: Context) {
 
     val settingsRepository: SettingsRepository by lazy {
         SettingsRepository(appContext)
+    }
+
+    val tabSessionStore: TabSessionStore by lazy {
+        TabSessionStore(appContext)
     }
 
     val downloadHandler: DownloadHandler by lazy {

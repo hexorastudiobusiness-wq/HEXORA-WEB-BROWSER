@@ -1,5 +1,6 @@
 package com.example.browser.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Icon
@@ -43,6 +46,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.browser.R
+import com.example.browser.ui.browser.AddressSuggestion
 
 /**
  * Address/search bar (ARCHITECTURE.md §6): URL or search input, security
@@ -62,6 +66,10 @@ fun AddressBar(
     onToggleBookmark: () -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    suggestions: List<AddressSuggestion> = emptyList(),
+    onQueryChange: (String) -> Unit = {},
+    onSuggestionSelected: (AddressSuggestion) -> Unit = {},
+    onSecurityClick: () -> Unit = {},
 ) {
     val focusManager = LocalFocusManager.current
     var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
@@ -88,13 +96,13 @@ fun AddressBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = if (compact) 1.dp else 2.dp),
+                    .padding(horizontal = 8.dp, vertical = if (compact) 0.dp else 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Surface(
                     modifier = Modifier
                         .weight(1f)
-                        .height(if (compact) 36.dp else 38.dp),
+                        .height(if (compact) 34.dp else 38.dp),
                     shape = RoundedCornerShape(20.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                 ) {
@@ -103,14 +111,23 @@ fun AddressBar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Icon(
-                            imageVector = if (isSecure) Icons.Filled.Lock else Icons.Filled.LockOpen,
-                            contentDescription = stringResource(
-                                if (isSecure) R.string.secure_connection
-                                else R.string.insecure_connection,
-                            ),
-                            modifier = Modifier.size(18.dp),
-                        )
+                        IconButton(
+                            onClick = onSecurityClick,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector = if (isSecure) {
+                                    Icons.Filled.Lock
+                                } else {
+                                    Icons.Filled.LockOpen
+                                },
+                                contentDescription = stringResource(
+                                    if (isSecure) R.string.secure_connection
+                                    else R.string.insecure_connection,
+                                ),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
                         Box(
                             modifier = Modifier.weight(1f),
                             contentAlignment = Alignment.CenterStart,
@@ -126,6 +143,9 @@ fun AddressBar(
                             BasicTextField(
                                 value = fieldValue,
                                 onValueChange = { newValue ->
+                                    if (newValue.text != text) {
+                                        onQueryChange(newValue.text)
+                                    }
                                     fieldValue = if (selectAllOnFocus && newValue.text == text) {
                                         // The first tap after focus may move the cursor
                                         // as part of the same click. Convert that first
@@ -143,6 +163,17 @@ fun AddressBar(
                                         val wasEditing = isEditing
                                         isEditing = focusState.isFocused
                                         if (focusState.isFocused && !wasEditing) {
+                                            // Suggestions are driven by the
+                                            // ViewModel's copy of the query,
+                                            // which is only updated while
+                                            // typing. Re-sync it with the
+                                            // text actually in the field —
+                                            // after a submit the field shows
+                                            // the page URL while the model
+                                            // would otherwise still hold the
+                                            // pre-submit query and pop up
+                                            // stale suggestions on refocus.
+                                            onQueryChange(fieldValue.text)
                                             selectAllOnFocus = true
                                             if (fieldValue.text.isNotEmpty()) {
                                                 fieldValue = selectAll(fieldValue)
@@ -172,7 +203,10 @@ fun AddressBar(
                         }
                         if (isEditing && text.isNotEmpty()) {
                             IconButton(
-                                onClick = { fieldValue = TextFieldValue("") },
+                                onClick = {
+                                    fieldValue = TextFieldValue("")
+                                    onQueryChange("")
+                                },
                                 modifier = Modifier.size(32.dp),
                             ) {
                                 Icon(
@@ -187,7 +221,7 @@ fun AddressBar(
 
                 IconButton(
                     onClick = onOpenDownloads,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(if (compact) 32.dp else 36.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Filled.Download,
@@ -197,7 +231,7 @@ fun AddressBar(
                 }
                 IconButton(
                     onClick = onToggleBookmark,
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(if (compact) 32.dp else 36.dp),
                 ) {
                     Icon(
                         imageVector = if (isBookmarked) Icons.Filled.Star else Icons.Outlined.StarOutline,
@@ -212,6 +246,50 @@ fun AddressBar(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
                     )
+                }
+            }
+
+            // History suggestions while typing: tap one to open it directly
+            // instead of retyping a previously visited address.
+            if (isEditing && suggestions.isNotEmpty()) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    suggestions.forEach { suggestion ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    focusManager.clearFocus()
+                                    onSuggestionSelected(suggestion)
+                                }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Icon(
+                                imageVector = if (suggestion.isBookmark) {
+                                    Icons.Filled.Bookmark
+                                } else {
+                                    Icons.Filled.History
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = suggestion.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                )
+                                Text(
+                                    text = suggestion.url,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

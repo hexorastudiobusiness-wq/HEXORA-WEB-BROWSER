@@ -14,6 +14,22 @@ interface DownloadDao {
     @Insert
     suspend fun insert(entry: DownloadEntity)
 
+    @Query("UPDATE downloads SET downloadManagerId = :downloadManagerId WHERE id = :id")
+    suspend fun updateDownloadManagerId(id: Long, downloadManagerId: Long)
+
+    @Query(
+        "UPDATE downloads SET localUri = :localUri, lastStatus = :lastStatus, " +
+            "downloadedBytes = :downloadedBytes, totalBytes = :totalBytes " +
+            "WHERE id = :id",
+    )
+    suspend fun updateState(
+        id: Long,
+        localUri: String?,
+        lastStatus: Int?,
+        downloadedBytes: Long,
+        totalBytes: Long,
+    )
+
     @Query("DELETE FROM downloads WHERE id = :id")
     suspend fun deleteById(id: Long)
 

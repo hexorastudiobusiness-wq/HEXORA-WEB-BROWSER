@@ -10,10 +10,29 @@ enum class SearchEngine(
 ) {
     GOOGLE("google", "Google", "https://www.google.com/search?q=%s"),
     DUCKDUCKGO("duckduckgo", "DuckDuckGo", "https://duckduckgo.com/?q=%s"),
-    BING("bing", "Bing", "https://www.bing.com/search?q=%s");
+    BING("bing", "Bing", "https://www.bing.com/search?q=%s"),
+    CUSTOM("custom", "Custom", "");
 
-    fun searchUrl(query: String): String =
-        queryTemplate.format(URLEncoder.encode(query, Charsets.UTF_8.name()))
+    fun searchUrl(query: String, customTemplate: String = ""): String {
+        val encoded = URLEncoder.encode(query, Charsets.UTF_8.name())
+        val candidate = customTemplate.trim()
+        val template = if (this == CUSTOM) {
+            // A custom engine is only usable as an absolute http(s) URL
+            // template with a %s query placeholder. Anything else falls
+            // back to Google instead of manufacturing an invalid URL.
+            if (("%s" in candidate) &&
+                (candidate.startsWith("https://", ignoreCase = true) ||
+                    candidate.startsWith("http://", ignoreCase = true))
+            ) {
+                candidate
+            } else {
+                GOOGLE.queryTemplate
+            }
+        } else {
+            queryTemplate
+        }
+        return template.replace("%s", encoded)
+    }
 
     companion object {
         fun fromId(id: String?): SearchEngine =
@@ -45,16 +64,22 @@ object UrlUtils {
     }
 
     /** Resolves raw address-bar text into the URL that should be loaded. */
-    fun resolveInput(input: String, searchEngine: SearchEngine): String {
+    fun resolveInput(
+        input: String,
+        searchEngine: SearchEngine,
+        customSearchTemplate: String = "",
+    ): String {
         val text = input.trim()
         if (text.isEmpty()) return text
-        if (!looksLikeUrl(text)) return searchEngine.searchUrl(text)
+        if (!looksLikeUrl(text)) {
+            return searchEngine.searchUrl(text, customSearchTemplate)
+        }
         return when {
             // Only web schemes may be navigated to directly. Anything else
             // (file:, intent:, data:, ...) is treated as a search query.
             schemeRegex.matches(text) && isHttpUrl(text) -> text
             text.startsWith("about:", ignoreCase = true) -> text
-            schemeRegex.matches(text) -> searchEngine.searchUrl(text)
+            schemeRegex.matches(text) -> searchEngine.searchUrl(text, customSearchTemplate)
             else -> "https://$text"
         }
     }

@@ -17,6 +17,29 @@ interface BrowserEngine {
      */
     var newSessionCreatedListener: ((BrowserSession, String?) -> Unit)?
 
+    /**
+     * Called when the user performs a horizontal tab-swipe gesture on the
+     * rendered web content (+1 = swiped left / next tab, -1 = swiped right /
+     * previous tab). Only delivered while [tabSwipeEnabled] is true; the
+     * gesture is detected at the native-view level because touch events over
+     * the web surface never reach Compose.
+     */
+    var onTabSwipe: ((Int) -> Unit)?
+
+    /**
+     * Called when the user performs a pull-to-refresh gesture (dragging
+     * down while the page is already at its top), in and out of fullscreen.
+     * Detected by the engine from Gecko's own overscroll reporting, so it
+     * never fires while the page can still scroll.
+     */
+    var onPullToRefresh: (() -> Unit)?
+
+    /**
+     * Enables content-level tab swiping (used in fullscreen, where the
+     * browser chrome — and its own swipe area — is hidden).
+     */
+    var tabSwipeEnabled: Boolean
+
     /** Creates a new, independent session. Not thread-confined, but cheap. */
     fun createSession(config: BrowserSessionConfig): BrowserSession
 
@@ -32,11 +55,40 @@ interface BrowserEngine {
      */
     fun setTextZoomPercent(percent: Int)
 
+    /**
+     * Applies global/per-session content controls without restarting the
+     * engine: JavaScript is a runtime-wide switch and Enhanced Tracking
+     * Protection is enabled per session by GeckoView.
+     */
+    fun applyContentControls(
+        javaScriptEnabled: Boolean,
+        trackingProtectionEnabled: Boolean,
+        httpsOnlyMode: Boolean = false,
+    ) {}
+
+    /** Loads all stored site permissions for the permissions manager. */
+    fun loadSitePermissions(onResult: (List<SitePermissionEntry>) -> Unit) {}
+
+    /** Changes one stored site permission; ASK restores the prompt default. */
+    fun setSitePermission(
+        uri: String,
+        kind: SitePermissionKind,
+        decision: SitePermissionDecision,
+        isPrivate: Boolean = false,
+        permissionType: Int = -1,
+    ) {}
+
     /** Clears cookies/cache/storage belonging to one [host] only. */
     fun clearSiteData(host: String)
 
     /** Clears cookies, cache, site data etc. via the engine. Fire-and-forget. */
     fun clearBrowsingData()
+
+    /**
+     * Clears only web caches (network/image), leaving history, bookmarks,
+     * cookies, site storage and saved logins untouched.
+     */
+    fun clearCache(onComplete: () -> Unit = {})
 }
 
 /** Color-scheme preference passed from the app theme to web content. */
