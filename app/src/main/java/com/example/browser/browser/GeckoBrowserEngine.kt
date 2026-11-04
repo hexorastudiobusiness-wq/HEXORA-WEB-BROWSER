@@ -333,11 +333,6 @@ class GeckoBrowserEngine(
         val host = SwipeableHostLayout(context)
         host.swipeEnabledProvider = { tabSwipeEnabled }
         host.onSwipeTab = { delta -> onTabSwipe?.invoke(delta) }
-        // Gecko knows whether the page can still scroll towards its top, so
-        // pull-to-refresh starts exactly when a mainstream browser would.
-        host.canScrollUpProvider = { (renderedSession?.rootScrollY ?: 0) > 0 }
-        host.onRefreshRequested = { onPullToRefresh?.invoke() }
-        host.updateRefreshChrome(isNightTheme())
         // NOTE: no `coverUntilFirstPaint` here on purpose.
         //
         // That call is not just a background colour: it stores the colour as
@@ -494,15 +489,6 @@ class GeckoBrowserEngine(
 
     override fun finishPullToRefresh() {
         onPullProgress?.invoke(0f)
-    }
-
-    private fun isNightTheme(): Boolean = when (preferredColorScheme) {
-        GeckoRuntimeSettings.COLOR_SCHEME_DARK -> true
-        GeckoRuntimeSettings.COLOR_SCHEME_LIGHT -> false
-        else ->
-            (appContext.resources.configuration.uiMode and
-                Configuration.UI_MODE_NIGHT_MASK) ==
-                Configuration.UI_MODE_NIGHT_YES
     }
 
     internal fun createSessionInternal(
