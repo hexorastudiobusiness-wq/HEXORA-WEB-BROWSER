@@ -355,19 +355,18 @@ interface BrowserSession {
     fun setPriorityHigh(high: Boolean)
 
     /**
-     * Returns the browser's single shared native content view and binds this
-     * session to it. GeckoView tab switching is designed around one attached
-     * GeckoView whose session is replaced; creating a separate surface-backed
-     * view per tab can leave previously shown tabs white/black. Typed as a
-     * plain [View] so no engine type leaks into the UI layer.
+     * Returns the app-wide content container for [context]: a plain view group
+     * that holds one surface per tab. Typed as a plain [View] so no engine type
+     * leaks into the UI layer.
      */
-    fun createContentView(context: Context): View
+    fun contentContainer(context: Context): View
 
-    /** Binds this session to the already-created shared content [view]. */
-    fun renderContentView(view: View)
-
-    /** Detaches [view] from this session without closing the session. */
-    fun releaseContentView(view: View)
+    /**
+     * Shows this session's own surface inside [container] and hides the others.
+     * Every tab owns its GeckoView (Mozilla's model), so this never re-binds
+     * another tab's page onto a shared view.
+     */
+    fun presentContentView(container: View)
 
     /** Supplies (or clears) the locally saved login to offer on this page. */
     fun setAutofillCredential(credential: AutofillCredential?)

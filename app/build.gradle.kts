@@ -23,20 +23,20 @@ android {
         // current GeckoView releases.
         minSdk = 26
         targetSdk = 37
-        versionCode = 26
-        versionName = "0.4.10"
+        versionCode = 27
+        versionName = "0.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // One APK per CPU architecture instead of a universal APK that bundles
-    // the GeckoView engine for every ABI (~130 MB each). Most phones from
-    // the last years are arm64-v8a; x86_64 is for emulators.
+    // arm64-v8a only, on the owner's instruction: the target device is a
+    // modern 64-bit phone, and skipping the other ABIs keeps a debug build
+    // down to one artifact (~120 MB instead of three).
     splits {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            include("arm64-v8a")
             isUniversalApk = false
         }
     }

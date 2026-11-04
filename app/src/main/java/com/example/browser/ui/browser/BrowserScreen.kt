@@ -945,14 +945,16 @@ private fun BrowserPageContent(
         val session = state.activeSession ?: surfaceSession.value
         if (session != null && state.tabs.isNotEmpty()) {
             AndroidView(
-                factory = { ctx -> session.createContentView(ctx) },
+                // The container is stable for the whole Activity; the surfaces
+                // inside it belong to individual tabs and are never re-created
+                // by a tab switch.
+                factory = { ctx -> session.contentContainer(ctx) },
                 update = { view ->
-                    // Only the *active* session renders; a Start Page tab
-                    // leaves the previous page bound but covered.
-                    state.activeSession?.renderContentView(view)
+                    state.activeSession?.presentContentView(view)
                 },
-                onRelease = { view ->
-                    (state.activeSession ?: session).releaseContentView(view)
+                onRelease = {
+                    // Surfaces outlive Compose nodes on purpose: a route change
+                    // must not cost a tab its page.
                 },
                 modifier = Modifier.fillMaxSize(),
             )
