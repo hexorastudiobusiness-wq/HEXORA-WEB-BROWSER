@@ -338,7 +338,13 @@ class GeckoBrowserEngine(
      */
     internal fun obtainContainer(context: Context): View {
         val existing = contentContainer
-        if (existing != null && contentContainerContext === context) return existing
+        if (existing != null && contentContainerContext === context) {
+            // Compose may hand the same instance back while the previous
+            // AndroidView node is still disposing it; a view can only have one
+            // parent, so detach it first (same protection the shared host had).
+            (existing.parent as? ViewGroup)?.removeView(existing)
+            return existing
+        }
         // A different Activity context invalidates every view built with the
         // old one. Detach them without closing anything: each tab rebuilds its
         // own surface the next time it is shown.
@@ -353,6 +359,7 @@ class GeckoBrowserEngine(
         }
         contentContainer = created
         contentContainerContext = context
+        (created.parent as? ViewGroup)?.removeView(created)
         return created
     }
 

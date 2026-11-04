@@ -73,14 +73,22 @@ Use the current stable GeckoView APIs available at implementation time. Do not i
 
 ## 4. Browser Sessions
 
-Each tab owns its own browser session. Rendering uses one shared GeckoView
-owned by the engine layer, inside one engine-owned host that is created once
-per Activity and reused for its entire life. Switching tabs replaces the
-session bound to that view (`renderContentView`); the view, its host and its
-Compose node are never re-created per tab `(see §4.1)`.
+Each tab owns its own browser session **and its own GeckoView**, which is
+Mozilla's model: `GeckoEngineView` owns one `GeckoView` per tab and the
+embedder only chooses which one is shown. The engine owns a single
+`FrameLayout` per Activity; every live tab's `SwipeableHostLayout` is a child of
+it, exactly one child is `VISIBLE`, the rest are `INVISIBLE`. Switching tabs
+therefore changes visibility, not the bound session `(see §4.1)`.
 
-Live sessions are kept at high priority; suspension (below) — not priority
-demotion — is the memory control.
+This replaced a single shared `GeckoView` whose session was swapped on every
+switch (0.5.0). That design forced a display release/acquire per tab switch and
+made unrelated pages share one compositor, which is where reloading tabs,
+cross-tab repaints and most black-pane reports came from. Do **not** reintroduce
+it.
+
+Live sessions are kept warm: the selected tab plus the three most recently used
+inactive tabs get `PRIORITY_HIGH`, so Gecko keeps their documents. Suspension
+(below) — not silent reloading — is the memory control for colder tabs.
 
 ### 4.1 Content-surface invariants (GeckoView)
 
@@ -88,24 +96,28 @@ These follow Mozilla's own `GeckoEngineView`/`NestedGeckoView` and exist because
 every previous "black tab" and "tab re-loads on switch" report traced back to a
 violation of one of them:
 
-1. **One view, created once.** `AndroidView` receives the same host instance on
-   every recomposition and route re-entry. Compose disposal detaches the
-   *session* only; the view and host stay alive while a tab exists.
-2. **The surface never unmounts while a tab exists.** The Start Page, crash
-   card and error card are drawn *on top of* the web surface instead of
+1. **One view per tab, created once.** `obtainSurface()` builds a tab's
+   `SwipeableHostLayout` + `HexoraGeckoView` the first time that tab is shown
+   and keeps it afterwards. The container `AndroidView` is stable for the whole
+   Activity; a tab switch never recreates a Compose node, a surface or a
+   session.
+2. **The container never unmounts while a tab exists.** The Start Page, crash
+   card and error card are drawn *on top of* the content container instead of
    replacing it.
 3. **Release before detach.** `HexoraGeckoView.onDetachedFromWindow()` calls
    `releaseSession()` before `super`, so GeckoView never closes the session and
-   the page survives. The session is re-bound on `onAttachedToWindow`.
+   the page survives; the session is re-bound in `onAttachedToWindow` (see
+   `obtainSurface`). A tab that is merely hidden keeps its view attached, so
+   only the platform's surface comes and goes — a repaint, never a load.
 4. **No opaque cover.** `GeckoView.coverUntilFirstPaint(color)` sets the
    session's compositor clear colour *and* paints an opaque SurfaceView
    background that only GeckoView's internal FIRST_PAINT callback removes. On a
    long-lived shared view that callback may never fire again, leaving a
    permanent black pane. Hexora therefore does not cover the surface.
-5. **Paint verification, not timers.** On foreground return the engine waits
-   for Gecko's own `onFirstComposite`/`onPaintStatusReset` signals; if no frame
-   arrives it re-acquires the display (release + `setSession`, no reload),
-   which is the same repair a fresh view performs.
+5. **Paint verification, not timers.** On foreground return the engine checks
+   every child surface: if the platform dropped one and GeckoView forgot its
+   session, the owning session is bound again (a repaint, not a reload). No
+   timers, no shared-compositor re-acquisition.
 6. **Pull-to-refresh is answered by Gecko.** The view is a
    `NestedScrollingChild` inside a `SwipeRefreshLayout`; whether a pull may
    start is decided by APZ (`InputResultDetail`), never by app-side heuristics.
@@ -502,8 +514,8 @@ The MVP sequence that built this project is complete. For new work:
    ViewModel → engine/session → repository), not in a Composable.
 2. Verify uncertain GeckoView APIs against the pinned dependency's docs
    or source before writing code.
-3. Make the smallest targeted change; keep the shared-`GeckoView`
-   rendering model and the security baseline intact.
+3. Make the smallest targeted change; keep the per-tab `GeckoView` model
+   (§4/§4.1) and the security baseline intact.
 4. Add or update unit tests where pure logic changed.
 5. Let CI compile and test; verify output assets; ask the owner to verify
    runtime behavior on a real device.

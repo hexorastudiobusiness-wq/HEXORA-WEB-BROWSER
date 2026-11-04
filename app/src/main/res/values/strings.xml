@@ -175,6 +175,11 @@
     <string name="start_shortcut_name_hint">Optional</string>
     <string name="start_shortcut_address">Address</string>
     <string name="start_shortcut_address_hint">example.com</string>
+    <string name="shortcut_added">Shortcut added</string>
+    <string name="shortcut_duplicate">That site is already a shortcut</string>
+    <string name="shortcut_limit">Shortcut limit reached (10)</string>
+    <string name="shortcut_invalid">Enter a site address, e.g. example.com</string>
+    <string name="shortcut_failed">Could not save the shortcut</string>
     <string name="start_shortcut_remove_hint">Long-press a shortcut to edit or delete it.</string>
     <string name="start_shortcuts_private">Your shortcuts are hidden in private tabs.</string>
     <string name="tabs_empty">No open tabs</string>

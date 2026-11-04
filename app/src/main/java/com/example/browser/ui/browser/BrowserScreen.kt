@@ -154,6 +154,14 @@ fun BrowserScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    // Shortcut writes answer with a toast instead of doing nothing visible.
+    val shortcutMessage = state.shortcutMessage
+    LaunchedEffect(shortcutMessage) {
+        if (shortcutMessage != null) {
+            Toast.makeText(context, shortcutMessage, Toast.LENGTH_SHORT).show()
+            viewModel.onAction(BrowserAction.DismissShortcutMessage)
+        }
+    }
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val sitePermissionRequest by viewModel.sitePermissionRequest.collectAsState()

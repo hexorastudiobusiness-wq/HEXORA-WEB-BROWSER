@@ -151,6 +151,8 @@ data class BrowserUiState(
     val pullRefreshProgress: Float = 0f,
     /** Floating per-site zoom panel (vertical slider) visibility. */
     val zoomPanelVisible: Boolean = false,
+    /** One-shot message after a shortcut write (string resource), shown as a toast. */
+    val shortcutMessage: Int? = null,
     /** Zoom of the site in front of the user, in percent. */
     val zoomPercent: Int = 100,
     /** Whether the diagnostics dialog is open (overflow menu). */
@@ -234,6 +236,7 @@ sealed interface BrowserAction {
     data object HideZoomPanel : BrowserAction
     data object ResetSiteZoom : BrowserAction
     data class SetSiteZoom(val percent: Int) : BrowserAction
+    data object DismissShortcutMessage : BrowserAction
     data object ShowDiagnostics : BrowserAction
     data object DismissDiagnostics : BrowserAction
     data object DismissPendingCredential : BrowserAction

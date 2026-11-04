@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.browser.R
 import com.example.browser.browser.BrowserEngine
 import com.example.browser.browser.BrowserSession
 import com.example.browser.browser.BrowserSessionConfig
@@ -155,6 +156,9 @@ class BrowserViewModel(
 
     /** Zoom panel (the floating vertical slider) visibility. */
     private val _zoomPanelVisible = MutableStateFlow(false)
+
+    /** One-shot shortcut feedback (string resource) for the UI toast. */
+    private val _shortcutMessage = MutableStateFlow<Int?>(null)
 
     /** Zoom shown by the panel: the active site's stored value, live-edited. */
     private val _zoomPercent = MutableStateFlow(SitePreferencesStore.DEFAULT_ZOOM)
@@ -329,8 +333,13 @@ class BrowserViewModel(
         chromeSliceWithPull,
         _zoomPanelVisible,
         _zoomPercent,
-    ) { chrome, zoomVisible, zoomPercent ->
-        chrome.copy(zoomPanelVisible = zoomVisible, zoomPercent = zoomPercent)
+        _shortcutMessage,
+    ) { chrome, zoomVisible, zoomPercent, shortcutMessage ->
+        chrome.copy(
+            zoomPanelVisible = zoomVisible,
+            zoomPercent = zoomPercent,
+            shortcutMessage = shortcutMessage,
+        )
     }
 
     private val historyAndBookmarks = combine(
@@ -450,6 +459,7 @@ class BrowserViewModel(
             pullRefreshProgress = start.chrome.pullRefreshProgress,
             zoomPanelVisible = start.chrome.zoomPanelVisible,
             zoomPercent = start.chrome.zoomPercent,
+            shortcutMessage = start.chrome.shortcutMessage,
             diagnosticsVisible = start.chrome.diagnosticsVisible,
             diagnosticsText = buildDiagnostics(activeEntry, activeState),
             savedLoginSuggestion = start.chrome.savedLoginSuggestion
@@ -1120,17 +1130,37 @@ class BrowserViewModel(
             is BrowserAction.AddStartShortcut -> {
                 viewModelScope.launch {
                     val resolvedUrl = resolveUserInput(action.url)
-                    val shortcutId = shortcutRepository.add(
-                        title = action.title,
-                        url = resolvedUrl,
-                    ) ?: return@launch
-                    // If this site is already open and loaded, its real icon
-                    // can replace the letter placeholder immediately.
-                    loadedPageUrlForShortcut(resolvedUrl)?.let { pageUrl ->
-                        fetchShortcutIcon(listOf(shortcutId), pageUrl)
+                    // Never fail silently again: the old code returned without
+                    // a word when the URL was a duplicate or the cap was hit,
+                    // which is indistinguishable from "the button is dead".
+                    val existing = shortcutRepository.shortcuts.first()
+                    _shortcutMessage.value = when {
+                        resolvedUrl.isBlank() -> R.string.shortcut_invalid
+                        existing.any { it.url.equals(resolvedUrl, ignoreCase = true) } ->
+                            R.string.shortcut_duplicate
+                        existing.size >= StartShortcutRepository.MAX_SHORTCUTS ->
+                            R.string.shortcut_limit
+                        else -> {
+                            val shortcutId = shortcutRepository.add(
+                                title = action.title,
+                                url = resolvedUrl,
+                            )
+                            if (shortcutId == null) {
+                                R.string.shortcut_failed
+                            } else {
+                                // If this site is already open and loaded, its
+                                // real icon can replace the letter placeholder
+                                // immediately.
+                                loadedPageUrlForShortcut(resolvedUrl)?.let { pageUrl ->
+                                    fetchShortcutIcon(listOf(shortcutId), pageUrl)
+                                }
+                                R.string.shortcut_added
+                            }
+                        }
                     }
                 }
             }
+            BrowserAction.DismissShortcutMessage -> _shortcutMessage.value = null
             is BrowserAction.EditStartShortcut -> {
                 viewModelScope.launch {
                     val resolvedUrl = resolveUserInput(action.url)
@@ -2602,6 +2632,7 @@ class BrowserViewModel(
         val diagnosticsVisible: Boolean = false,
         val zoomPanelVisible: Boolean = false,
         val zoomPercent: Int = SitePreferencesStore.DEFAULT_ZOOM,
+        val shortcutMessage: Int? = null,
     )
 
     private data class StartSlice(
