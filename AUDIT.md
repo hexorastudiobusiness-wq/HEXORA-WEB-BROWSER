@@ -118,3 +118,50 @@ Root cause found for the owner-reported "tabs come back black after minimise":
 - No device run, no emulator run, no CI run in this sandbox. Emoji behaviour
   was not changed: Gecko uses the system emoji font and bundles none; the
   report lists the ranked hypotheses and a three-step comparison test.
+
+## Content surface, second pass (0.4.6, `571a567`)
+
+The 0.4.5 host-ownership theory (`bad689a`) did not fix the black tab on device.
+The owner's exact signature — single tab, ~5 s minimised, **reload does not
+help**, **tab switch does not help**, only the tab-tray round trip does — was
+then traced to GeckoView's own source (geckoview 158, `GeckoView.java`):
+
+1. `coverUntilFirstPaint(color)` is not cosmetic. It stores the colour in
+   `mLastCoverColor`, pushes it to the session compositor as the clear colour
+   (`setClearColor`), and paints an **opaque** SurfaceView-wrapper background
+   (`coverUntilFirstPaintInternal`). Only `uncover()` (registered as the
+   compositor's FIRST_PAINT callback in `setSession`) restores transparency.
+   FIRST_PAINT fires "for the first content composite after a start or a
+   restart of the compositor" — on Hexora's single long-lived view the
+   compositor is not restarted per tab/resume, so a cover applied at the wrong
+   moment can never be removed. Reloading and switching sessions repaint
+   *under* the cover; recreating the view restarts the compositor and removes
+   it. That reproduces the reported behaviour exactly.
+2. `GeckoView.setSession()` returns early when the session is already set,
+   acquires the display only when the view is attached (`onAttachedToWindow`
+   re-acquires it), and `releaseSession()` drops the display, the first-paint
+   callback, autofill/selection/print delegates, focus and session ownership.
+   Detaching the view therefore deactivates the session; re-binding it forces a
+   full repaint — which is what looked like "tabs reload on switch".
+
+Changes: the content host and GeckoView are engine-owned, created once per
+Activity and reused for its whole life; the composable never recreates or
+unmounts them; the Start Page/crash card are drawn on top of the surface; no
+`coverUntilFirstPaint` call remains; `onFirstComposite` and
+`onPaintStatusReset` feed a paint-status flag and, if no frame arrives after
+the window has a surface again, the engine re-acquires the display
+(release + `setSession`, no reload). `contentViewGeneration` and the 30 s
+background-rebind timer are gone.
+
+Pull-to-refresh was rebuilt on `SwipeRefreshLayout` plus a `NestedScrollingChild`
+GeckoView following `NestedGeckoView`: `onTouchEventForDetailResult` →
+`PanZoomController.InputResultDetail` decides whether a gesture may leave the
+page; `requestDisallowInterceptTouchEvent` is released only when Gecko reports
+the content cannot scroll up and the site did not consume the touch. The custom
+indicator, `SwipeableHostLayout.onDraw` painting, `rootScrollYProvider` and
+`PullToRefreshGesture` were removed.
+
+Still unverified on device: everything above is source-level reasoning. The
+next diagnostic step, if the black pane survives, is the SurfaceView path
+(`GeckoDisplay.surfaceChanged/surfaceDestroyed`, SurfaceView punch-out vs.
+Compose overlays) with a paint-event-only log (no URLs).
