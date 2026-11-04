@@ -14,6 +14,7 @@ navigationCompose = "2.8.5"
 room = "2.7.2"
 datastore = "1.1.1"
 coroutines = "1.9.0"
+swiperefreshlayout = "1.1.0"
 
 # Mozilla GeckoView — latest stable release build published to maven.mozilla.org.
 # Format is <firefoxVersion>.<buildTimestamp>; bump to the newest entry of
@@ -45,6 +46,11 @@ androidx-room-compiler = { group = "androidx.room", name = "room-compiler", vers
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+
+# Standard Android pull-to-refresh container, used exactly the way Mozilla wraps
+# GeckoView with it (a plain FrameLayout + custom gesture code is what made
+# pull-to-refresh unreliable here before).
+androidx-swiperefreshlayout = { group = "androidx.swiperefreshlayout", name = "swiperefreshlayout", version.ref = "swiperefreshlayout" }
 
 mozilla-geckoview = { group = "org.mozilla.geckoview", name = "geckoview", version.ref = "geckoview" }
 

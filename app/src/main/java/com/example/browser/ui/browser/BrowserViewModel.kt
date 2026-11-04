@@ -123,7 +123,6 @@ class BrowserViewModel(
 
     private val _tabs = MutableStateFlow<List<TabEntry>>(emptyList())
     private val _tabRevision = MutableStateFlow(0L)
-    private var contentViewGeneration = 0L
     private val persistenceMutex = Mutex()
     private val _activeTabId = MutableStateFlow<String?>(null)
     private val _pageStates = MutableStateFlow<Map<String, SessionPageState>>(emptyMap())
@@ -375,7 +374,6 @@ class BrowserViewModel(
             thumbnailVersions = slice.thumbnails,
             errorMessage = error,
             activeSession = activeEntry?.session,
-            contentViewGeneration = contentViewGeneration,
             showStartPage = activeEntry?.showStartPage ?: slice.tabs.isEmpty(),
             activeTabCrashed = activeEntry?.crashed == true,
             hasWebPage = activeState.url.isNotBlank() ||
@@ -1479,20 +1477,25 @@ class BrowserViewModel(
     }
 
     /**
-     * Recreate the entire AndroidView host after a long background interval,
-     * exactly as leaving content for the tab selector and selecting a tab does.
-     * Reattaching the SAME child to the SAME host did not reproduce that path.
-     * The engine session stays open; this only resets the display/view lifecycle.
+     * Called after the window has a surface again (Activity onResume). A tab
+     * whose session died while backgrounded is restored, then the engine is
+     * asked to verify — from Gecko's own paint callbacks — that the visible
+     * page really is on screen. No timers, no blind re-creation.
      */
-    fun onBrowserResumed(backgroundDurationMs: Long) {
-        if (backgroundDurationMs < REBIND_AFTER_BACKGROUND_MS) return
+    fun onBrowserResumed() {
         val active = activeEntry() ?: return
-        if (active.showStartPage || active.crashed) return
-        if (active.session == null) restoreTab(active)
-        if (active.session?.isUsable() == true) {
-            contentViewGeneration++
-            _tabRevision.update { it + 1 }
+        val session = active.session
+        if (session != null && !session.isUsable()) {
+            // Died while we were in the background; a death the user did not
+            // witness is restored silently below instead of showing the
+            // crash card.
+            handleDeadSession(active, session, witnessed = false)
         }
+        if (!active.showStartPage && !active.crashed && active.session == null) {
+            restoreTab(active)
+        }
+        engine?.finishPullToRefresh()
+        engine?.ensureContentDisplayed()
     }
 
     /**
@@ -2040,6 +2043,7 @@ class BrowserViewModel(
                     }
                     val finishedLoad = wasLoading && !state.isLoading
                     wasLoading = state.isLoading
+                    if (finishedLoad) engine?.finishPullToRefresh()
                     if (finishedLoad && !state.loadFailed) {
                         if (!entry.isPrivate && UrlUtils.isHttpUrl(state.url)) {
                             historyRepository.recordVisit(state.url, state.title)
@@ -2367,12 +2371,6 @@ class BrowserViewModel(
          * alive under memory pressure — Mozilla's MIN_ACTIVE_TABS.
          */
         const val SUSPEND_KEEP_INACTIVE_TABS = 3
-
-        /**
-         * After this long in the background the rendered surface is
-         * recreated on return even when all sessions are still alive.
-         */
-        const val REBIND_AFTER_BACKGROUND_MS = 30_000L
 
         /** Quiet period after which requested tab-strip writes are flushed. */
         const val PERSIST_DEBOUNCE_MS = 400L

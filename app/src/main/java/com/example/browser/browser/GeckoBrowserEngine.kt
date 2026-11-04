@@ -1,20 +1,24 @@
 package com.example.browser.browser
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.SparseArray
 import android.view.MotionEvent
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.core.view.NestedScrollingChild
+import androidx.core.view.NestedScrollingChildHelper
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.io.IOException
 import java.util.Collections
 import java.util.UUID
@@ -153,6 +157,7 @@ class GeckoBrowserEngine(
         // Gecko updates `prefers-color-scheme` for pages that provide a dark
         // theme. It does not algorithmically recolor sites without one.
         processRuntime?.settings?.setPreferredColorScheme(geckoScheme)
+        sharedContentHost?.updateRefreshChrome(isNightTheme())
     }
 
     override fun applyContentControls(
@@ -275,96 +280,120 @@ class GeckoBrowserEngine(
         )
     }
 
-    // GeckoView is designed to paint sessions through one attached view:
-    // tabs are switched by replacing the session on that view (the model
-    // used by Mozilla's own Android Components). A separate GeckoView per
-    // tab leaves detached SurfaceViews behind and previously shown tabs can
-    // return white/black even though their GeckoSession is still alive.
+    // One long-lived content surface per Activity, exactly like Mozilla's
+    // GeckoEngineView: a single GeckoView inside a single host, never moved,
+    // never re-parented per tab. Tabs are switched by replacing the session
+    // bound to that view. Detaching or re-creating the surface per tab (or per
+    // resume) is what used to leave pages black, and re-binding a session to
+    // a surface that had been thrown away is what made returning tabs reload.
     private var sharedContentView: HexoraGeckoView? = null
-    private var sharedContentHost: FrameLayout? = null
+    private var sharedContentHost: SwipeableHostLayout? = null
     private var renderedSession: GeckoBrowserSession? = null
     /** Session to re-attach automatically when the shared view returns. */
     private var sessionToRestoreOnAttach: GeckoBrowserSession? = null
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** Guard for the "did Gecko actually paint after we came back?" check. */
+    private var resumeCheckToken = 0L
+    private var paintedSinceResume = true
 
     internal fun obtainContentView(
         session: GeckoBrowserSession,
         context: Context,
     ): View {
-        val existing = sharedContentView
-        val geckoView = if (existing == null || existing.context !== context) {
-            existing?.let { oldView ->
-                oldView.onViewDetached = null
-                oldView.onViewAttached = null
-                oldView.releaseSession()
-                (oldView.parent as? ViewGroup)?.removeView(oldView)
-            }
-            renderedSession?.contentView = null
-            renderedSession = null
-            sessionToRestoreOnAttach = null
-            HexoraGeckoView(context).also { newView ->
-                newView.onViewDetached = { handleSharedViewDetached(newView) }
-                newView.onViewAttached = { handleSharedViewAttached(newView) }
-                // No root scroll callback is guaranteed on an unscrolled/SPA
-                // document. Unknown is delegated to APZ, NOT treated as "not
-                // at top"; APZ also knows the nested container under the finger.
-                newView.rootScrollYProvider = { renderedSession?.rootScrollY }
-                newView.onPullToRefreshGesture = { onPullToRefresh?.invoke() }
-                newView.onPullProgress = { progress ->
-                    (sharedContentHost as? SwipeableHostLayout)?.pullProgress =
-                        progress
-                }
-                sharedContentView = newView
-            }
-        } else {
-            existing
+        val host = sharedContentHost?.takeIf { it.context === context }
+            ?: createContentHost(context)
+        // A fresh AndroidView node asking for a host means the previous node
+        // is gone; detach the host from any stale parent first so Compose can
+        // never hit "child already has a parent".
+        if (host.parent != null) {
+            (host.parent as? ViewGroup)?.removeView(host)
         }
+        bindContentView(session, host)
+        return host
+    }
 
-        // AndroidView receives a fresh lightweight host. The real GeckoView
-        // is moved into that host by the engine, so a Compose branch change
-        // (for example entering fullscreen) can never try to add a GeckoView
-        // that still has another parent.
+    private fun createContentHost(context: Context): SwipeableHostLayout {
+        // A different Activity context (Activity recreation) invalidates every
+        // view bound to the old one; drop them without touching sessions.
+        sharedContentView?.let { oldView ->
+            oldView.onViewAttached = null
+            oldView.onViewDetached = null
+            oldView.releaseSession()
+            (oldView.parent as? ViewGroup)?.removeView(oldView)
+        }
+        sharedContentHost?.let { oldHost ->
+            (oldHost.parent as? ViewGroup)?.removeView(oldHost)
+        }
+        renderedSession?.contentView = null
+        renderedSession = null
+        sessionToRestoreOnAttach = null
+        sharedContentView = null
+        sharedContentHost = null
+
         val host = SwipeableHostLayout(context)
         host.swipeEnabledProvider = { tabSwipeEnabled }
         host.onSwipeTab = { delta -> onTabSwipe?.invoke(delta) }
+        // Gecko knows whether the page can still scroll towards its top, so
+        // pull-to-refresh starts exactly when a mainstream browser would.
+        host.canScrollUpProvider = { (renderedSession?.rootScrollY ?: 0) > 0 }
+        host.onRefreshRequested = { onPullToRefresh?.invoke() }
+        host.updateRefreshChrome(isNightTheme())
+        // NOTE: no `coverUntilFirstPaint` here on purpose.
+        //
+        // That call is not just a background colour: it stores the colour as
+        // the GeckoView's "last cover colour" and pushes it to the session
+        // compositor as its clear colour, and it paints an OPAQUE background
+        // on the SurfaceView wrapper. The ONLY thing that removes that opaque
+        // background is GeckoView's internal FIRST_PAINT callback, which fires
+        // "for the first content composite after a start or a restart of the
+        // compositor". Our single shared view keeps the same compositor alive
+        // across tab switches, resumes and reloads, so a cover applied at the
+        // wrong moment could sit on top of a perfectly painted page and never
+        // be removed: a black tab that survives reloads and tab switches and
+        // only goes away when the whole view is recreated (a new view always
+        // restarts the compositor). Gecko has its own sane default background,
+        // so the cover is not worth that risk.
+        val view = HexoraGeckoView(context).also { newView ->
+            newView.onViewDetached = { handleSharedViewDetached(it) }
+            newView.onViewAttached = { handleSharedViewAttached(it) }
+        }
+        host.addView(
+            view,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        sharedContentView = view
         sharedContentHost = host
-        attachToHost(geckoView, host)
-        bindContentView(session, host)
         return host
     }
 
     internal fun bindContentView(session: GeckoBrowserSession, view: View) {
         val geckoView = sharedContentView ?: return
-        // The host Compose hands us is the single source of truth. Relying on
-        // the cached [sharedContentHost] instead made this a silent no-op
-        // whenever that cache was stale or null (the previous session was
-        // closed, so its release had detached the view and cleared the
-        // field): the shared GeckoView then stayed outside the view
-        // hierarchy with no session bound, and the content area came back
-        // empty/black until the whole screen was recreated (tab tray round
-        // trip) — exactly the reported "tabs go black" behaviour. Adopt the
-        // host here and re-attach; there is only ever one such host.
-        if (view !is FrameLayout) return
-        val host = view
-        sharedContentHost = host
-        attachToHost(geckoView, host)
+        val host = sharedContentHost ?: return
+        // Only the engine-owned host is ever rendered; Compose hands back the
+        // same instance for the whole Activity.
+        if (view !== host) return
         if (renderedSession !== session) {
             renderedSession?.contentView = null
         }
         if (geckoView.session !== session.geckoSession) {
             // Hexora provides its own offline credential vault through the
-            // session Autofill.Delegate. Disable GeckoView's Android
-            // Autofill bridge so it does not replace that delegate.
+            // session Autofill.Delegate. Disable GeckoView's Android Autofill
+            // bridge so it does not replace that delegate.
             geckoView.setAutofillEnabled(false)
-            // Mozilla's GeckoEngineView covers the not-yet-painted surface
-            // with the app's background color so a tab switch or return can
-            // never flash GeckoView's default black surface.
-            geckoView.coverUntilFirstPaint(coverColor())
-            if (geckoView.session != null) geckoView.releaseSession()
+            // Release explicitly, like Mozilla's GeckoEngineView: GeckoView
+            // would otherwise close the incoming/replaced session.
+            geckoView.session?.let { geckoView.releaseSession() }
             // setSession() throws for a closed session; reopen defensively
             // (e.g. after a content-process crash) instead of crashing.
             if (!session.geckoSession.isOpen) session.ensureOpen()
             geckoView.setSession(session.geckoSession)
             session.installAutofillDelegate()
+            paintedSinceResume = false
         }
         renderedSession = session
         sessionToRestoreOnAttach = session
@@ -374,9 +403,9 @@ class GeckoBrowserEngine(
     /**
      * Called by [HexoraGeckoView] *before* GeckoView's own detach handling.
      * The subclass releases the session itself (otherwise GeckoView closes
-     * it); here we only forget the stale view binding and remember which
-     * session must be rendered again when the view comes back. The session
-     * itself stays open and loaded: no reload, no state loss.
+     * it); here we only forget the view binding and remember which session
+     * must be rendered again when the view comes back. The session itself
+     * stays open and loaded: no reload, no state loss.
      */
     internal fun handleSharedViewDetached(view: HexoraGeckoView) {
         if (view !== sharedContentView) return
@@ -389,10 +418,7 @@ class GeckoBrowserEngine(
 
     internal fun handleSharedViewAttached(view: HexoraGeckoView) {
         if (view !== sharedContentView) return
-        // Fall back to the real parent: a stale/cleared cache must never be
-        // the reason a returning view stays unbound (see bindContentView).
-        val host = (view.parent as? FrameLayout) ?: sharedContentHost ?: return
-        if (view.parent !== host) return
+        val host = (view.parent as? SwipeableHostLayout) ?: sharedContentHost ?: return
         sharedContentHost = host
         val session = sessionToRestoreOnAttach ?: return
         if (view.session === session.geckoSession) return
@@ -401,60 +427,69 @@ class GeckoBrowserEngine(
 
     internal fun releaseContentView(session: GeckoBrowserSession, view: View) {
         val geckoView = sharedContentView ?: return
-        if (view === geckoView) {
-            // Session-initiated release (GeckoBrowserSession.close()). The
-            // Compose host is very likely still on screen and will bind the
-            // next session in the same frame, so only detach this session.
-            // Detaching the VIEW here used to leave the whole screen unable
-            // to render a page again.
-            if (geckoView.session === session.geckoSession) {
-                geckoView.releaseSession()
-            }
-            if (renderedSession === session) renderedSession = null
-            if (sessionToRestoreOnAttach === session) sessionToRestoreOnAttach = null
-            if (session.contentView === geckoView) session.contentView = null
-            return
-        }
-        // UI-initiated release: the AndroidView that owned this host is gone.
-        if (view !== sharedContentHost) return
-        // Release BEFORE removing the view: removing a plain GeckoView with
-        // a session still attached lets its detach handling close that
-        // session. (Our subclass also guards this, but the explicit order
-        // keeps the lifecycle readable.)
+        if (view !== sharedContentHost && view !== geckoView) return
+        // The host belongs to the engine and is reused when the Compose node
+        // comes back. Only detach the session, so neither Gecko nor the host
+        // is thrown away while a tab still exists.
         if (geckoView.session === session.geckoSession) {
             geckoView.releaseSession()
         }
-        (geckoView.parent as? ViewGroup)?.removeView(geckoView)
-        sharedContentHost = null
         if (renderedSession === session) renderedSession = null
         if (sessionToRestoreOnAttach === session) sessionToRestoreOnAttach = null
         if (session.contentView === geckoView) session.contentView = null
     }
 
-    /** Background colour GeckoView paints until the page's first frame. */
-    private fun coverColor(): Int {
-        val night = when (preferredColorScheme) {
-            GeckoRuntimeSettings.COLOR_SCHEME_DARK -> true
-            GeckoRuntimeSettings.COLOR_SCHEME_LIGHT -> false
-            else ->
-                (appContext.resources.configuration.uiMode and
-                    Configuration.UI_MODE_NIGHT_MASK) ==
-                    Configuration.UI_MODE_NIGHT_YES
-        }
-        return if (night) COVER_DARK else Color.WHITE
+    /** Gecko told us the painted content is no longer displayed. */
+    internal fun notifyPaintStatusReset(session: GeckoSession) {
+        if (renderedSession?.geckoSession !== session) return
+        paintedSinceResume = false
     }
 
-    private fun attachToHost(geckoView: GeckoView, host: FrameLayout) {
-        if (geckoView.parent === host) return
-        (geckoView.parent as? ViewGroup)?.removeView(geckoView)
-        host.removeAllViews()
-        host.addView(
-            geckoView,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            ),
+    /** Gecko produced a frame: the surface is definitely alive. */
+    internal fun notifyFirstComposite(session: GeckoSession) {
+        if (renderedSession?.geckoSession !== session) return
+        paintedSinceResume = true
+    }
+
+    /**
+     * Called when the app comes back to the foreground (after the window has a
+     * surface again). If Gecko does not report a frame shortly after, the
+     * display is re-acquired exactly the way re-entering the browser does —
+     * the recovery the owner confirmed works. Without this, a surface that
+     * came back without repainting stayed black no matter what the page did.
+     */
+    override fun ensureContentDisplayed() {
+        val geckoView = sharedContentView ?: return
+        val session = renderedSession ?: return
+        val token = ++resumeCheckToken
+        paintedSinceResume = false
+        mainHandler.postDelayed(
+            {
+                if (token != resumeCheckToken || paintedSinceResume) return@postDelayed
+                if (renderedSession !== session) return@postDelayed
+                if (!ViewCompat.isAttachedToWindow(geckoView)) return@postDelayed
+                // Restart the display. No reload, no session loss.
+                if (geckoView.session != null) geckoView.releaseSession()
+                if (!session.geckoSession.isOpen) session.ensureOpen()
+                geckoView.setSession(session.geckoSession)
+                session.installAutofillDelegate()
+                paintedSinceResume = false
+            },
+            RESUME_PAINT_GRACE_MS,
         )
+    }
+
+    override fun finishPullToRefresh() {
+        sharedContentHost?.finishRefresh()
+    }
+
+    private fun isNightTheme(): Boolean = when (preferredColorScheme) {
+        GeckoRuntimeSettings.COLOR_SCHEME_DARK -> true
+        GeckoRuntimeSettings.COLOR_SCHEME_LIGHT -> false
+        else ->
+            (appContext.resources.configuration.uiMode and
+                Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
     }
 
     internal fun createSessionInternal(
@@ -504,8 +539,11 @@ class GeckoBrowserEngine(
         @Volatile
         private var processRuntime: GeckoRuntime? = null
 
-        /** Matches the app's dark background so resume never flashes black. */
-        private val COVER_DARK: Int = 0xFF100B0F.toInt()
+        /**
+         * Grace period after returning to the foreground before the display is
+         * re-acquired because Gecko reported no frame at all.
+         */
+        private const val RESUME_PAINT_GRACE_MS = 1_200L
     }
 }
 
@@ -528,14 +566,21 @@ internal fun PermissionDelegate.ContentPermission.toAppPermissionKind(): SitePer
     }
 
 /**
- * Host of the shared GeckoView that can intercept a deliberate horizontal
- * swipe so the app can switch tabs while the browser chrome is hidden
- * (fullscreen). Touch events over the web surface never reach Compose, so
- * the gesture must be detected here, at the view level. Only a clearly
- * horizontal, fast-enough drag is intercepted; taps, vertical page
- * scrolling and in-page horizontal interactions keep flowing to the page.
+ * Host of the shared content view.
+ *
+ * Two jobs, both at the view level because touch events over the web surface
+ * never reach Compose:
+ *
+ * 1. **Pull to refresh.** [SwipeRefreshLayout] provides the standard Android
+ *    gesture and indicator, exactly the way it is used around GeckoView by
+ *    Mozilla's own browser. Whether a pull may start is answered by Gecko
+ *    itself (see [HexoraGeckoView]): the child reports "I can scroll up" via
+ *    [canScrollUpProvider], so a pull only starts when the page is really at
+ *    its top — no page-specific heuristics.
+ * 2. **Fullscreen tab swipes.** A clearly horizontal, quick drag switches
+ *    tabs while the browser chrome is hidden.
  */
-internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
+internal class SwipeableHostLayout(context: Context) : SwipeRefreshLayout(context) {
 
     /** +1 = swiped left (next tab), -1 = swiped right (previous tab). */
     var onSwipeTab: ((Int) -> Unit)? = null
@@ -543,12 +588,11 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
     /** Consulted on every gesture start; swipes are ignored while false. */
     var swipeEnabledProvider: () -> Boolean = { false }
 
-    /** Pull-to-refresh progress 0f..1f, drawn as an indicator at the top. */
-    var pullProgress: Float = 0f
-        set(value) {
-            field = value
-            invalidate()
-        }
+    /** True while the web content can still scroll towards its top. */
+    var canScrollUpProvider: () -> Boolean = { false }
+
+    /** Called when the user releases a valid pull-to-refresh gesture. */
+    var onRefreshRequested: (() -> Unit)? = null
 
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private val density = context.resources.displayMetrics.density
@@ -557,6 +601,35 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
     private var downTime = 0L
     private var swiping = false
     private var fired = false
+
+    private val refreshSafety = Runnable { if (isRefreshing) isRefreshing = false }
+
+    init {
+        // The child answers "may a pull start?" through Gecko's own scroll
+        // state; without this, SwipeRefreshLayout asks the SurfaceView, which
+        // knows nothing about the page.
+        setOnChildScrollUpCallback { _, _ -> canScrollUpProvider() }
+        setOnRefreshListener {
+            // Never leave the spinner running if the page never reports a
+            // start/stop (failed reload, killed session, ...).
+            postDelayed(refreshSafety, REFRESH_SAFETY_MS)
+            onRefreshRequested?.invoke()
+        }
+        setColorSchemeColors(0xFFE77E3D.toInt())
+        setProgressBackgroundColorSchemeColor(Color.WHITE)
+        isNestedScrollingEnabled = true
+    }
+
+    fun updateRefreshChrome(dark: Boolean) {
+        setProgressBackgroundColorSchemeColor(if (dark) REFRESH_DARK else Color.WHITE)
+        setColorSchemeColors(if (dark) 0xFFE77E3D.toInt() else 0xFF8A4415.toInt())
+    }
+
+    /** Ends the spinner; called when the engine reports the load finished. */
+    fun finishRefresh() {
+        removeCallbacks(refreshSafety)
+        if (isRefreshing) isRefreshing = false
+    }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
@@ -586,7 +659,7 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> swiping = false
         }
-        return super.onInterceptTouchEvent(event)
+        return super.onInterceptTouchEvent(event) || swiping
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -609,38 +682,6 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
         return super.onTouchEvent(event)
     }
 
-    override fun dispatchDraw(canvas: Canvas) {
-        super.dispatchDraw(canvas)
-        if (pullProgress > 0f) {
-            drawPullIndicator(canvas)
-        }
-    }
-
-    /** Small circular pull-to-refresh indicator tracking the page's top. */
-    private fun drawPullIndicator(canvas: Canvas) {
-        val radius = 18f * density
-        val cx = width / 2f
-        val cy = radius + 26f * density * pullProgress
-        val alpha = (90 + 140 * pullProgress).toInt().coerceIn(0, 255)
-        indicatorPaint.color = android.graphics.Color.argb(alpha, 28, 28, 32)
-        canvas.drawCircle(cx, cy, radius, indicatorPaint)
-        indicatorPaint.color = android.graphics.Color.argb(230, 255, 255, 255)
-        arrowPaint.strokeWidth = 2.2f * density
-        val arrow = radius * 0.52f
-        // Downward chevron: refresh affordance, like mainstream browsers.
-        canvas.drawLine(cx - arrow * 0.7f, cy - arrow * 0.35f, cx, cy + arrow * 0.45f, arrowPaint)
-        canvas.drawLine(cx + arrow * 0.7f, cy - arrow * 0.35f, cx, cy + arrow * 0.45f, arrowPaint)
-        canvas.drawLine(cx, cy - arrow * 0.75f, cx, cy + arrow * 0.45f, arrowPaint)
-    }
-
-    private val indicatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-    }
-    private val arrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-    }
-
     private fun isKeyboardVisible(): Boolean =
         ViewCompat.getRootWindowInsets(this)
             ?.isVisible(WindowInsetsCompat.Type.ime()) == true
@@ -650,168 +691,215 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
 
         /** Longer than this and the gesture is a drag, not a tab swipe. */
         const val SWIPE_MAX_DURATION_MS = 700L
+        const val REFRESH_SAFETY_MS = 8_000L
+
+        /** Matches the app's Hexora/dark background. */
+        val REFRESH_DARK = 0xFF100B0F.toInt()
     }
 }
 
 /**
  * The one shared content view.
  *
- * A plain [GeckoView] **closes its session** in `onDetachedFromWindow()`
- * when any state was not explicitly saved. That is exactly what used to
- * destroy pages on tab switches, navigation to the tab switcher and
- * minimise/return: the GeckoSession died with the detach, and the next
- * render had to reopen and reload it. Mozilla's own Android Components
- * (`GeckoEngineView`) avoids this by releasing the session *before*
- * GeckoView's detach handling runs; this subclass does the same thing for
- * Hexora's single shared view. The engine re-attaches the same, still-open
- * session when the view returns, so returning is a repaint, not a reload.
+ * Two behaviours matter here and both follow Mozilla's `NestedGeckoView` /
+ * `GeckoEngineView`:
+ *
+ * 1. **The session survives a detach.** A plain [GeckoView] closes its session
+ *    in `onDetachedFromWindow()`; releasing it first keeps the page alive so
+ *    returning to it is a repaint, not a reload.
+ * 2. **Nested scrolling.** The view is a [NestedScrollingChild], so a parent
+ *    [SwipeRefreshLayout] can own pull-to-refresh. Gecko's own APZ answer
+ *    decides whether a gesture may leave the page (content already at the
+ *    top) or must stay inside it (the page is scrolling, or the site consumed
+ *    the touch). The previous custom implementation guessed with its own
+ *    thresholds, which is why it worked on some sites and not on others.
  */
-internal class HexoraGeckoView(context: Context) : GeckoView(context) {
+@SuppressLint("ClickableViewAccessibility")
+internal class HexoraGeckoView(context: Context) : GeckoView(context), NestedScrollingChild {
 
     var onViewAttached: ((HexoraGeckoView) -> Unit)? = null
     var onViewDetached: ((HexoraGeckoView) -> Unit)? = null
 
-    /** Fired once per gesture when the user pulls down past the threshold. */
-    var onPullToRefreshGesture: (() -> Unit)? = null
+    private val childHelper = NestedScrollingChildHelper(this)
+    private val scrollOffset = IntArray(2)
+    private val scrollConsumed = IntArray(2)
 
-    /** Pull progress 0f..1f for the host's indicator; 0 when released. */
-    var onPullProgress: ((Float) -> Unit)? = null
+    private var lastY = 0
+    private var initialDownY = 0f
+    private var nestedOffsetY = 0
 
-    private val pullThresholdPx =
-        PULL_THRESHOLD_DP * context.resources.displayMetrics.density
-    var rootScrollYProvider: () -> Int? = { null }
+    /**
+     * True while a gesture may still be taken over by the parent. It starts
+     * true, is confirmed by Gecko on DOWN (page already at its top), and is
+     * cleared for good once the page scrolls down inside this gesture.
+     */
+    private var gestureCanReachParent = true
 
-    private val pullGesture = PullToRefreshGesture(
-        threshold = pullThresholdPx,
-        slop = ViewConfiguration.get(context).scaledTouchSlop.toFloat(),
-    )
-    private var gestureGeneration = 0L
-    private var pendingDetails = 0
-    private var released = false
-    private var gestureSession: GeckoSession? = null
-    private var firstMoveChecked = false
-    private var downX = 0f
-    private var downY = 0f
-    private val pullTouchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    init {
+        isNestedScrollingEnabled = true
+    }
 
-    // Chromium locks top-at-scroll-start for the entire gesture. Mozilla's
-    // NestedGeckoView additionally checks APZ scrollable directions and touch
-    // ownership. Vertical overscroll capability alone does NOT mean "at top".
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (session == null || onPullToRefreshGesture == null) {
-            cancelPull()
-            return super.onTouchEvent(event)
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        // A copy is used because the event is offset while nested scrolling.
+        val event = MotionEvent.obtain(ev)
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                val eventY = event.y.toInt()
+                var deltaY = lastY - eventY
+
+                if (dispatchNestedPreScroll(0, deltaY, scrollConsumed, scrollOffset)) {
+                    deltaY -= scrollConsumed[1]
+                    event.offsetLocation(0f, (-scrollOffset[1]).toFloat())
+                    nestedOffsetY += scrollOffset[1]
+                }
+                lastY = eventY - scrollOffset[1]
+
+                if (dispatchNestedScroll(0, scrollOffset[1], 0, deltaY, scrollOffset)) {
+                    lastY -= scrollOffset[1]
+                    event.offsetLocation(0f, scrollOffset[1].toFloat())
+                    nestedOffsetY += scrollOffset[1]
+                }
+
+                // The first drag move (and any move while the gesture may
+                // still reach the parent) is dispatched through Gecko's
+                // detail query so the answer about who owns it arrives with
+                // the event; later moves go straight to Gecko, once.
+                if (gestureCanReachParent && event.y != initialDownY) {
+                    askInputResult(event)
+                    event.recycle()
+                    return true
+                }
+            }
+
+            MotionEvent.ACTION_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                nestedOffsetY = 0
+                lastY = event.y.toInt()
+                initialDownY = event.y
+                askInputResult(event)
+                event.recycle()
+                return true
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                stopNestedScroll()
+                // Let the next gesture reach the parent again.
+                parent?.requestDisallowInterceptTouchEvent(false)
+                gestureCanReachParent = true
+            }
         }
+        val handled = super.onTouchEvent(event)
+        event.recycle()
+        return handled
+    }
+
+    /**
+     * Asks Gecko who should own the current gesture. The answer is async, so
+     * it is only used to gate interception; the event itself has already been
+     * forwarded to Gecko by [onTouchEventForDetailResult].
+     */
+    private fun askInputResult(event: MotionEvent) {
         val action = event.actionMasked
-        if (action == MotionEvent.ACTION_DOWN) {
-            cancelPull()
-            gestureSession = session
-            downX = event.x
-            downY = event.y
-            firstMoveChecked = false
-            pullGesture.begin(event.x, event.y, rootScrollYProvider())
-        }
-        if (session !== gestureSession || event.pointerCount != 1 ||
-            action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_CANCEL
-        ) {
-            cancelPull()
-        }
-        if (action == MotionEvent.ACTION_MOVE) {
-            pullGesture.move(event.x, event.y)
-            if (!released) onPullProgress?.invoke(pullGesture.progress)
-        }
-        if (action == MotionEvent.ACTION_UP) {
-            released = true
-            // UI feedback always ends with the finger, even if APZ replies late.
-            onPullProgress?.invoke(0f)
-        }
-        val generation = gestureGeneration
-        // Gecko explicitly warns against a GeckoResult allocation per MOVE.
-        // Like NestedGeckoView, check DOWN and the first significant MOVE;
-        // subsequent motion uses the ordinary Gecko touch path exactly once.
-        val firstMove = action == MotionEvent.ACTION_MOVE && !firstMoveChecked &&
-            (kotlin.math.abs(event.x - downX) > pullTouchSlop ||
-                kotlin.math.abs(event.y - downY) > pullTouchSlop)
-        if (firstMove) firstMoveChecked = true
-        val checksDetail = action == MotionEvent.ACTION_DOWN || firstMove
-        if (!checksDetail) {
-            val handled = super.onTouchEvent(event)
-            finishPullIfReady()
-            return handled
-        }
-        pendingDetails++
+        val eventY = event.y
         onTouchEventForDetailResult(event).accept(
             { detail ->
-                if (generation == gestureGeneration && checksDetail) {
-                    pendingDetails--
-                    val handled = detail?.handledResult()
-                    val ownedByBrowser = handled == PanZoomController.INPUT_RESULT_HANDLED ||
-                        handled == PanZoomController.INPUT_RESULT_UNHANDLED
-                    val atTop = detail != null &&
-                        detail.scrollableDirections() and PanZoomController.SCROLLABLE_FLAG_TOP == 0
-                    val permitsOverscroll = detail != null &&
-                        detail.overscrollDirections() and PanZoomController.OVERSCROLL_FLAG_VERTICAL != 0
-                    pullGesture.confirm(ownedByBrowser && atTop && permitsOverscroll)
-                    if (!released) onPullProgress?.invoke(pullGesture.progress)
-                    finishPullIfReady()
+                if (!gestureCanReachParent) return@accept
+                val handled = detail?.handledResult() ?: PanZoomController.INPUT_RESULT_UNHANDLED
+                val atTop = detail != null &&
+                    detail.scrollableDirections() and PanZoomController.SCROLLABLE_FLAG_TOP == 0
+                val handledBySite = handled == PanZoomController.INPUT_RESULT_HANDLED_CONTENT
+                when (action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        gestureCanReachParent = atTop
+                        if (gestureCanReachParent &&
+                            handled != PanZoomController.INPUT_RESULT_HANDLED_CONTENT
+                        ) {
+                            parent?.requestDisallowInterceptTouchEvent(false)
+                        }
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        when {
+                            // Pulling down: the parent may take over unless the
+                            // site itself is using the touch (drag handles,
+                            // carousels, map panes...).
+                            initialDownY < eventY -> {
+                                if (!handledBySite) {
+                                    parent?.requestDisallowInterceptTouchEvent(false)
+                                }
+                            }
+                            // The page is scrolling towards its content: the
+                            // gesture belongs to the page from now on.
+                            initialDownY > eventY -> {
+                                parent?.requestDisallowInterceptTouchEvent(true)
+                                gestureCanReachParent = false
+                            }
+                            else -> parent?.requestDisallowInterceptTouchEvent(false)
+                        }
+                    }
                 }
+                startNestedScroll(ViewCompat.SCROLL_AXIS_VERTICAL)
             },
-            { _ ->
-                if (generation == gestureGeneration && checksDetail) {
-                    pendingDetails--
-                    pullGesture.confirm(false)
-                    finishPullIfReady()
-                }
-            },
+            { /* No answer: keep whatever the DOWN event decided. */ },
         )
-        finishPullIfReady()
-        return true
-    }
-
-    private fun finishPullIfReady() {
-        if (!released || pendingDetails != 0) return
-        val refresh = session === gestureSession && pullGesture.shouldRefresh
-        cancelPull()
-        if (refresh) onPullToRefreshGesture?.invoke()
-    }
-
-    private fun cancelPull() {
-        gestureGeneration++
-        pendingDetails = 0
-        released = false
-        gestureSession = null
-        pullGesture.cancel()
-        onPullProgress?.invoke(0f)
-    }
-
-    private companion object {
-        const val PULL_THRESHOLD_DP = 110f
     }
 
     override fun onAttachedToWindow() {
-        // GeckoView would create and open a brand-new session here when it
-        // has none. Suppress that; the engine decides which tab renders.
-        val hadSession = session != null
         super.onAttachedToWindow()
-        if (!hadSession) {
-            // That fresh session is not ours and never loaded anything:
-            // drop it so the engine can attach the tab's real session.
-            val fresh = session
-            if (fresh != null) {
-                releaseSession()
-                if (fresh.isOpen) fresh.close()
-            }
-        }
         onViewAttached?.invoke(this)
     }
 
     override fun onDetachedFromWindow() {
-        cancelPull()
         // Release first: prevents GeckoView from closing the session.
         if (session != null) releaseSession()
         onViewDetached?.invoke(this)
         super.onDetachedFromWindow()
     }
+
+    // ---- NestedScrollingChild ------------------------------------------------
+
+    override fun setNestedScrollingEnabled(enabled: Boolean) {
+        childHelper.isNestedScrollingEnabled = enabled
+    }
+
+    override fun isNestedScrollingEnabled(): Boolean = childHelper.isNestedScrollingEnabled
+
+    override fun startNestedScroll(axes: Int): Boolean = childHelper.startNestedScroll(axes)
+
+    override fun stopNestedScroll() {
+        childHelper.stopNestedScroll()
+    }
+
+    override fun hasNestedScrollingParent(): Boolean = childHelper.hasNestedScrollingParent()
+
+    override fun dispatchNestedScroll(
+        dxConsumed: Int,
+        dyConsumed: Int,
+        dxUnconsumed: Int,
+        dyUnconsumed: Int,
+        offsetInWindow: IntArray?,
+    ): Boolean = childHelper.dispatchNestedScroll(
+        dxConsumed,
+        dyConsumed,
+        dxUnconsumed,
+        dyUnconsumed,
+        offsetInWindow,
+    )
+
+    override fun dispatchNestedPreScroll(
+        dx: Int,
+        dy: Int,
+        consumed: IntArray?,
+        offsetInWindow: IntArray?,
+    ): Boolean = childHelper.dispatchNestedPreScroll(dx, dy, consumed, offsetInWindow)
+
+    override fun dispatchNestedFling(
+        velocityX: Float,
+        velocityY: Float,
+        consumed: Boolean,
+    ): Boolean = childHelper.dispatchNestedFling(velocityX, velocityY, consumed)
+
+    override fun dispatchNestedPreFling(velocityX: Float, velocityY: Float): Boolean =
+        childHelper.dispatchNestedPreFling(velocityX, velocityY)
 }
 
 /**
@@ -1926,6 +2014,14 @@ internal class GeckoBrowserSession(
     }
 
     private val contentDelegate = object : GeckoSession.ContentDelegate {
+        override fun onFirstComposite(session: GeckoSession) {
+            engine.notifyFirstComposite(session)
+        }
+
+        override fun onPaintStatusReset(session: GeckoSession) {
+            engine.notifyPaintStatusReset(session)
+        }
+
         override fun onTitleChange(session: GeckoSession, title: String?) {
             _state.update { it.copy(title = title.orEmpty()) }
         }

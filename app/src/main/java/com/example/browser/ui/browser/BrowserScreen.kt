@@ -104,6 +104,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -117,12 +118,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.key
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.browser.R
+import com.example.browser.browser.BrowserSession
 import com.example.browser.browser.PageMediaKind
 import com.example.browser.browser.SitePermissionKind
 import com.example.browser.browser.WebPromptKind
@@ -905,6 +906,35 @@ private fun BrowserPageContent(
             return
         }
 
+        // The web surface is created once and then stays mounted for as long
+        // as any tab exists — the Start Page, the crash card and the error
+        // card are drawn ON TOP of it instead of replacing it. Swapping the
+        // surface in and out of the composition (which is what the Start Page
+        // used to do) detached the GeckoView, and a detached/re-attached
+        // surface is what made pages come back black or re-load.
+        //
+        // The last session stays bound while the Start Page is visible (it is
+        // hidden underneath), so returning to that tab is not a re-bind either.
+        val surfaceSession = remember { mutableStateOf<BrowserSession?>(null) }
+        LaunchedEffect(state.activeSession) {
+            state.activeSession?.let { surfaceSession.value = it }
+        }
+        val session = state.activeSession ?: surfaceSession.value
+        if (session != null && state.tabs.isNotEmpty()) {
+            AndroidView(
+                factory = { ctx -> session.createContentView(ctx) },
+                update = { view ->
+                    // Only the *active* session renders; a Start Page tab
+                    // leaves the previous page bound but covered.
+                    state.activeSession?.renderContentView(view)
+                },
+                onRelease = { view ->
+                    (state.activeSession ?: session).releaseContentView(view)
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
         if (state.showStartPage) {
             StartPage(
                 state = state,
@@ -919,7 +949,19 @@ private fun BrowserPageContent(
                 onDeleteShortcut = { id ->
                     onAction(BrowserAction.DeleteStartShortcut(id))
                 },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    // Opaque and touch-blocking: the page underneath must not
+                    // show through or receive touches meant for the Start Page.
+                    .background(MaterialTheme.colorScheme.background)
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent(PointerEventPass.Final)
+                                    .changes.forEach { it.consume() }
+                            }
+                        }
+                    },
             )
             return
         }
@@ -950,21 +992,6 @@ private fun BrowserPageContent(
                 }
             }
             return
-        }
-
-        val session = state.activeSession
-        if (session != null) {
-            // One shared GeckoView stays attached while browsing. Tabs are
-            // switched with renderContentView(), matching GeckoView's
-            // intended session-swap model instead of swapping surfaces.
-            key(state.contentViewGeneration) {
-                AndroidView(
-                    factory = { ctx -> session.createContentView(ctx) },
-                    update = { view -> session.renderContentView(view) },
-                    onRelease = { view -> session.releaseContentView(view) },
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
         }
 
         if (state.loadFailed && session != null && !state.isFullscreen) {

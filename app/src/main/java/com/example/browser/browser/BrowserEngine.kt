@@ -40,6 +40,20 @@ interface BrowserEngine {
      */
     var tabSwipeEnabled: Boolean
 
+    /**
+     * Called every time the app returns to the foreground, after the window has
+     * a surface again. The engine checks that Gecko actually painted the page
+     * and, if it did not, re-acquires the display without reloading anything.
+     * This is the deterministic replacement for timer-based recovery.
+     */
+    fun ensureContentDisplayed() {}
+
+    /**
+     * Ends the pull-to-refresh indicator. The tab layer calls this once the
+     * load it triggered has finished (or its session went away).
+     */
+    fun finishPullToRefresh() {}
+
     /** Creates a new, independent session. Not thread-confined, but cheap. */
     fun createSession(config: BrowserSessionConfig): BrowserSession
 

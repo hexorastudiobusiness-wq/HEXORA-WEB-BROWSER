@@ -14,7 +14,6 @@ import android.graphics.pdf.PdfDocument
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
-import android.os.SystemClock
 import android.print.PageRange
 import android.print.PrintAttributes
 import android.print.PrintDocumentAdapter
@@ -413,11 +412,8 @@ class MainActivity : ComponentActivity() {
         browserViewModel.onLowMemory(level)
     }
 
-    private var backgroundedAtMs: Long = 0L
-
     override fun onStop() {
         super.onStop()
-        backgroundedAtMs = SystemClock.elapsedRealtime()
         browserViewModel.onAppBackgrounded()
         // The saved-login vault never stays unlocked while the app is in
         // the background: returning to Hexora must re-authenticate before
@@ -435,18 +431,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Surface recovery runs only now — posted past the resume, when
-        // the window surface actually exists again. At onStart the same
-        // rebind intermittently landed on a not-yet-recreated surface and
-        // the tabs stayed white.
-        val backgroundDurationMs = if (backgroundedAtMs == 0L) {
-            0L
-        } else {
-            SystemClock.elapsedRealtime() - backgroundedAtMs
-        }
-        backgroundedAtMs = 0L
+        // Content verification is posted past the resume, when the window
+        // surface actually exists again.
         window.decorView.post {
-            browserViewModel.onBrowserResumed(backgroundDurationMs)
+            browserViewModel.onBrowserResumed()
         }
     }
 

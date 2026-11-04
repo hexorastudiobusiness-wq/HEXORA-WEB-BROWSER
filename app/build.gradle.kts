@@ -23,8 +23,8 @@ android {
         // current GeckoView releases.
         minSdk = 26
         targetSdk = 37
-        versionCode = 21
-        versionName = "0.4.5"
+        versionCode = 22
+        versionName = "0.4.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -101,6 +101,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons)
+
+    // Pull-to-refresh container (the standard one Mozilla wraps GeckoView in).
+    implementation(libs.androidx.swiperefreshlayout)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     // Lifecycle / Navigation
