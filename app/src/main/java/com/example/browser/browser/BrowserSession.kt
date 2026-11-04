@@ -306,8 +306,14 @@ interface BrowserSession {
      */
     fun isUsable(): Boolean
 
-    /** Switches desktop/mobile rendering for this tab and reloads the page. */
-    fun setDesktopMode(enabled: Boolean)
+    /**
+     * Switches desktop/mobile rendering for this tab.
+     *
+     * [reload] must be false when the caller is about to navigate anyway:
+     * reloading the old document first was a wasted load (and a visible
+     * flash) on every link that opened in a site with a stored mode.
+     */
+    fun setDesktopMode(enabled: Boolean, reload: Boolean = true)
 
     /** Finds [query] in the page; [forward] = false searches backwards. */
     fun findText(query: String, forward: Boolean)

@@ -1896,7 +1896,9 @@ class BrowserViewModel(
         val stored = siteDesktop[host] ?: return
         if (entry.desktopMode == stored) return
         entry.desktopMode = stored
-        entry.session?.setDesktopMode(stored)
+        // No reload: a navigation is about to start, and reloading the old
+        // document first would double-load the tab (visible flash).
+        entry.session?.setDesktopMode(stored, reload = false)
         _tabRevision.update { it + 1 }
         requestPersistTabs()
     }
@@ -2136,9 +2138,33 @@ class BrowserViewModel(
      * bring back from their saved engine state instead.
      */
     private fun updateWarmPriorities() {
+        // Firefox keeps only the selected tab HIGH because every tab there
+        // lives in its own content process, and boosting several processes
+        // invites the OEM memory killer to take the whole app instead.
+        //
+        // We do not: the whole app shares ONE Gecko content process, so this
+        // hint does not pick a process — it decides how willing Gecko is to
+        // keep a session's document in memory ("GeckoView will keep the
+        // session state as long as possible"). Demoting the outgoing tab on
+        // every switch was therefore us telling Gecko "this tab is
+        // expendable", and on a phone that is short of RAM Gecko acted on it:
+        // the document went away, and the next switch had to restore the tab
+        // from its saved state — which in Gecko is a fresh network load. That
+        // is the reload-on-every-switch the owner reports, and it has nothing
+        // to do with how long the tab sat in the background.
+        //
+        // Warm set = selected tab + the SUSPEND_KEEP_INACTIVE_TABS most
+        // recently used inactive tabs, so two tabs always survive while a
+        // large tab strip still cannot pin everything.
         val activeId = _activeTabId.value
+        val warm = HashSet<String>(SUSPEND_KEEP_INACTIVE_TABS + 1)
+        activeId?.let { warm.add(it) }
+        lruOrder
+            .filter { it != activeId }
+            .takeLast(SUSPEND_KEEP_INACTIVE_TABS)
+            .forEach { warm.add(it) }
         _tabs.value.forEach { entry ->
-            entry.session?.setPriorityHigh(entry.tabId == activeId)
+            entry.session?.setPriorityHigh(entry.tabId in warm)
         }
     }
 

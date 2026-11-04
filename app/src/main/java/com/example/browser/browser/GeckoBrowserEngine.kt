@@ -315,6 +315,10 @@ class GeckoBrowserEngine(
     private var sharedContentView: HexoraGeckoView? = null
     private var sharedContentHost: SwipeableHostLayout? = null
     private var renderedSession: GeckoBrowserSession? = null
+
+    /** True when [session] is the one currently painted by the shared view. */
+    internal fun isRenderedSession(session: GeckoBrowserSession): Boolean =
+        renderedSession === session
     /** Session to re-attach automatically when the shared view returns. */
     private var sessionToRestoreOnAttach: GeckoBrowserSession? = null
 
@@ -893,7 +897,7 @@ internal class GeckoBrowserSession(
         }
     }
 
-    override fun setDesktopMode(enabled: Boolean) {
+    override fun setDesktopMode(enabled: Boolean, reload: Boolean) {
         if (closed || _state.value.isDesktopMode == enabled) return
         _state.update { it.copy(isDesktopMode = enabled) }
         if (geckoSession.isOpen) {
@@ -911,7 +915,7 @@ internal class GeckoBrowserSession(
                     GeckoSessionSettings.VIEWPORT_MODE_MOBILE
                 },
             )
-            geckoSession.reload()
+            if (reload) geckoSession.reload()
         }
     }
 
@@ -964,12 +968,23 @@ internal class GeckoBrowserSession(
 
     override fun captureThumbnail(onCaptured: (Bitmap?) -> Unit) {
         val view = contentView
-        if (closed || view == null) {
+        // Only the painted session can be captured: `contentView` points at
+        // the app's one shared GeckoView, so a background tab asking for a
+        // thumbnail would otherwise save a picture of whichever page happens
+        // to be on screen.
+        if (closed || view == null || !engine.isRenderedSession(this)) {
             onCaptured(null)
             return
         }
         view.capturePixels().accept(
             { bitmap ->
+                // The readback is asynchronous: the user may have switched
+                // tabs meanwhile, so the bitmap could belong to another page.
+                if (!engine.isRenderedSession(this)) {
+                    bitmap?.recycle()
+                    onCaptured(null)
+                    return@accept
+                }
                 // Tab-switcher thumbnails never need the full surface. Scaling
                 // here avoids retaining and JPEG-encoding a huge bitmap on
                 // every page load.
