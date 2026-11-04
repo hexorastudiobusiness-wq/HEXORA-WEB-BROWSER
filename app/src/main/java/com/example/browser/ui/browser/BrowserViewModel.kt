@@ -1152,6 +1152,10 @@ class BrowserViewModel(
             }
         }
         updateWarmPriorities()
+        // Closing a tab is a structural change: write the strip now instead of
+        // waiting for the 400 ms debounce, otherwise a tab closed right before
+        // the app is killed comes back on the next cold start.
+        persistTabsNow()
     }
 
     /** Opens [url] (from Start Page/bookmarks/history/another app). */
@@ -1973,6 +1977,9 @@ class BrowserViewModel(
         sessionJobs.remove(entry.tabId)?.cancel()
         session.close()
         entry.session = null
+        // The captured engine state is the tab's only remaining page state;
+        // nothing else emits for a suspension, so ask for a write explicitly.
+        requestPersistTabs()
     }
 
     /**

@@ -83,3 +83,38 @@ not a claim of identical Chromium internals, animations or thresholds.
   earlier "unbuilt" note describes the previous follow-up, not this build.
 - Still no physical-device reproduction or exact download-crash stack trace.
   Do not describe defensive guards or CI success as device verification.
+
+## Debug audit — shared content-host ownership (0.4.5, unbuilt follow-up)
+
+Root cause found for the owner-reported "tabs come back black after minimise":
+
+- `GeckoBrowserSession.close()` released the content view through
+  `releaseContentView()`, which also removed the single shared `GeckoView`
+  from its Compose host and cleared `sharedContentHost`. The still-composed
+  `AndroidView` was never re-created (its key is
+  `contentViewGeneration`), so the next `update` called
+  `bindContentView()` with a null cached host and silently returned: the
+  shared view stayed outside the view hierarchy with no session bound and
+  the content area showed the theme background until the whole screen was
+  rebuilt (tab tray round trip) — the owner's "tab tray fixes it" clue.
+- `bindContentView()` now treats the Compose-supplied host as the single
+  source of truth and re-attaches the view; `releaseContentView()` splits
+  session-initiated release (detach session only, keep the view) from
+  UI-initiated release (remove the view, clear the host);
+  `handleSharedViewAttached()` falls back to `view.parent`.
+- Verified against GeckoView source (GeckoView.java `releaseSession`,
+  `setSession`, `Display.acquire/release`; `GeckoSession.setActive`,
+  `ContentDelegate.onFirstComposite/onFirstContentfulPaint/onPaintStatusReset`),
+  not against a device.
+- Structural tab writes: `closeTab()` now persists immediately, and
+  `suspendTab()` requests a write after capturing the saved session state
+  (previously the suspended state was only written if something else
+  triggered a persist).
+- NOT done, and deliberately left as recommendations (see `REPORT-FA.md`):
+  implementing the paint-status delegates as the recovery source of truth,
+  moving trim-memory policy to `Application`, flushing state with
+  `setActive(false)` before `close()`, moving session-state serialization
+  off the main thread, and re-keying thumbnails for restored tabs.
+- No device run, no emulator run, no CI run in this sandbox. Emoji behaviour
+  was not changed: Gecko uses the system emoji font and bundles none; the
+  report lists the ranked hypotheses and a three-step comparison test.

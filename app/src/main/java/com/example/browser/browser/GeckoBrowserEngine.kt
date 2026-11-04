@@ -334,8 +334,18 @@ class GeckoBrowserEngine(
 
     internal fun bindContentView(session: GeckoBrowserSession, view: View) {
         val geckoView = sharedContentView ?: return
-        val host = sharedContentHost ?: return
-        if (view !== host) return
+        // The host Compose hands us is the single source of truth. Relying on
+        // the cached [sharedContentHost] instead made this a silent no-op
+        // whenever that cache was stale or null (the previous session was
+        // closed, so its release had detached the view and cleared the
+        // field): the shared GeckoView then stayed outside the view
+        // hierarchy with no session bound, and the content area came back
+        // empty/black until the whole screen was recreated (tab tray round
+        // trip) — exactly the reported "tabs go black" behaviour. Adopt the
+        // host here and re-attach; there is only ever one such host.
+        if (view !is FrameLayout) return
+        val host = view
+        sharedContentHost = host
         attachToHost(geckoView, host)
         if (renderedSession !== session) {
             renderedSession?.contentView = null
@@ -379,8 +389,11 @@ class GeckoBrowserEngine(
 
     internal fun handleSharedViewAttached(view: HexoraGeckoView) {
         if (view !== sharedContentView) return
-        val host = sharedContentHost ?: return
+        // Fall back to the real parent: a stale/cleared cache must never be
+        // the reason a returning view stays unbound (see bindContentView).
+        val host = (view.parent as? FrameLayout) ?: sharedContentHost ?: return
         if (view.parent !== host) return
+        sharedContentHost = host
         val session = sessionToRestoreOnAttach ?: return
         if (view.session === session.geckoSession) return
         bindContentView(session, host)
@@ -388,8 +401,22 @@ class GeckoBrowserEngine(
 
     internal fun releaseContentView(session: GeckoBrowserSession, view: View) {
         val geckoView = sharedContentView ?: return
-        // The UI passes the host; session.close() passes the GeckoView.
-        if (view !== sharedContentHost && view !== geckoView) return
+        if (view === geckoView) {
+            // Session-initiated release (GeckoBrowserSession.close()). The
+            // Compose host is very likely still on screen and will bind the
+            // next session in the same frame, so only detach this session.
+            // Detaching the VIEW here used to leave the whole screen unable
+            // to render a page again.
+            if (geckoView.session === session.geckoSession) {
+                geckoView.releaseSession()
+            }
+            if (renderedSession === session) renderedSession = null
+            if (sessionToRestoreOnAttach === session) sessionToRestoreOnAttach = null
+            if (session.contentView === geckoView) session.contentView = null
+            return
+        }
+        // UI-initiated release: the AndroidView that owned this host is gone.
+        if (view !== sharedContentHost) return
         // Release BEFORE removing the view: removing a plain GeckoView with
         // a session still attached lets its detach handling close that
         // session. (Our subclass also guards this, but the explicit order
