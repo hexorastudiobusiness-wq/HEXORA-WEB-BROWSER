@@ -23,8 +23,8 @@ android {
         // current GeckoView releases.
         minSdk = 26
         targetSdk = 37
-        versionCode = 28
-        versionName = "0.5.1"
+        versionCode = 29
+        versionName = "0.5.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -70,6 +70,9 @@ android {
 
     buildFeatures {
         compose = true
+        // The owner needs to be able to tell which build is installed: the app
+        // never exposed its own version, so "this feels old" was unanswerable.
+        buildConfig = true
     }
 
     compileOptions {

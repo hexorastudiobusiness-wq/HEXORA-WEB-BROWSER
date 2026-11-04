@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.browser.BuildConfig
 import com.example.browser.R
 import com.example.browser.browser.BrowserEngine
 import com.example.browser.browser.BrowserSession
@@ -2604,6 +2605,10 @@ class BrowserViewModel(
         entry: TabEntry?,
         pageState: SessionPageState,
     ): String = buildString {
+        // Which build is this? Answerable from the screen itself.
+        append("version=").append(BuildConfig.VERSION_NAME)
+        append(" (").append(BuildConfig.VERSION_CODE).append(')')
+        append('\n')
         append(engine?.diagnostics().orEmpty())
         append("\nsessions=").append(sessionsCreated)
         append(" restored=").append(tabsRestored)

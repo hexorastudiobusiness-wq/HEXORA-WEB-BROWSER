@@ -1,6 +1,7 @@
 package com.example.browser.ui.settings
 
 import android.widget.Toast
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.example.browser.BuildConfig
 import com.example.browser.R
 import com.example.browser.data.settings.ThemeMode
 import com.example.browser.util.SearchEngine
@@ -268,6 +270,16 @@ fun SettingsScreen(
             ) {
                 Text(stringResource(R.string.menu_clear_data))
             }
+            Spacer(Modifier.height(24.dp))
+            // Build identity, bottom of Settings: the answer to "is this the
+            // build I just downloaded?".
+            Text(
+                text = "Hexora ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+            )
             Spacer(Modifier.height(24.dp))
         }
     }
