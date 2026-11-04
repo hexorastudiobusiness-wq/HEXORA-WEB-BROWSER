@@ -164,11 +164,18 @@ class GeckoBrowserEngine(
             SitePreferencesStore.MIN_ZOOM,
             SitePreferencesStore.MAX_ZOOM,
         )
-        processRuntime?.settings?.let { settings ->
-            runCatching {
-                settings.setAutomaticFontSizeAdjustment(false)
-                settings.setFontSizeFactor(textZoomPercent / 100f)
-            }
+        // Font size is a runtime setting: pushing the same value again forces
+        // every open page to lay out again. That was a steady source of jank
+        // on every page start and every tab switch.
+        if (textZoomPercent == appliedZoomPercent) return
+        val settings = processRuntime?.settings ?: return
+        runCatching {
+            settings.setAutomaticFontSizeAdjustment(false)
+            settings.setFontSizeFactor(textZoomPercent / 100f)
+            // Only remember the factor once it really reached the runtime;
+            // otherwise a call made before the runtime exists would block the
+            // first real application later.
+            appliedZoomPercent = textZoomPercent
         }
     }
 
@@ -328,6 +335,17 @@ class GeckoBrowserEngine(
     /** Which session owns which surface, for the foreground repair below. */
     private val surfaceOwners = mutableMapOf<HexoraGeckoView, GeckoBrowserSession>()
 
+    /** The session currently on screen; only it may change the text zoom. */
+    @Volatile
+    private var activeSession: GeckoBrowserSession? = null
+
+    internal fun isActiveSession(session: GeckoBrowserSession): Boolean =
+        activeSession === session
+
+    /** Last factor pushed to the runtime, to avoid needless global reflows. */
+    @Volatile
+    private var appliedZoomPercent: Int = -1
+
     // Diagnostics counters (see BrowserEngine.diagnostics): they let a user
     // report what actually happened without a logcat cable.
     internal var paintRecoveries: Int = 0
@@ -369,6 +387,11 @@ class GeckoBrowserEngine(
     /** Shows [session]'s own surface inside [container] and hides the rest. */
     internal fun present(session: GeckoBrowserSession, container: View) {
         val host = container as? FrameLayout ?: return
+        val becameActive = activeSession !== session
+        // Text zoom lives on the runtime, not on a session, so only the
+        // session that is actually on screen may set it. A background tab
+        // finishing a load used to overwrite the visible tab's factor.
+        activeSession = session
         val surface = session.obtainSurface(host.context, this) ?: return
         if (surface.parent !== host) {
             (surface.parent as? ViewGroup)?.removeView(surface)
@@ -380,7 +403,22 @@ class GeckoBrowserEngine(
                 ),
             )
             contentBinds++
+            session.applyOwnZoom()
+            forceShow(host, surface)
+            return
         }
+        // `present` runs on every UI state emission (scroll, title, progress),
+        // not only on a tab switch; re-walking the children and calling
+        // bringChildToFront each time forced needless layout passes, which is
+        // exactly the kind of small stutter this build is meant to remove.
+        if (becameActive) {
+            session.applyOwnZoom()
+            forceShow(host, surface)
+        }
+    }
+
+    /** Makes [surface] the only visible child of [host]. */
+    private fun forceShow(host: FrameLayout, surface: View) {
         // Exactly one surface is visible. The others stay attached with their
         // session still bound: coming back to them is a repaint, never a
         // reload, and no two tabs ever share a compositor.
@@ -826,6 +864,12 @@ internal class GeckoBrowserSession(
         return host
     }
 
+    /** Re-applies this site's zoom if this tab is the visible one. */
+    internal fun applyOwnZoom() {
+        val url = _state.value.url
+        if (url.isNotBlank() && engine.isActiveSession(this)) engine.applySiteZoom(url)
+    }
+
     /** Drops this tab's surface; the session and its document stay alive. */
     internal fun detachSurface() {
         val host = contentHost ?: return
@@ -1059,11 +1103,19 @@ internal class GeckoBrowserSession(
     override fun loadUrl(url: String) {
         if (closed || url.isBlank()) return
         ensureOpen()
+        // Apply this site's zoom first: Gecko lays the document out with the
+        // factor that is current when the navigation starts, so doing it in
+        // onPageStart alone let the first frames render at the old value and
+        // then snap.
+        if (engine.isActiveSession(this)) engine.applySiteZoom(url)
         geckoSession.loadUri(url)
     }
 
     override fun reload() {
         if (closed) return
+        if (engine.isActiveSession(this) && _state.value.url.isNotBlank()) {
+            engine.applySiteZoom(_state.value.url)
+        }
         if (geckoSession.isOpen) {
             val state = _state.value
             // After a failed load Gecko halts the navigation and there is no
@@ -1096,6 +1148,9 @@ internal class GeckoBrowserSession(
     }
 
     override fun setPriorityHigh(high: Boolean) {
+        // Every tab switch walks the whole strip; a no-op hint push is an IPC
+        // round-trip per tab, so only send real changes.
+        if (priorityHigh == high && geckoSession.isOpen) return
         priorityHigh = high
         if (!closed && geckoSession.isOpen) {
             geckoSession.setPriorityHint(
@@ -1939,8 +1994,12 @@ internal class GeckoBrowserSession(
         }
 
         override fun onPageStart(session: GeckoSession, url: String) {
-            // Per-site zoom must be in effect before this document lays out.
-            engine.applySiteZoom(url)
+            // Per-site zoom must be in effect before this document lays out,
+            // but the factor is process-wide: a background tab must not
+            // overwrite the zoom of the tab the user is looking at (that is
+            // the "zoom jumps to 100% for a moment" report). When a tab
+            // becomes visible, its own factor is applied.
+            if (engine.isActiveSession(this@GeckoBrowserSession)) engine.applySiteZoom(url)
             rootScrollY = null
             // A new document invalidates any previous Find result; the UI
             // re-issues the visible query once loading finishes.

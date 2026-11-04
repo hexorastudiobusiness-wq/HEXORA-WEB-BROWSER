@@ -1224,7 +1224,6 @@ class BrowserViewModel(
             restoreTab(entry)
         }
         activateTab(tabId)
-        updateWarmPriorities()
     }
 
     /** Explicit restore of a crashed active tab (crash card button). */
@@ -2141,10 +2140,10 @@ class BrowserViewModel(
         if (entry(tabId)?.showStartPage == true) {
             _userFullscreen.value = false
         }
-        // Snapshot the outgoing tab for the tab switcher while it is still
-        // the rendered one (Firefox captures tab thumbnails on switch,
-        // not after every page load).
-        if (previousId != null) captureThumbnail(previousId)
+        // No thumbnail capture here. A capture is a GPU readback of the whole
+        // surface, and doing it on every switch is a visible stutter on a slow
+        // phone. Tiles are refreshed when the tab tray is opened
+        // (captureActiveThumbnail) and after each finished load.
         // Each tab owns its own surface, so GeckoView marks a session
         // active/inactive on that surface alone; nothing here needs to touch
         // display state, and doing so in the past left dead compositors.
