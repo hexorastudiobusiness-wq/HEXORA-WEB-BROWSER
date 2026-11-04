@@ -366,3 +366,44 @@ the shared-surface design and adopt Firefox's model.
   the tab's `GeckoSession` is never closed on a switch, so the remaining cause
   would be Gecko/Android dropping the document — Visible in Diagnostics as
   `restored` vs `suspended`.
+
+## Zoom ownership and switch-time jank (0.5.1, `21ba34b`)
+
+Device feedback on 0.5.0: everything is much better, but there is occasional
+lag, and at 70% zoom a tab sometimes showed 100% for a moment (or "reset" after
+a switch/refresh).
+
+* **Root cause of the zoom flicker:** `setFontSizeFactor` is a *runtime*
+  setting, not a session one, and `onPageStart` applied it unconditionally. Any
+  background tab finishing a load therefore re-pushed its own factor and the
+  page in front of the user reflowed to it — the "jumps to 100% then snaps
+  back" report. Only the session that is currently on screen may set the
+  factor now (`isActiveSession`), and it is applied **before** a navigation
+  starts (`loadUrl`, `reload`) so the first layout is already correct rather
+  than snapping after `onPageStart`.
+* **Second cause of jank:** every push reflows every open document. Identical
+  factors are no longer pushed; the applied value is remembered — and only
+  after it really reached the runtime, so an early call cannot mask the real
+  one.
+* `present()` is now a no-op when the session is already on screen. It runs on
+  every UI state emission (title, progress, scroll), and it used to walk all
+  children and call `bringChildToFront` each time, forcing needless layout
+  passes.
+* Tab switches no longer perform a GPU surface readback for thumbnails; tiles
+  are refreshed after a load and when the tab tray opens.
+* Session priority hints are only pushed when they change (each push is an IPC
+  round-trip, and a switch walks the whole strip).
+* Diagnostics now also prints the applied zoom and the number of live surfaces.
+
+### Review round (structural/logic)
+
+1. **Zoom:** every call site audited — `SetSiteZoom`, panel reset, tab
+   activation, `loadUrl`, `reload`, `onPageStart`, `present`. Only the visible
+   session can change the factor; the panel's percentage and the rendered page
+   cannot disagree any more than the runtime allows.
+2. **Surfaces:** `present`/`obtainSurface`/`detachSurface` re-read against every
+   session lifecycle path; a closed session returns no surface, and a surface
+   is only ever added to the single engine container.
+3. **App-wide:** no leftover shared-view references, no duplicate string
+   resources, no new API outside the pinned GeckoView, and the diagnostics
+   counters still describe the per-tab model.
