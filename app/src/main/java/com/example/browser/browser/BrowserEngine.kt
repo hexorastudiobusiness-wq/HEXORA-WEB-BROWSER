@@ -71,6 +71,13 @@ interface BrowserEngine {
     /** Creates a new, independent session. Not thread-confined, but cheap. */
     fun createSession(config: BrowserSessionConfig): BrowserSession
 
+    /**
+     * Resolver for per-site zoom: the engine asks for a site's stored percent
+     * on every page start, so the factor always belongs to the page that is
+     * being loaded (null = nothing stored, use 100%).
+     */
+    var siteZoomProvider: ((String) -> Int?)?
+
     /** Preferred color scheme exposed to web content (`prefers-color-scheme`). */
     fun setPreferredColorScheme(scheme: WebColorScheme)
 

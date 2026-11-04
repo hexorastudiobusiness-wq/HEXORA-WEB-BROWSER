@@ -41,7 +41,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.browser.R
 import com.example.browser.data.settings.ThemeMode
-import com.example.browser.ui.components.ZoomSlider
 import com.example.browser.util.SearchEngine
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -241,21 +240,17 @@ fun SettingsScreen(
                 onCheckedChange = { viewModel.setDesktopMode(it) },
             )
             Spacer(Modifier.height(12.dp))
+            // Zoom is per site and lives in the page's overflow menu, so a
+            // global slider here would silently disagree with what the page
+            // in front of the user is actually rendering (the old bug).
             Text(
-                text = stringResource(R.string.settings_text_zoom),
+                text = stringResource(R.string.settings_zoom_info_title),
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
-                text = stringResource(R.string.settings_text_zoom_summary),
+                text = stringResource(R.string.settings_zoom_info_summary),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            ZoomSlider(
-                percent = settings.textZoomPercent,
-                onPercentCommitted = { percent ->
-                    viewModel.setTextZoomPercent(percent)
-                },
-                modifier = Modifier.fillMaxWidth(),
             )
             SwitchRow(
                 label = stringResource(R.string.settings_open_links_new_tab),

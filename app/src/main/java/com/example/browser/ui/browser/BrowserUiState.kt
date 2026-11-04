@@ -127,7 +127,6 @@ data class BrowserUiState(
     val findVisible: Boolean = false,
     val findResult: FindResultUi = FindResultUi(),
     /** Current text zoom (50..200), mirrors the persisted setting. */
-    val textZoomPercent: Int = 100,
     /** Number of tabs available for "undo close all" (0 = nothing to undo). */
     val recentlyClosedCount: Int = 0,
     /** tabId -> counter bumped whenever a fresh thumbnail is stored. */
@@ -150,6 +149,10 @@ data class BrowserUiState(
     val savedLoginSuggestion: SavedLoginSuggestion? = null,
     /** Pull-to-refresh drag progress (0..1.5) for the in-app indicator. */
     val pullRefreshProgress: Float = 0f,
+    /** Floating per-site zoom panel (vertical slider) visibility. */
+    val zoomPanelVisible: Boolean = false,
+    /** Zoom of the site in front of the user, in percent. */
+    val zoomPercent: Int = 100,
     /** Whether the diagnostics dialog is open (overflow menu). */
     val diagnosticsVisible: Boolean = false,
     /** Counters describing the content surface; no URLs, no titles. */
@@ -210,7 +213,6 @@ sealed interface BrowserAction {
     data object ClearBrowsingData : BrowserAction
     data object ClearSiteData : BrowserAction
     data object ToggleDesktopMode : BrowserAction
-    data class SetTextZoom(val percent: Int) : BrowserAction
     data object OpenFind : BrowserAction
     data object CloseFind : BrowserAction
     data object ClearFind : BrowserAction
@@ -228,6 +230,10 @@ sealed interface BrowserAction {
     /** Fill the offered saved login into the current page (user tap only). */
     data object FillSavedLogin : BrowserAction
     data object DismissSavedLoginSuggestion : BrowserAction
+    data object ShowZoomPanel : BrowserAction
+    data object HideZoomPanel : BrowserAction
+    data object ResetSiteZoom : BrowserAction
+    data class SetSiteZoom(val percent: Int) : BrowserAction
     data object ShowDiagnostics : BrowserAction
     data object DismissDiagnostics : BrowserAction
     data object DismissPendingCredential : BrowserAction

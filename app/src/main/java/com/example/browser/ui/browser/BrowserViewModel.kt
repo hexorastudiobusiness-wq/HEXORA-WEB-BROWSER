@@ -26,6 +26,7 @@ import com.example.browser.data.repository.StartShortcutRepository
 import com.example.browser.data.settings.BrowserSettingsState
 import com.example.browser.data.settings.PersistedTab
 import com.example.browser.data.settings.SettingsRepository
+import com.example.browser.data.settings.SitePreferencesStore
 import com.example.browser.data.settings.TabSessionStore
 import com.example.browser.data.settings.ThemeMode
 import com.example.browser.download.DownloadFileName
@@ -86,6 +87,7 @@ class BrowserViewModel(
     private val shortcutIconStore: ShortcutIconStore,
     private val faviconFetcher: FaviconFetcher,
     private val tabSessionStore: TabSessionStore,
+    private val sitePreferencesStore: SitePreferencesStore,
 ) : ViewModel() {
 
     private var engine: BrowserEngine? = null
@@ -150,6 +152,21 @@ class BrowserViewModel(
 
     /** Live pull-to-refresh progress reported by the engine (0f..1.5f). */
     private val _pullProgress = MutableStateFlow(0f)
+
+    /** Zoom panel (the floating vertical slider) visibility. */
+    private val _zoomPanelVisible = MutableStateFlow(false)
+
+    /** Zoom shown by the panel: the active site's stored value, live-edited. */
+    private val _zoomPercent = MutableStateFlow(SitePreferencesStore.DEFAULT_ZOOM)
+
+    /**
+     * Per-site zoom/desktop preferences, mirrored in memory so the engine can
+     * resolve a site's zoom synchronously on page start (DataStore reads are
+     * async and a page must not lay out at the wrong zoom first).
+     */
+    private var siteZoom: Map<String, Int> = emptyMap()
+    private var siteDesktop: Map<String, Boolean> = emptyMap()
+    private var zoomPersistJob: Job? = null
     private val _diagnosticsVisible = MutableStateFlow(false)
 
     // Counters for the in-app diagnostics dialog (no logs, no cable).
@@ -300,12 +317,20 @@ class BrowserViewModel(
         chrome.copy(savedLoginSuggestion = suggestion)
     }
 
-    private val chromeSlice = combine(
+    private val chromeSliceWithPull = combine(
         chromeSliceWithLogin,
         _pullProgress,
         _diagnosticsVisible,
     ) { chrome, pull, diagnostics ->
         chrome.copy(pullRefreshProgress = pull, diagnosticsVisible = diagnostics)
+    }
+
+    private val chromeSlice = combine(
+        chromeSliceWithPull,
+        _zoomPanelVisible,
+        _zoomPercent,
+    ) { chrome, zoomVisible, zoomPercent ->
+        chrome.copy(zoomPanelVisible = zoomVisible, zoomPercent = zoomPercent)
     }
 
     private val historyAndBookmarks = combine(
@@ -401,7 +426,6 @@ class BrowserViewModel(
             ),
             findVisible = start.chrome.findVisible,
             findResult = activeState.findResult,
-            textZoomPercent = currentSettings.textZoomPercent,
             recentlyClosedCount = start.chrome.recentlyClosedCount,
             thumbnailVersions = slice.thumbnails,
             errorMessage = error,
@@ -424,6 +448,8 @@ class BrowserViewModel(
             },
             pendingCredentialSave = start.chrome.pendingCredentialSave,
             pullRefreshProgress = start.chrome.pullRefreshProgress,
+            zoomPanelVisible = start.chrome.zoomPanelVisible,
+            zoomPercent = start.chrome.zoomPercent,
             diagnosticsVisible = start.chrome.diagnosticsVisible,
             diagnosticsText = buildDiagnostics(activeEntry, activeState),
             savedLoginSuggestion = start.chrome.savedLoginSuggestion
@@ -769,15 +795,33 @@ class BrowserViewModel(
         viewModelScope.launch(Dispatchers.IO) { thumbnailStore.clearAll() }
 
         viewModelScope.launch {
+            sitePreferencesStore.zoomByHost.collect { siteZoom = it }
+        }
+        viewModelScope.launch {
+            sitePreferencesStore.desktopByHost.collect { siteDesktop = it }
+        }
+
+        viewModelScope.launch {
             // Engine bootstrap must degrade to the error state, never crash
             // the whole app: GeckoView can refuse to start on an unsupported
             // or damaged installation, and the user should see that instead
             // of a process death before the first frame.
             try {
+            // Read the per-site maps *before* the first page starts. The
+            // DataStore collectors below are asynchronous, so a restored tab
+            // or a cold start could otherwise begin loading before the stored
+            // zoom arrived and render at 100% while the UI said 75% — the
+            // exact bug this release fixes.
+            siteZoom = sitePreferencesStore.zoomByHost.first()
+            siteDesktop = sitePreferencesStore.desktopByHost.first()
             val initialSettings = settingsRepository.settings.first()
             val createdEngine = engineFactory(initialSettings.javaScriptEnabled)
             engine = createdEngine
-            createdEngine.setTextZoomPercent(initialSettings.textZoomPercent)
+            // Zoom is per site: the engine asks this map on every page start
+            // and falls back to 100% for sites the user never adjusted.
+            createdEngine.siteZoomProvider = { host ->
+                siteZoom[SitePreferencesStore.normalizeHost(host)]
+            }
             createdEngine.setPreferredColorScheme(initialSettings.themeMode.toWebColorScheme())
             createdEngine.applyContentControls(
                 javaScriptEnabled = initialSettings.javaScriptEnabled,
@@ -863,13 +907,11 @@ class BrowserViewModel(
                 }
             }
         }
-        // Keep the engine's text zoom in sync with the persisted setting.
-        // Also react immediately when the local password vault is toggled:
+        // React immediately when the local password vault is toggled:
         // disabling it must remove credentials already offered to pages.
         viewModelScope.launch {
             var lastPasswordManagerEnabled: Boolean? = null
             settings.collect { current ->
-                engine?.setTextZoomPercent(current.textZoomPercent)
                 engine?.setPreferredColorScheme(current.themeMode.toWebColorScheme())
                 engine?.applyContentControls(
                     javaScriptEnabled = current.javaScriptEnabled,
@@ -930,7 +972,9 @@ class BrowserViewModel(
                 } else {
                     setShowStartPage(entry, false)
                     restoreForExplicitNavigation(entry)
-                    entry.session?.loadUrl(resolveUserInput(action.input))
+                    val target = resolveUserInput(action.input)
+                    applyStoredDesktopMode(entry, target)
+                    entry.session?.loadUrl(target)
                 }
             }
             BrowserAction.Reload -> {
@@ -992,8 +1036,6 @@ class BrowserViewModel(
             BrowserAction.ClearBrowsingData -> clearBrowsingData()
             BrowserAction.ClearSiteData -> clearSiteData()
             BrowserAction.ToggleDesktopMode -> toggleDesktopMode()
-            is BrowserAction.SetTextZoom ->
-                viewModelScope.launch { settingsRepository.setTextZoomPercent(action.percent) }
             BrowserAction.OpenFind -> _findVisible.value = true
             BrowserAction.CloseFind -> {
                 _findVisible.value = false
@@ -1035,6 +1077,31 @@ class BrowserViewModel(
             }
             BrowserAction.DismissSavedLoginSuggestion -> {
                 _savedLoginSuggestion.value = null
+            }
+            BrowserAction.ShowZoomPanel -> {
+                _zoomPercent.value = siteZoom[
+                    SitePreferencesStore.hostOf(currentPageUrl()).orEmpty()
+                ] ?: SitePreferencesStore.DEFAULT_ZOOM
+                _zoomPanelVisible.value = true
+            }
+            BrowserAction.HideZoomPanel -> {
+                _zoomPanelVisible.value = false
+                persistSiteZoom(_zoomPercent.value, immediate = true)
+            }
+            is BrowserAction.SetSiteZoom -> {
+                val percent = action.percent.coerceIn(
+                    SitePreferencesStore.MIN_ZOOM,
+                    SitePreferencesStore.MAX_ZOOM,
+                )
+                _zoomPercent.value = percent
+                // Applied live so the page reflows under the user's finger.
+                engine?.setTextZoomPercent(percent)
+                persistSiteZoom(percent)
+            }
+            BrowserAction.ResetSiteZoom -> {
+                _zoomPercent.value = SitePreferencesStore.DEFAULT_ZOOM
+                engine?.setTextZoomPercent(SitePreferencesStore.DEFAULT_ZOOM)
+                persistSiteZoom(SitePreferencesStore.DEFAULT_ZOOM)
             }
             BrowserAction.ShowDiagnostics -> _diagnosticsVisible.value = true
             BrowserAction.DismissDiagnostics -> _diagnosticsVisible.value = false
@@ -1229,6 +1296,7 @@ class BrowserViewModel(
         }
         setShowStartPage(entry, false)
         restoreForExplicitNavigation(entry)
+        applyStoredDesktopMode(entry, url)
         entry.session?.loadUrl(url)
     }
 
@@ -1642,7 +1710,13 @@ class BrowserViewModel(
                 tabId = newTabId(),
                 session = null,
                 isPrivate = false,
-                desktopMode = saved.desktopMode ?: desktopMode,
+                // The per-site choice wins over the mode saved with the tab,
+                // so a site the user switched to desktop stays that way after
+                // a restart regardless of how the tab was left.
+                desktopMode = SitePreferencesStore.hostOf(saved.url)
+                    ?.let { siteDesktop[it] }
+                    ?: saved.desktopMode
+                    ?: desktopMode,
                 lastUrl = saved.url,
                 lastTitle = saved.title,
                 savedState = saved.engineState?.takeUnless { skipEngineState }
@@ -1794,9 +1868,47 @@ class BrowserViewModel(
         val entry = activeEntry() ?: return
         entry.desktopMode = !entry.desktopMode
         entry.session?.setDesktopMode(entry.desktopMode)
+        // Remember the choice for this site, so returning to it later (also
+        // after a restart) keeps the same rendering mode.
+        SitePreferencesStore.hostOf(currentPageUrl())?.let { host ->
+            val enabled = entry.desktopMode
+            viewModelScope.launch { sitePreferencesStore.setDesktop(host, enabled) }
+        }
         // Refresh derived UI (tab item state) even though session state also updates.
         _tabRevision.update { it + 1 }
         requestPersistTabs()
+    }
+
+    /** URL currently shown by the active tab, URL bar included. */
+    private fun currentPageUrl(): String {
+        val entry = activeEntry() ?: return ""
+        val state = _pageStates.value[entry.tabId]
+        return state?.url?.takeIf { it.isNotBlank() } ?: entry.lastUrl
+    }
+
+    /**
+     * Applies this site's stored "desktop site" choice before a navigation.
+     * Applying it after the load would reload the page, so it happens here,
+     * while the tab is still on its previous document.
+     */
+    private fun applyStoredDesktopMode(entry: TabEntry, url: String) {
+        val host = SitePreferencesStore.hostOf(url) ?: return
+        val stored = siteDesktop[host] ?: return
+        if (entry.desktopMode == stored) return
+        entry.desktopMode = stored
+        entry.session?.setDesktopMode(stored)
+        _tabRevision.update { it + 1 }
+        requestPersistTabs()
+    }
+
+    /** Saves the active site's zoom; debounced while the slider is dragged. */
+    private fun persistSiteZoom(percent: Int, immediate: Boolean = false) {
+        val host = SitePreferencesStore.hostOf(currentPageUrl()) ?: return
+        zoomPersistJob?.cancel()
+        zoomPersistJob = viewModelScope.launch {
+            if (!immediate) delay(350)
+            sitePreferencesStore.setZoom(host, percent)
+        }
     }
 
     private fun switchAdjacentTab(delta: Int) {
@@ -1931,7 +2043,10 @@ class BrowserViewModel(
         touchLru(entry.tabId)
         if (session != null) {
             attachSession(entry, session)
-            if (target.isNotBlank()) session.loadUrl(target)
+            if (target.isNotBlank()) {
+                applyStoredDesktopMode(entry, target)
+                session.loadUrl(target)
+            }
         }
         if (makeActive) activateTab(entry.tabId)
         updateWarmPriorities()
@@ -2459,6 +2574,8 @@ class BrowserViewModel(
         val savedLoginSuggestion: SavedLoginSuggestion? = null,
         val pullRefreshProgress: Float = 0f,
         val diagnosticsVisible: Boolean = false,
+        val zoomPanelVisible: Boolean = false,
+        val zoomPercent: Int = SitePreferencesStore.DEFAULT_ZOOM,
     )
 
     private data class StartSlice(

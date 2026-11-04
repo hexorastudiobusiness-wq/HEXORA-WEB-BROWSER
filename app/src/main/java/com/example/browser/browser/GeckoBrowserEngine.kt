@@ -36,6 +36,7 @@ import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.PanZoomController
 import org.mozilla.geckoview.GeckoSession.PermissionDelegate
 import org.mozilla.geckoview.StorageController
+import com.example.browser.data.settings.SitePreferencesStore
 import org.mozilla.geckoview.WebRequestError
 import org.mozilla.geckoview.WebResponse
 import com.example.browser.download.DownloadFileName
@@ -68,6 +69,9 @@ class GeckoBrowserEngine(
     override var onPullToRefresh: (() -> Unit)? = null
 
     override var onPullProgress: ((Float) -> Unit)? = null
+
+    /** host -> stored zoom percent, resolved synchronously by the shell. */
+    override var siteZoomProvider: ((String) -> Int?)? = null
 
     @Volatile
     override var tabSwipeEnabled: Boolean = false
@@ -136,12 +140,37 @@ class GeckoBrowserEngine(
         createSessionInternal(config, pendingRestore = savedState).also { it.ensureOpen() }
 
     override fun setTextZoomPercent(percent: Int) {
-        textZoomPercent = percent.coerceIn(50, 200)
-        // Takes effect on each session's next reload/navigation.
+        applyZoomFactor(percent)
+    }
+
+    /**
+     * Applies a zoom factor to the (process-wide) Gecko settings.
+     *
+     * Gecko exposes text scaling only at runtime level, so the factor follows
+     * the page in front of the user: [applySiteZoom] is called on every page
+     * start, which is what makes a per-site zoom survive both a tab switch and
+     * a cold start (the old code applied it once, at settings-load time, and a
+     * page that started before that kept rendering at 100% while the UI still
+     * showed 75%).
+     */
+    private fun applyZoomFactor(percent: Int) {
+        textZoomPercent = percent.coerceIn(
+            SitePreferencesStore.MIN_ZOOM,
+            SitePreferencesStore.MAX_ZOOM,
+        )
         processRuntime?.settings?.let { settings ->
-            settings.setAutomaticFontSizeAdjustment(false)
-            settings.setFontSizeFactor(textZoomPercent / 100f)
+            runCatching {
+                settings.setAutomaticFontSizeAdjustment(false)
+                settings.setFontSizeFactor(textZoomPercent / 100f)
+            }
         }
+    }
+
+    /** Applies the stored zoom for [url]'s site; 100% when none is stored. */
+    internal fun applySiteZoom(url: String) {
+        val host = SitePreferencesStore.hostOf(url) ?: return
+        val percent = siteZoomProvider?.invoke(host) ?: SitePreferencesStore.DEFAULT_ZOOM
+        applyZoomFactor(percent)
     }
 
     override fun setPreferredColorScheme(scheme: WebColorScheme) {
@@ -1900,6 +1929,8 @@ internal class GeckoBrowserSession(
         }
 
         override fun onPageStart(session: GeckoSession, url: String) {
+            // Per-site zoom must be in effect before this document lays out.
+            engine.applySiteZoom(url)
             rootScrollY = null
             // A new document invalidates any previous Find result; the UI
             // re-issues the visible query once loading finishes.

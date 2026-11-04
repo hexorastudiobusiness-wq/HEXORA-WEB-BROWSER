@@ -116,6 +116,7 @@ class MainActivity : ComponentActivity() {
                     settingsRepository = container.settingsRepository,
                     thumbnailStore = container.tabThumbnailStore,
                     tabSessionStore = container.tabSessionStore,
+                    sitePreferencesStore = container.sitePreferencesStore,
                 )
             }
         }

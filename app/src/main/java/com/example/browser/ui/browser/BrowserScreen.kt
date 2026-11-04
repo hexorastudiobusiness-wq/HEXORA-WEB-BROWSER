@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Print
@@ -130,7 +131,6 @@ import com.example.browser.browser.PageMediaKind
 import com.example.browser.browser.SitePermissionKind
 import com.example.browser.browser.WebPromptKind
 import com.example.browser.ui.components.AddressBar
-import com.example.browser.ui.components.ZoomSlider
 import com.example.browser.util.HomeScreenShortcut
 import kotlinx.coroutines.delay
 
@@ -1130,6 +1130,16 @@ private fun BrowserPageContent(
                 }
             }
         }
+        // Floating zoom panel: last child, so it sits above the page, the
+        // pull indicator and the error cards while it is open.
+        if (state.zoomPanelVisible && !state.showStartPage) {
+            SiteZoomPanel(
+                percent = state.zoomPercent,
+                onPercentChange = { percent -> onAction(BrowserAction.SetSiteZoom(percent)) },
+                onReset = { onAction(BrowserAction.ResetSiteZoom) },
+                onDismiss = { onAction(BrowserAction.HideZoomPanel) },
+            )
+        }
     }
 }
 
@@ -1986,24 +1996,17 @@ private fun BrowserBottomBar(
                     )
                     HorizontalDivider()
 
-                    // Text zoom (engine text scaling), 50%..200% like Chrome's menu.
-                    Column(
-                        modifier = Modifier
-                            .width(272.dp)
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.menu_zoom),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        ZoomSlider(
-                            percent = state.textZoomPercent,
-                            onPercentCommitted = { percent ->
-                                onAction(BrowserAction.SetTextZoom(percent))
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
+                    // Zoom lives in a floating panel, not in this menu: the
+                    // slider inside a popup is awkward to reach one-handed and
+                    // the panel keeps the page visible while it is dragged.
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_zoom)) },
+                        leadingIcon = { Icon(Icons.Filled.ZoomIn, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onAction(BrowserAction.ShowZoomPanel)
+                        },
+                    )
                     HorizontalDivider()
 
                     DropdownMenuItem(
