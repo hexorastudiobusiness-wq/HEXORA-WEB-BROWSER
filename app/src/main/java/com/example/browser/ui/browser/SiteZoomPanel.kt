@@ -157,7 +157,7 @@ fun SiteZoomPanel(
                                     onDragStart = { offset ->
                                         onPercentChange(percentAt(offset.y))
                                     },
-                                    onDrag = { change, _ ->
+                                    onVerticalDrag = { change, _ ->
                                         change.consume()
                                         onPercentChange(percentAt(change.position.y))
                                     },
