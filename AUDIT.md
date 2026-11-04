@@ -202,3 +202,33 @@ The next report will carry the numeric code, which distinguishes a network
 failure, a certificate problem, a renderer crash, a redirect loop, and a
 navigation denied by the app's own scheme allowlist (code 0 + nothing in
 the page = the app refused the navigation).
+
+## Scrolling regression, app-side reloads, unconditional display repair (0.4.8)
+
+Device feedback on 0.4.7: the page could not be scrolled at all, tabs still
+reloaded on every switch, and the pane still went black after ~10 s minimised.
+
+* The SwipeRefreshLayout wrapper was the scrolling regression. A parent that
+  intercepts touches needs a synchronous "can the child scroll up?" answer; a
+  GeckoView has none, so ordinary downward drags were turned into refresh
+  pulls and page scrolling stopped. Removed: the GeckoView is now wrapped in a
+  plain FrameLayout and keeps every touch event. Pull-to-refresh is recognised
+  *inside* the GeckoView from Gecko's own `InputResultDetail`
+  (`SCROLLABLE_FLAG_TOP` / `INPUT_RESULT_HANDLED_CONTENT` decided on DOWN), and
+  only reports progress to the UI, which draws the indicator.
+* Removed every app-side path that rebuilt a live session (rebuilding a session
+  is a real reload): `onAppForegrounded` no longer polls `isUsable()`,
+  `switchTab` only restores tabs that have no session, `onBrowserResumed` only
+  restores without a session, `bindContentView` no longer calls
+  `ensureOpen()`/`restoreState()`, and `releaseContentView` no longer releases
+  the bound session when the Compose node goes away.
+* The display is now re-acquired unconditionally on every foreground return
+  (release + `setSession`), which is the same repair a freshly created view
+  performs, with no timers and no paint-callback guesswork.
+* New Diagnostics dialog in the overflow menu: content binds, paint resets,
+  first paints, display recoveries, sessions created/restored/suspended, active
+  session liveness and the last load error code/category. Counters only; no
+  URLs or
+
+  page titles. This exists because the two remaining reports cannot be settled
+  from source alone.
