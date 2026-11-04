@@ -232,3 +232,69 @@ reloaded on every switch, and the pane still went black after ~10 s minimised.
 
   page titles. This exists because the two remaining reports cannot be settled
   from source alone.
+
+## Per-site zoom and desktop mode, floating zoom panel (0.4.9, `d77c3bf`)
+
+Owner's report: after a full app restart a page was rendered at 100% while the
+zoom UI still showed 75%, and it only corrected once the slider was touched.
+
+* Root cause: zoom was a single global value applied **once**, from the
+  settings flow, after the engine was created. Any page whose `onPageStart`
+  ran before that (a restored tab, a cold start, a tab switch to an already
+  loaded page) kept rendering at the previous factor. The UI and the page
+  therefore disagreed, and both were "right" from their own point of view.
+  `GeckoSessionSettings` has no font-size field either, so the factor cannot be
+  baked into a saved session — it has to be applied per page start.
+* Fix: new `data/settings/SitePreferencesStore` — a second DataStore
+  (`site_preferences`) keyed by `zoom/<host>` and `desktop/<host>`, host
+  lowercased with a leading `www.` removed. No URLs, no titles, no paths are
+  stored, and a value equal to the default (100% / desktop off) is deleted
+  rather than written, so the file cannot grow without bound.
+* `GeckoBrowserEngine.applySiteZoom(url)` runs as the first statement of
+  `onPageStart` and resolves the site's zoom through `siteZoomProvider`. On cold
+  start the ViewModel **awaits** `zoomByHost.first()` before creating the
+  engine, so the very first restored page already renders at the stored zoom.
+  The global `textZoomPercent` setting is retired (its key is still read, but
+  nothing applies it).
+* Desktop site is per domain too: applied before a navigation starts
+  (`openUrl`, `LoadInput`, link/new-tab creation) and to tabs restored on
+  launch, so the mode never has to be re-applied by reloading the page.
+* UI: the overflow menu no longer contains a slider. It has a **Zoom** item
+  that closes the menu and opens `SiteZoomPanel`, a translucent vertical
+  slider docked to the right edge (76x320dp, centred), with the percentage, a
+  visible filled track, a large thumb and a `100%` reset button. Percent steps
+  are 5% because every change reflows the page; a drag therefore issues at most
+  ~30 factor changes instead of one per pixel. The Settings screen no longer
+  has a zoom slider at all; it explains that zoom is per site.
+* Bounds and defaults: 50–200%, default 100%, clamped in the store, in the
+  ViewModel and in the engine.
+
+### General pass alongside 0.4.9
+
+* Removed the now-dead `ZoomSlider` composable and every `SetTextZoom` /
+  `textZoomPercent` UI state and action, so no second path can apply a
+  different zoom than the panel shows.
+* Writing a site preference no longer goes through the settings flow, so
+  dragging a slider cannot re-emit (and re-apply) the whole settings object to
+  every open session.
+* Tab restore now prefers the site's stored desktop mode over the mode saved
+  with the tab; the saved value stays as the fallback for private/blank tabs.
+* Persisting a zoom change is debounced (350ms) during a drag and flushed
+  immediately when the panel is closed, so a drag writes once but a close never
+  loses the last value.
+
+### Verification and boundaries
+
+* 0.4.9 was built by GitHub Actions: `assembleDebug` and
+  `testDebugUnitTest` are green on `d77c3bf`; the APK is the
+  `debug-d77c3bf` prerelease (versionCode 25, versionName 0.4.9).
+* The first push of this round failed compilation (`onDrag` is
+  `onVerticalDrag` in `detectVerticalDragGestures`); the failure was read from
+  the auto-filed CI issue and fixed in `d77c3bf`. That is the only compile
+  error of the round.
+* Still not device-verified: the panel's reachability with a real thumb, how
+  live reflow feels on a heavy site, and whether any site ignores a text
+  factor. Those need the owner's phone, not a sandbox.
+* No new dependencies. Signing, workflow and release process unchanged; debug
+  build only.
+
