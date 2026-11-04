@@ -42,6 +42,9 @@ import org.mozilla.geckoview.WebResponse
 import com.example.browser.download.DownloadFileName
 import com.example.browser.util.CredentialOrigin
 
+/** Gecko's NS_BINDING_ABORTED: the request was superseded, it did not fail. */
+private const val NS_BINDING_ABORTED = 0x804B0002.toInt()
+
 /**
  * [BrowserEngine] implementation backed by Mozilla GeckoView.
  *
@@ -608,7 +611,7 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
 }
 
 /**
- * The one shared content view.
+ * One tab's own content surface (one instance per tab, never shared).
  *
  * Two behaviours matter here and both follow Mozilla's `GeckoEngineView` /
  * `NestedGeckoView`:
@@ -1877,6 +1880,12 @@ internal class GeckoBrowserSession(
             uri: String?,
             error: WebRequestError,
         ): GeckoResult<String>? {
+            // NS_BINDING_ABORTED means "this request was superseded", which is
+            // what every redirect chain and federated sign-in round-trip looks
+            // like from Gecko's side. It is not a failure, and showing the
+            // error card with Retry for it is what made Google's sign-in look
+            // broken over and over.
+            if (error.code == NS_BINDING_ABORTED) return null
             // Recorded WITHOUT the URI (never log or surface full URLs); the
             // numeric code/category is what makes a failure diagnosable from
             // a screenshot alone.

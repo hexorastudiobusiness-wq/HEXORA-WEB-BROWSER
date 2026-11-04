@@ -89,14 +89,15 @@ Current shipped state (update this section on every release):
 
 - All tabs live in `BrowserViewModel`, keyed by a stable UUID `tabId`.
   Session events are mapped back to tabs via `BrowserSession.id`.
-- **One `GeckoSession` per tab; sessions are never shared** between
-  unrelated tabs. But rendering uses **one shared `GeckoView`** owned by the
-  engine: tab switches swap the session bound to that view. A fresh
-  lightweight `FrameLayout` host is returned per `AndroidView` composition,
-  the engine moves its single `GeckoView` into it, and the old session is
-  released *before* the new one is set. This exact arrangement fixed a
-  confirmed white/black-tab bug. **Do not regress it** (no per-tab
-  `GeckoView`, no priority demotion of live sessions).
+- **One `GeckoSession` and one `GeckoView` per tab**, never shared between
+  unrelated tabs — Mozilla's own model (`GeckoEngineView` owns a GeckoView per
+  tab). The engine owns a single `FrameLayout` per Activity; every live tab's
+  host is a child of it and exactly one child is visible. A tab switch changes
+  visibility only: no re-bind, no display release/acquire, no session restore.
+  The earlier design (one shared `GeckoView`, session swapped per switch) was
+  removed in 0.5.0 because it reloaded tabs and shared one compositor between
+  unrelated pages. **Do not regress it** (no shared view; no priority
+  demotion of live sessions).
 - Memory control is **tab suspension** following Firefox's model:
   sessions are created lazily, the selected tab gets high priority, and
   low-memory/trim signals suspend colder inactive tabs (engine state

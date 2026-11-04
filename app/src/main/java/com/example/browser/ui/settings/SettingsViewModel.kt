@@ -37,10 +37,6 @@ class SettingsViewModel(
         viewModelScope.launch { repository.setThemeMode(mode) }
     }
 
-    fun setTextZoomPercent(percent: Int) {
-        viewModelScope.launch { repository.setTextZoomPercent(percent) }
-    }
-
     fun setJavaScriptEnabled(enabled: Boolean) {
         viewModelScope.launch { repository.setJavaScriptEnabled(enabled) }
     }

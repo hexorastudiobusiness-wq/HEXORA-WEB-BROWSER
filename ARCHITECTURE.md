@@ -112,7 +112,8 @@ violation of one of them:
 4. **No opaque cover.** `GeckoView.coverUntilFirstPaint(color)` sets the
    session's compositor clear colour *and* paints an opaque SurfaceView
    background that only GeckoView's internal FIRST_PAINT callback removes. On a
-   long-lived shared view that callback may never fire again, leaving a
+   long-lived view whose compositor keeps running that callback may never
+   fire again, leaving a
    permanent black pane. Hexora therefore does not cover the surface.
 5. **Paint verification, not timers.** On foreground return the engine checks
    every child surface: if the platform dropped one and GeckoView forgot its
