@@ -20,6 +20,18 @@
     <string name="tab_crashed_message">This tab crashed. Your other tabs are unaffected.</string>
     <string name="action_restore_tab">Restore tab</string>
     <string name="action_retry">Retry</string>
+    <!-- Why a page failed, so the user (and a screenshot) can tell the
+         difference between a network problem and an engine problem. -->
+    <string name="page_load_failed_network">Network error. Check your connection.</string>
+    <string name="page_load_failed_offline">You are offline.</string>
+    <string name="page_load_failed_security">Secure connection failed.</string>
+    <string name="page_load_failed_redirect">Too many redirects.</string>
+    <string name="page_load_failed_renderer">The page rendering process stopped.</string>
+    <string name="page_load_failed_code">code %1$d</string>
+    <!-- A saved login may be filled only when the user taps Fill. -->
+    <string name="saved_login_available">Saved login for %1$s</string>
+    <string name="action_fill_login">Fill</string>
+    <string name="action_dismiss">Dismiss</string>
 
     <!-- Menu -->
     <string name="menu_new_tab">New tab</string>

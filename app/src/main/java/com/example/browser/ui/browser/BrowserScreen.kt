@@ -994,27 +994,120 @@ private fun BrowserPageContent(
             return
         }
 
-        if (state.loadFailed && session != null && !state.isFullscreen) {
-            Card(
+        if (!state.isFullscreen &&
+            (state.loadFailed || state.savedLoginSuggestion != null)
+        ) {
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.page_load_failed),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Button(onClick = { onAction(BrowserAction.Reload) }) {
-                        Text(stringResource(R.string.action_retry))
+                // Offered, never applied: the page gets the password only when
+                // the user taps Fill. The old behaviour filled it silently.
+                state.savedLoginSuggestion?.let { suggestion ->
+                    Card {
+                        Row(
+                            modifier = Modifier.padding(
+                                start = 16.dp,
+                                end = 8.dp,
+                                top = 6.dp,
+                                bottom = 6.dp,
+                            ),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f, fill = false),
+                            ) {
+                                Text(
+                                    text = stringResource(
+                                        R.string.saved_login_available,
+                                        suggestion.host,
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = suggestion.username,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Button(onClick = { onAction(BrowserAction.FillSavedLogin) }) {
+                                Text(stringResource(R.string.action_fill_login))
+                            }
+                            IconButton(
+                                onClick = {
+                                    onAction(BrowserAction.DismissSavedLoginSuggestion)
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = stringResource(R.string.action_dismiss),
+                                )
+                            }
+                        }
+                    }
+                }
+                if (state.loadFailed && session != null) {
+                    Card {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Column {
+                                Text(
+                                    text = loadFailureMessage(state),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                if (state.loadErrorCode != 0) {
+                                    // Numeric only: never the URL. Enough for a
+                                    // screenshot to identify the failure.
+                                    Text(
+                                        text = stringResource(
+                                            R.string.page_load_failed_code,
+                                            state.loadErrorCode,
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            Button(onClick = { onAction(BrowserAction.Reload) }) {
+                                Text(stringResource(R.string.action_retry))
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * Short, honest reason for a failed load. Gecko's numeric codes are stable
+ * API constants (`WebRequestError`); the category is used as a fallback so an
+ * unknown code still says something useful.
+ */
+@Composable
+private fun loadFailureMessage(state: BrowserUiState): String {
+    val code = state.loadErrorCode
+    val category = state.loadErrorCategory
+    return when {
+        code == 0 -> stringResource(R.string.page_load_failed)
+        code == 0x73 -> stringResource(R.string.page_load_failed_offline)
+        code == 0x22 || code == 0x32 || code == 0xB3 -> // SSL, bad cert, bad HSTS
+            stringResource(R.string.page_load_failed_security)
+        code == 0x63 -> stringResource(R.string.page_load_failed_redirect)
+        code == 0x44 -> stringResource(R.string.page_load_failed_renderer)
+        code == 0x23 || code == 0x33 || code == 0x43 || code == 0x93 || // net
+            code == 0x25 -> // unknown host
+            stringResource(R.string.page_load_failed_network)
+        category == 0x3 -> stringResource(R.string.page_load_failed_network)
+        category == 0x2 -> stringResource(R.string.page_load_failed_security)
+        else -> stringResource(R.string.page_load_failed)
     }
 }
 

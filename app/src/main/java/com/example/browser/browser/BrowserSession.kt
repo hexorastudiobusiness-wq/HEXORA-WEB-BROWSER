@@ -31,6 +31,14 @@ data class SessionPageState(
     val certificateSubject: String = "",
     val certificateIssuer: String = "",
     val loadFailed: Boolean = false,
+    /**
+     * Gecko error code/category for the failed load, when the engine reported
+     * one (`WebRequestError`). 0 means "failure without a specific error",
+     * e.g. a cancelled or superseded navigation. Shown to the user so a
+     * screenshot is enough to diagnose a failure.
+     */
+    val loadErrorCode: Int = 0,
+    val loadErrorCategory: Int = 0,
     val isDesktopMode: Boolean = false,
     /** The page itself requested fullscreen (e.g. a video player). */
     val isPageFullscreen: Boolean = false,
@@ -236,6 +244,18 @@ sealed interface BrowserSessionEvent {
         val label: String?,
     ) : BrowserSessionEvent
 
+    /**
+     * A login field was focused and the password vault has a saved login for
+     * the current page. Nothing has been filled: the user decides, and the
+     * shell calls [BrowserSession.fillSavedCredentialNow] only on an explicit
+     * tap.
+     */
+    data class SavedLoginOffered(
+        override val sessionId: String,
+        val host: String,
+        val username: String,
+    ) : BrowserSessionEvent
+
     /** A login form was submitted; the app may ask whether to save it. */
     data class CredentialSubmitted(
         override val sessionId: String,
@@ -345,6 +365,14 @@ interface BrowserSession {
 
     /** Supplies (or clears) the locally saved login to offer on this page. */
     fun setAutofillCredential(credential: AutofillCredential?)
+
+    /**
+     * Fills the page's current login fields with the credential installed by
+     * [setAutofillCredential]. Never called automatically: filling a password
+     * without the user asking is exactly what this API exists to prevent.
+     * Returns false when there is nothing to fill.
+     */
+    fun fillSavedCredentialNow(): Boolean
 
     /** Releases the session and its view. The session cannot be reused afterwards. */
     fun close()

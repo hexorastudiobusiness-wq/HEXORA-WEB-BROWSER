@@ -41,6 +41,7 @@ import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.PanZoomController
 import org.mozilla.geckoview.GeckoSession.PermissionDelegate
 import org.mozilla.geckoview.StorageController
+import org.mozilla.geckoview.WebRequestError
 import org.mozilla.geckoview.WebResponse
 import com.example.browser.download.DownloadFileName
 import com.example.browser.util.CredentialOrigin
@@ -1161,7 +1162,15 @@ internal class GeckoBrowserSession(
     override fun reload() {
         if (closed) return
         if (geckoSession.isOpen) {
-            geckoSession.reload()
+            val state = _state.value
+            // After a failed load Gecko halts the navigation and there is no
+            // document to reload, which is why the Retry button used to do
+            // nothing. Ask for the URL again instead.
+            if (state.loadFailed && state.url.isNotBlank()) {
+                geckoSession.loadUri(state.url)
+            } else {
+                geckoSession.reload()
+            }
         } else {
             // Session was closed by a content-process crash: reopen and
             // navigate back to the last known URL.
@@ -1209,7 +1218,12 @@ internal class GeckoBrowserSession(
     }
 
     override fun setAutofillCredential(credential: AutofillCredential?) {
+        val changed = credential?.origin != autofillCredential?.origin ||
+            credential?.username != autofillCredential?.username
         autofillCredential = credential
+        // A different (or newly loaded) login may be offered again; the same
+        // one is offered only once per page.
+        if (changed) savedLoginOffered = false
     }
 
     internal fun installAutofillDelegate() {
@@ -1238,6 +1252,8 @@ internal class GeckoBrowserSession(
 
     @Volatile
     private var autofillCredential: AutofillCredential? = null
+    /** The saved login for this page has already been offered once. */
+    private var savedLoginOffered = false
 
     private data class PendingFilePrompt(
         val prompt: GeckoSession.PromptDelegate.FilePrompt,
@@ -1832,7 +1848,54 @@ internal class GeckoBrowserSession(
         ) {
             return
         }
+        // Nothing is written into the page here. The owner reported the vault
+        // putting a previously saved Gmail address AND password into a Google
+        // sign-in form without ever asking; a password must only be filled
+        // after an explicit user decision. Offer it instead and let the shell
+        // call fillSavedCredentialNow() when the user taps.
+        if (savedLoginOffered) return
         val autofillSession = session.getAutofillSession()
+        var hasField = false
+        fun hasLoginField(node: Autofill.Node) {
+            if (hasField) return
+            if (nodeMatchesCurrentPage(node) &&
+                (node.hint == Autofill.Hint.USERNAME ||
+                    node.hint == Autofill.Hint.EMAIL_ADDRESS ||
+                    node.hint == Autofill.Hint.PASSWORD)
+            ) {
+                hasField = true
+                return
+            }
+            node.children.forEach(::hasLoginField)
+        }
+        hasLoginField(autofillSession.root)
+        if (!hasField) return
+        savedLoginOffered = true
+        _events.tryEmit(
+            BrowserSessionEvent.SavedLoginOffered(
+                sessionId = id,
+                host = CredentialOrigin.fromUrl(_state.value.url)?.substringAfter("://").orEmpty(),
+                username = credential.username,
+            ),
+        )
+    }
+
+    /**
+     * Fills the login fields the user is looking at, and only then. Called by
+     * the shell in response to [BrowserSessionEvent.SavedLoginOffered]; the
+     * origin is re-checked here so a navigation between the offer and the tap
+     * can never move a password to another site.
+     */
+    override fun fillSavedCredentialNow(): Boolean {
+        if (closed || config.isPrivate || !geckoSession.isOpen) return false
+        val credential = autofillCredential ?: return false
+        val expectedOrigin = credential.origin
+        if (expectedOrigin != null &&
+            CredentialOrigin.fromUrl(_state.value.url) != expectedOrigin
+        ) {
+            return false
+        }
+        val autofillSession = geckoSession.getAutofillSession()
         val nodes = mutableListOf<Autofill.Node>()
         fun visit(node: Autofill.Node) {
             nodes += node
@@ -1853,11 +1916,13 @@ internal class GeckoBrowserSession(
         nodes.firstOrNull { node ->
             nodeMatchesCurrentPage(node) && node.hint == Autofill.Hint.PASSWORD
         }?.let { node ->
-                runCatching { autofillSession.dataFor(node).id }
-                    .getOrNull()
-                    ?.let { values.put(it, credential.password) }
-            }
-        if (values.size() > 0) autofillSession.autofill(values)
+            runCatching { autofillSession.dataFor(node).id }
+                .getOrNull()
+                ?.let { values.put(it, credential.password) }
+        }
+        if (values.size() == 0) return false
+        autofillSession.autofill(values)
+        return true
     }
 
     // ---- GeckoView delegates -------------------------------------------------
@@ -1912,6 +1977,27 @@ internal class GeckoBrowserSession(
             _state.update { it.copy(canGoForward = canGoForward) }
         }
 
+        override fun onLoadError(
+            session: GeckoSession,
+            uri: String?,
+            error: WebRequestError,
+        ): GeckoResult<String>? {
+            // Recorded WITHOUT the URI (never log or surface full URLs); the
+            // numeric code/category is what makes a failure diagnosable from
+            // a screenshot alone.
+            _state.update {
+                it.copy(
+                    loadFailed = true,
+                    loadErrorCode = error.code,
+                    loadErrorCategory = error.category,
+                )
+            }
+            // Returning null tells Gecko to halt the load; the shell shows its
+            // own localized error card with a working Retry instead of
+            // Gecko's English net-error page.
+            return null
+        }
+
         override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? {
             // GeckoView requires the returned session to be *unopened* — it
             // opens and navigates it itself. We only create + register it.
@@ -1953,11 +2039,14 @@ internal class GeckoBrowserSession(
             // A new document invalidates any previous Find result; the UI
             // re-issues the visible query once loading finishes.
             latestFindQuery = ""
+            savedLoginOffered = false
             _state.update {
                 it.copy(
                     url = url,
                     isLoading = true,
                     loadFailed = false,
+                    loadErrorCode = 0,
+                    loadErrorCategory = 0,
                     progress = 0f,
                     findResult = FindResultUi(),
                 )

@@ -141,6 +141,12 @@ class BrowserViewModel(
      */
     private var lastCloseAllIds: Set<String> = emptySet()
     private val _pendingCredentialPrompt = MutableStateFlow<CredentialSavePrompt?>(null)
+
+    /**
+     * A saved login the user may tap to fill. Nothing is written into the page
+     * until they do (the engine only offers; see SavedLoginOffered).
+     */
+    private val _savedLoginSuggestion = MutableStateFlow<SavedLoginSuggestion?>(null)
     private val _shortcutIcons = MutableStateFlow<Map<Long, Bitmap>>(emptyMap())
     private val shortcutIconFetchesInFlight = mutableSetOf<Long>()
     private val shortcutIconLastAttemptAt = mutableMapOf<Long, Long>()
@@ -268,7 +274,7 @@ class BrowserViewModel(
         TabsSlice(tabs, activeId, states, thumbs, revision)
     }
 
-    private val chromeSlice = combine(
+    private val chromeBaseSlice = combine(
         _findVisible,
         _userFullscreen,
         _recentlyClosed,
@@ -276,6 +282,13 @@ class BrowserViewModel(
         _pageContextMenu,
     ) { find, fs, closed, prompt, contextMenu ->
         ChromeSlice(find, fs, closed.size, prompt, contextMenu)
+    }
+
+    private val chromeSlice = combine(
+        chromeBaseSlice,
+        _savedLoginSuggestion,
+    ) { chrome, suggestion ->
+        chrome.copy(savedLoginSuggestion = suggestion)
     }
 
     private val historyAndBookmarks = combine(
@@ -359,6 +372,8 @@ class BrowserViewModel(
             certificateIssuer = activeState.certificateIssuer,
             isPrivate = activeEntry?.isPrivate ?: false,
             loadFailed = activeState.loadFailed,
+            loadErrorCode = activeState.loadErrorCode,
+            loadErrorCategory = activeState.loadErrorCategory,
             isBookmarked = bookmarked && activeEntry?.isPrivate != true,
             isDesktopMode = activeEntry?.desktopMode ?: false,
             isFullscreen = BrowserPresentationPolicy.isFullscreen(
@@ -391,6 +406,8 @@ class BrowserViewModel(
                 start.icons
             },
             pendingCredentialSave = start.chrome.pendingCredentialSave,
+            savedLoginSuggestion = start.chrome.savedLoginSuggestion
+                ?.takeIf { suggestion -> suggestion.tabId == activeEntry?.tabId },
             pageContextMenu = start.chrome.pageContextMenu,
             // Private tabs never surface the normal browsing history.
             addressSuggestions = if (activeEntry?.isPrivate == true) {
@@ -895,7 +912,20 @@ class BrowserViewModel(
                     entry.session?.loadUrl(resolveUserInput(action.input))
                 }
             }
-            BrowserAction.Reload -> activeSession()?.reload()
+            BrowserAction.Reload -> {
+                val entry = activeEntry()
+                val session = entry?.session
+                if (entry != null && session != null && !session.isUsable()) {
+                    // Nothing to reload: the content process is gone. Restoring
+                    // the tab is what the user expects from Retry, and it is
+                    // what used to surface as a "tab crashed" card.
+                    _savedLoginSuggestion.value = null
+                    handleDeadSession(entry, session)
+                    if (entry.session == null) restoreTab(entry)
+                } else {
+                    session?.reload()
+                }
+            }
             BrowserAction.StopLoading -> activeSession()?.stopLoading()
             BrowserAction.GoBack -> activeSession()?.goBack()
             BrowserAction.GoForward -> activeSession()?.goForward()
@@ -973,6 +1003,18 @@ class BrowserViewModel(
             BrowserAction.UndoCloseAllTabs -> undoCloseAllTabs()
             BrowserAction.SavePendingCredential -> savePendingCredential()
             BrowserAction.DismissPendingCredential -> dismissPendingCredential()
+            BrowserAction.FillSavedLogin -> {
+                val suggestion = _savedLoginSuggestion.value
+                _savedLoginSuggestion.value = null
+                if (suggestion != null) {
+                    // The engine re-checks the origin at fill time, so a
+                    // navigation since the offer cannot leak the password.
+                    entry(suggestion.tabId)?.session?.fillSavedCredentialNow()
+                }
+            }
+            BrowserAction.DismissSavedLoginSuggestion -> {
+                _savedLoginSuggestion.value = null
+            }
             BrowserAction.DismissPageContextMenu ->
                 _pageContextMenu.value = null
             BrowserAction.OpenContextMenuLink -> openContextMenuLink(newTab = false)
@@ -1951,6 +1993,8 @@ class BrowserViewModel(
         // a previously shown tab with a dead compositor (black until reload).
         _findVisible.value = false
         _pageContextMenu.value = null
+        // An offer belongs to the page the user was looking at.
+        _savedLoginSuggestion.value = null
         _activeTabId.value = tabId
         touchLru(tabId)
         updateWarmPriorities()
@@ -2041,6 +2085,12 @@ class BrowserViewModel(
                         // finishes (see finishedLoad below).
                         session.setAutofillCredential(null)
                     }
+                    if (state.isLoading) {
+                        // A new page invalidates an offer from the previous one.
+                        _savedLoginSuggestion.update { current ->
+                            current?.takeIf { it.tabId != entry.tabId }
+                        }
+                    }
                     val finishedLoad = wasLoading && !state.isLoading
                     wasLoading = state.isLoading
                     if (finishedLoad) engine?.finishPullToRefresh()
@@ -2113,6 +2163,15 @@ class BrowserViewModel(
                             handleAndroidPermission(entry.tabId, event)
                         is BrowserSessionEvent.WebPromptRequested ->
                             handleWebPrompt(entry.tabId, event)
+                        is BrowserSessionEvent.SavedLoginOffered -> {
+                            if (!entry.isPrivate && entry.tabId == _activeTabId.value) {
+                                _savedLoginSuggestion.value = SavedLoginSuggestion(
+                                    tabId = entry.tabId,
+                                    host = event.host,
+                                    username = event.username,
+                                )
+                            }
+                        }
                         is BrowserSessionEvent.CredentialSubmitted ->
                             handleCredentialSubmitted(entry, event)
                         is BrowserSessionEvent.PrintRequested -> {
@@ -2356,6 +2415,7 @@ class BrowserViewModel(
         val recentlyClosedCount: Int,
         val pendingCredentialSave: CredentialSavePrompt?,
         val pageContextMenu: PageContextMenu?,
+        val savedLoginSuggestion: SavedLoginSuggestion? = null,
     )
 
     private data class StartSlice(

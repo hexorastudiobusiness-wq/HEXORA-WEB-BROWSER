@@ -113,6 +113,9 @@ data class BrowserUiState(
     val certificateIssuer: String = "",
     val isPrivate: Boolean = false,
     val loadFailed: Boolean = false,
+    /** Gecko's error code/category for [loadFailed]; 0 when unknown. */
+    val loadErrorCode: Int = 0,
+    val loadErrorCategory: Int = 0,
     /**
      * The active tab's page crashed (Firefox-style crashed tab): show the
      * restore card instead of the page until the user restores it.
@@ -143,10 +146,23 @@ data class BrowserUiState(
     /** Cached site icons by shortcut id; absent ids use the letter placeholder. */
     val startShortcutIcons: Map<Long, Bitmap> = emptyMap(),
     val pendingCredentialSave: CredentialSavePrompt? = null,
+    /** A saved login the user may choose to fill on the current page. */
+    val savedLoginSuggestion: SavedLoginSuggestion? = null,
     /** Long-press menu for a link/image/video/audio on the page, if open. */
     val pageContextMenu: PageContextMenu? = null,
     /** History matches for the text currently typed in the address bar. */
     val addressSuggestions: List<AddressSuggestion> = emptyList(),
+)
+
+/**
+ * A stored login that could be filled into the page in front of the user.
+ * Never applied automatically: the address and password are written only when
+ * the user taps [BrowserAction.FillSavedLogin].
+ */
+data class SavedLoginSuggestion(
+    val tabId: String,
+    val host: String,
+    val username: String,
 )
 
 /** Explicit user actions sent from the UI to [BrowserViewModel] (ARCHITECTURE.md §14). */
@@ -203,6 +219,9 @@ sealed interface BrowserAction {
     data object CloseAllTabs : BrowserAction
     data object UndoCloseAllTabs : BrowserAction
     data object SavePendingCredential : BrowserAction
+    /** Fill the offered saved login into the current page (user tap only). */
+    data object FillSavedLogin : BrowserAction
+    data object DismissSavedLoginSuggestion : BrowserAction
     data object DismissPendingCredential : BrowserAction
     data object DismissPageContextMenu : BrowserAction
     data object OpenContextMenuLink : BrowserAction
