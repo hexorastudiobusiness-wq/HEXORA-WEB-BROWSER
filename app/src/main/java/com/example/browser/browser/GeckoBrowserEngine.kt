@@ -477,6 +477,12 @@ class GeckoBrowserEngine(
         append(" paintResets=").append(paintStatusResets)
         append(" firstPaint=").append(firstComposites)
         append(" recoveries=").append(paintRecoveries)
+        // Text zoom is process-wide; this is the value actually pushed to the
+        // runtime, plus how many tab surfaces exist right now.
+        append(" zoom=").append(
+            if (appliedZoomPercent < 0) textZoomPercent else appliedZoomPercent,
+        )
+        append(" surfaces=").append(contentContainer?.childCount ?: 0)
     }
 
     override fun finishPullToRefresh() {
