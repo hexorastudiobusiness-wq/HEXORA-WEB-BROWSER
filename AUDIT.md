@@ -165,3 +165,40 @@ Still unverified on device: everything above is source-level reasoning. The
 next diagnostic step, if the black pane survives, is the SurfaceView path
 (`GeckoDisplay.surfaceChanged/surfaceDestroyed`, SurfaceView punch-out vs.
 Compose overlays) with a paint-event-only log (no URLs).
+
+## Load failures, retry and the password vault (0.4.7, `a9d7bb2`)
+
+Owner-reported, carried over from 0.4.6: pages that come up blank with
+"This page could not be loaded." on several sites (Google sign-in,
+arena.ai), Retry doing nothing and then turning into "This tab crashed",
+and the password vault writing a previously saved Gmail address *and*
+password into a page without asking.
+
+What the code actually did:
+
+1. `onPageStop(success = false)` set `loadFailed` and that was all: the
+   engine never implemented `NavigationDelegate.onLoadError`, so Gecko's
+   `WebRequestError` (code + category) — the only description of *why* a
+   load failed — was discarded. The card could therefore only say
+   "could not be loaded".
+2. `reload()` called `GeckoSession.reload()`. After a failed load Gecko
+   halts the navigation and leaves no document, so reload is a no-op: the
+   Retry button could never work. Retrying a session whose content process
+   was gone is also what produced the crash card.
+3. `Autofill.Delegate.onNodeFocus` called `fillSavedCredential`, which
+   wrote the stored username and password into the page immediately. No
+   prompt, no tap, no consent.
+
+Changes: `onLoadError` is implemented and records code/category (URI is
+never stored or logged); the card shows a localized reason (network,
+offline, security, redirect loop, renderer stopped) plus the numeric code
+in small print; `reload()` re-loads the failed URL and Retry restores a
+dead tab instead of reloading it; filling requires an explicit tap on the
+new suggestion bar (`SavedLoginOffered` → `fillSavedCredentialNow()`), with
+the exact-origin check repeated at fill time.
+
+Still open: the *cause* of the failing loads themselves is not yet known.
+The next report will carry the numeric code, which distinguishes a network
+failure, a certificate problem, a renderer crash, a redirect loop, and a
+navigation denied by the app's own scheme allowlist (code 0 + nothing in
+the page = the app refused the navigation).
