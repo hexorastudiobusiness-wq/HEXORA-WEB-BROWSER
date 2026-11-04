@@ -119,9 +119,10 @@ violation of one of them:
    every child surface: if the platform dropped one and GeckoView forgot its
    session, the owning session is bound again (a repaint, not a reload). No
    timers, no shared-compositor re-acquisition.
-6. **Pull-to-refresh is answered by Gecko.** The view is a
-   `NestedScrollingChild` inside a `SwipeRefreshLayout`; whether a pull may
-   start is decided by APZ (`InputResultDetail`), never by app-side heuristics.
+6. **Pull-to-refresh is answered by Gecko.** Each tab's `HexoraGeckoView`
+   keeps every touch; whether a pull may start is decided by APZ
+   (`InputResultDetail`), never by app-side heuristics. There is no
+   `SwipeRefreshLayout` — it broke ordinary scrolling in 0.4.7.
 
 A browser tab should contain:
 

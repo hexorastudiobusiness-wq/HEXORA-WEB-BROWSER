@@ -2145,10 +2145,9 @@ class BrowserViewModel(
         // the rendered one (Firefox captures tab thumbnails on switch,
         // not after every page load).
         if (previousId != null) captureThumbnail(previousId)
-        // GeckoView itself marks the rendered session active/inactive as its
-        // surface is acquired/released during bindContentView(). Toggling
-        // sessions manually here raced that surface lifecycle and could leave
-        // a previously shown tab with a dead compositor (black until reload).
+        // Each tab owns its own surface, so GeckoView marks a session
+        // active/inactive on that surface alone; nothing here needs to touch
+        // display state, and doing so in the past left dead compositors.
         _findVisible.value = false
         _pageContextMenu.value = null
         // An offer belongs to the page the user was looking at.
@@ -2156,6 +2155,18 @@ class BrowserViewModel(
         _activeTabId.value = tabId
         touchLru(tabId)
         updateWarmPriorities()
+        // Text zoom is a process-wide Gecko setting (there is no per-session
+        // font factor). Re-apply the selected site's value so the tab that is
+        // now on screen renders at the zoom its panel shows, instead of
+        // inheriting whatever the previous tab's page load left behind.
+        val targetEntry = entry(tabId)
+        val targetUrl = _pageStates.value[tabId]?.url?.takeIf { it.isNotBlank() }
+            ?: targetEntry?.lastUrl
+        engine?.setTextZoomPercent(
+            SitePreferencesStore.hostOf(targetUrl)
+                ?.let { host -> siteZoom[host] }
+                ?: SitePreferencesStore.DEFAULT_ZOOM,
+        )
     }
 
     /**

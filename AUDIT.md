@@ -298,3 +298,71 @@ zoom UI still showed 75%, and it only corrected once the slider was touched.
 * No new dependencies. Signing, workflow and release process unchanged; debug
   build only.
 
+
+## One GeckoView per tab — the content-layer migration (0.5.0, `d31ca77`→`0ea58ea`)
+
+Owner's verdict on 0.4.10: tabs still reload on switch, some sites come back
+scrambled and need a manual refresh, Home-screen "Add shortcut" does nothing,
+and Google's sign-in lands on the retry card. The decision was to stop patching
+the shared-surface design and adopt Firefox's model.
+
+### What changed
+
+* **One `GeckoView` per tab.** `GeckoBrowserSession` creates its own
+  `SwipeableHostLayout` + `HexoraGeckoView` (`obtainSurface`) the first time the
+  tab is shown, and keeps it afterwards. The engine owns a single `FrameLayout`
+  per Activity (`obtainContainer`); every live tab's host is a child, exactly
+  one is `VISIBLE`, the rest are `INVISIBLE` (`present`). A tab switch now only
+  changes visibility: no display release/acquire, no session re-bind, no
+  restore from saved state.
+* **Removed:** `sharedContentView`, `sharedContentHost`, `renderedSession`,
+  `sessionToRestoreOnAttach`, `bindContentView`, `releaseContentView`,
+  `handleSharedViewDetached/Attached`, `isRenderedSession`, and the
+  release+`setSession` "display repair" that used to run on every foreground
+  return. Two tabs can no longer share a compositor, which is what produced the
+  cross-tab repaint ("sites get scrambled").
+* **Thumbnails** are captured from the tab's own visible surface, so a preview
+  can no longer show another tab's page.
+* **Text zoom** is a process-wide Gecko setting; the selected site's factor is
+  re-applied when a tab becomes visible (`activateTab`), so the page on screen
+  matches the percentage its panel shows.
+* **Superseded loads are not failures.** `NS_BINDING_ABORTED` (0x804B0002) is
+  what a redirect or a federated sign-in round-trip looks like to Gecko; it no
+  longer raises the retry card.
+* **Third-party cookie partitioning (TCP) disabled.** Without the Storage
+  Access API that Firefox pairs with it, it bounces Google's sign-in into a
+  retry loop.
+* **Shortcut writes are no longer silent.** Duplicate, limit (10), invalid
+  address and success each produce a toast; the previous code returned without
+  a word, which is indistinguishable from a dead button.
+* **Global text-zoom setting retired** (it was already ignored for rendering
+  since 0.4.9); the dead plumbing was removed with it.
+* Version 0.5.0 (27), **arm64-v8a APK only** as instructed.
+
+### Reviews performed
+
+1. **Content layer:** every session-close path (`closeTab`, `suspendTab`,
+   `handleDeadSession`, close-all, private cleanup) now drops the tab's surface
+   through `detachSurface`; `surfaceOwners` is unbound in the same call, so no
+   stale view→session entries survive. `present` tolerates a host that belongs
+   to a previous Activity by re-creating it (context check in `obtainSurface`).
+2. **UI/Compose:** the container `AndroidView` is stable for the Activity and
+   never returns a view that still has a parent (same protection as before);
+   the Start Page, crash card, error card and zoom panel still draw on top of
+   the container, so nothing that used to unmount the surface does now.
+3. **Whole app:** leftover references to the shared-view API are gone (one
+   stale comment fixed), `strings.xml` has no duplicate names, the unused
+   global-zoom key/flow were removed, and `ARCHITECTURE.md`/`AGENTS.md` now
+   document the per-tab model as an invariant instead of the old one.
+
+### Boundaries
+
+* Built by GitHub Actions: `assembleDebug` + `testDebugUnitTest` green on
+  `2e558ce`, `dfcc9d6` and `0ea58ea`.
+* **Not device-verified.** Surface lifecycle, real memory pressure and OEM
+  behaviour cannot be exercised in this sandbox; the owner's phone is the only
+  place these four reports can be closed.
+* If a tab still reloads after this, the reload is no longer ours to remove:
+  the tab's `GeckoSession` is never closed on a switch, so the remaining cause
+  would be Gecko/Android dropping the document — Visible in Diagnostics as
+  `restored` vs `suspended`.
