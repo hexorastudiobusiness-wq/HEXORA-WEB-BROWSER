@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
@@ -73,6 +74,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -364,6 +366,24 @@ fun BrowserScreen(
         )
     }
 
+    if (state.diagnosticsVisible) {
+        AlertDialog(
+            onDismissRequest = { viewModel.onAction(BrowserAction.DismissDiagnostics) },
+            title = { Text(stringResource(R.string.menu_diagnostics)) },
+            text = {
+                Text(
+                    text = state.diagnosticsText,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.onAction(BrowserAction.DismissDiagnostics) }) {
+                    Text(stringResource(R.string.action_close))
+                }
+            },
+        )
+    }
+
     if (showClearDataConfirm) {
         // Same destructive-action guard as Settings: clearing browsing
         // data from the quick menu must never be a single accidental tap.
@@ -522,6 +542,9 @@ fun BrowserScreen(
                 onSiteDataCleared = {
                     Toast.makeText(context, R.string.site_data_cleared, Toast.LENGTH_SHORT)
                         .show()
+                },
+                onShowDiagnostics = {
+                    viewModel.onAction(BrowserAction.ShowDiagnostics)
                 },
             )
         }
@@ -992,6 +1015,30 @@ private fun BrowserPageContent(
                 }
             }
             return
+        }
+
+        // Pull-to-refresh indicator: driven entirely by progress the engine
+        // measured from Gecko's own touch result, so it appears exactly when
+        // the page is at its top and cannot scroll any further. Nothing here
+        // touches the gesture: the page keeps every event.
+        val pullProgress = state.pullRefreshProgress
+        if (pullProgress > 0.02f) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                shadowElevation = 2.dp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 12.dp)
+                    .size(40.dp),
+            ) {
+                CircularProgressIndicator(
+                    progress = { pullProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier.padding(10.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
         }
 
         if (!state.isFullscreen &&
@@ -1803,6 +1850,7 @@ private fun BrowserBottomBar(
     onClearBrowsingData: () -> Unit,
     onAddToHomeScreen: () -> Unit,
     onSiteDataCleared: () -> Unit,
+    onShowDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -2085,6 +2133,14 @@ private fun BrowserBottomBar(
                             menuExpanded = false
                             onAction(BrowserAction.ClearSiteData)
                             onSiteDataCleared()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_diagnostics)) },
+                        leadingIcon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onShowDiagnostics()
                         },
                     )
                     DropdownMenuItem(

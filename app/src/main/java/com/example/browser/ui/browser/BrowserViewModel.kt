@@ -147,6 +147,15 @@ class BrowserViewModel(
      * until they do (the engine only offers; see SavedLoginOffered).
      */
     private val _savedLoginSuggestion = MutableStateFlow<SavedLoginSuggestion?>(null)
+
+    /** Live pull-to-refresh progress reported by the engine (0f..1.5f). */
+    private val _pullProgress = MutableStateFlow(0f)
+    private val _diagnosticsVisible = MutableStateFlow(false)
+
+    // Counters for the in-app diagnostics dialog (no logs, no cable).
+    private var sessionsCreated = 0
+    private var sessionsClosedByApp = 0
+    private var tabsRestored = 0
     private val _shortcutIcons = MutableStateFlow<Map<Long, Bitmap>>(emptyMap())
     private val shortcutIconFetchesInFlight = mutableSetOf<Long>()
     private val shortcutIconLastAttemptAt = mutableMapOf<Long, Long>()
@@ -284,11 +293,19 @@ class BrowserViewModel(
         ChromeSlice(find, fs, closed.size, prompt, contextMenu)
     }
 
-    private val chromeSlice = combine(
+    private val chromeSliceWithLogin = combine(
         chromeBaseSlice,
         _savedLoginSuggestion,
     ) { chrome, suggestion ->
         chrome.copy(savedLoginSuggestion = suggestion)
+    }
+
+    private val chromeSlice = combine(
+        chromeSliceWithLogin,
+        _pullProgress,
+        _diagnosticsVisible,
+    ) { chrome, pull, diagnostics ->
+        chrome.copy(pullRefreshProgress = pull, diagnosticsVisible = diagnostics)
     }
 
     private val historyAndBookmarks = combine(
@@ -406,6 +423,9 @@ class BrowserViewModel(
                 start.icons
             },
             pendingCredentialSave = start.chrome.pendingCredentialSave,
+            pullRefreshProgress = start.chrome.pullRefreshProgress,
+            diagnosticsVisible = start.chrome.diagnosticsVisible,
+            diagnosticsText = buildDiagnostics(activeEntry, activeState),
             savedLoginSuggestion = start.chrome.savedLoginSuggestion
                 ?.takeIf { suggestion -> suggestion.tabId == activeEntry?.tabId },
             pageContextMenu = start.chrome.pageContextMenu,
@@ -789,6 +809,7 @@ class BrowserViewModel(
             }
             createdEngine.onTabSwipe = { delta -> handleFullscreenTabSwipe(delta) }
             createdEngine.onPullToRefresh = { handlePullToRefresh() }
+            createdEngine.onPullProgress = { progress -> _pullProgress.value = progress }
             // If the previous launch died before becoming usable, the
             // persisted engine state of some tab is the prime suspect:
             // restore URLs only, so the same state cannot kill every
@@ -1015,6 +1036,8 @@ class BrowserViewModel(
             BrowserAction.DismissSavedLoginSuggestion -> {
                 _savedLoginSuggestion.value = null
             }
+            BrowserAction.ShowDiagnostics -> _diagnosticsVisible.value = true
+            BrowserAction.DismissDiagnostics -> _diagnosticsVisible.value = false
             BrowserAction.DismissPageContextMenu ->
                 _pageContextMenu.value = null
             BrowserAction.OpenContextMenuLink -> openContextMenuLink(newTab = false)
@@ -1094,14 +1117,9 @@ class BrowserViewModel(
 
     fun switchTab(tabId: String) {
         val entry = entry(tabId) ?: return
-        val session = entry.session
-        if (session != null && !session.isUsable()) {
-            // The content process died while this tab sat in the background
-            // and no death event reached us (or it was missed): suspend it
-            // instead of binding a dead session, which rendered a white
-            // page even Refresh could not revive.
-            handleDeadSession(entry, session)
-        }
+        // Switching tabs must never recreate anything: a session that exists
+        // is bound as-is, and only a suspended tab (no session at all) is
+        // restored. Recreating a live session here reloaded the page.
         if (entry.session == null) {
             // Selecting a suspended/crashed tab is the user's explicit
             // "restore this tab" (Firefox RestoreUseCase semantics).
@@ -1479,16 +1497,10 @@ class BrowserViewModel(
      * an empty tab even though the tab strip still showed its site.
      */
     fun onAppForegrounded() {
-        // Check for quietly-killed sessions *before* flipping the flag:
-        // handleDeadSession() classifies a death as user-witnessed from it,
-        // and a process the system killed while we were backgrounded must
-        // be restored silently below, never presented as a crashed tab.
-        _tabs.value.forEach { entry ->
-            val session = entry.session ?: return@forEach
-            if (!session.isUsable()) {
-                handleDeadSession(entry, session, witnessed = false)
-            }
-        }
+        // Sessions are only ever torn down in response to a death Gecko
+        // actually reported (SessionDied). Polling isUsable() here used to
+        // recreate sessions on every return to the app: recreating a session
+        // reloads the page, which is what made returning look like a refresh.
         appInForeground = true
         // Returning to the app is the explicit "this tab is needed again"
         // moment: a tab whose process died quietly in the background is
@@ -1526,16 +1538,13 @@ class BrowserViewModel(
      */
     fun onBrowserResumed() {
         val active = activeEntry() ?: return
-        val session = active.session
-        if (session != null && !session.isUsable()) {
-            // Died while we were in the background; a death the user did not
-            // witness is restored silently below instead of showing the
-            // crash card.
-            handleDeadSession(active, session, witnessed = false)
-        }
+        // Only a tab that genuinely has no session (suspended, or restored
+        // after a reported death) is rebuilt here; a live session is never
+        // touched, because rebuilding it would reload the page.
         if (!active.showStartPage && !active.crashed && active.session == null) {
             restoreTab(active)
         }
+        _pullProgress.value = 0f
         engine?.finishPullToRefresh()
         engine?.ensureContentDisplayed()
     }
@@ -1900,7 +1909,7 @@ class BrowserViewModel(
                         isPrivate = isPrivate,
                         desktopMode = desktopMode,
                     ),
-                )
+                ).also { sessionsCreated++ }
             } catch (e: Exception) {
                 _engineError.value = e.message ?: e.javaClass.simpleName
                 return null
@@ -1931,6 +1940,7 @@ class BrowserViewModel(
     }
 
     private fun restoreTab(entry: TabEntry) {
+        tabsRestored++
         // A Start Page tab has no page to restore. Creating an engine
         // session for it (which fullscreen tab-switching did when it
         // landed on an empty tab) binds a blank Gecko surface that has
@@ -1963,6 +1973,7 @@ class BrowserViewModel(
             }
         }
         entry.session = session
+        sessionsCreated++
         attachSession(entry, session)
         if (!restoredFromState && entry.lastUrl.isNotBlank()) {
             // No (usable) saved navigation state: reopen the page.
@@ -2022,6 +2033,7 @@ class BrowserViewModel(
         captureThumbnail(entry.tabId)
         entry.savedState = session.latestSavedState() ?: entry.savedState
         sessionJobs.remove(entry.tabId)?.cancel()
+        sessionsClosedByApp++
         session.close()
         entry.session = null
         // The captured engine state is the tab's only remaining page state;
@@ -2401,6 +2413,35 @@ class BrowserViewModel(
         super.onCleared()
     }
 
+    /**
+     * Plain-text diagnostics shown in the overflow menu. It exists because the
+     * two remaining reports (a black pane and a tab that reloads) can only be
+     * settled by knowing what the content surface actually did on that device.
+     * No URLs, no page titles: counters only.
+     */
+    private fun buildDiagnostics(
+        entry: TabEntry?,
+        pageState: SessionPageState,
+    ): String = buildString {
+        append(engine?.diagnostics().orEmpty())
+        append("\nsessions=").append(sessionsCreated)
+        append(" restored=").append(tabsRestored)
+        append(" suspended=").append(sessionsClosedByApp)
+        append(" tabs=").append(_tabs.value.size)
+        append("\nactiveSession=").append(
+            when {
+                entry == null -> "none"
+                entry.session == null -> "suspended"
+                entry.session?.isUsable() == true -> "alive"
+                else -> "dead"
+            },
+        )
+        append(" loading=").append(pageState.isLoading)
+        append(" failed=").append(pageState.loadFailed)
+        append(" err=").append(pageState.loadErrorCode).append('/')
+            .append(pageState.loadErrorCategory)
+    }
+
     private data class TabsSlice(
         val tabs: List<TabEntry>,
         val activeId: String?,
@@ -2416,6 +2457,8 @@ class BrowserViewModel(
         val pendingCredentialSave: CredentialSavePrompt?,
         val pageContextMenu: PageContextMenu?,
         val savedLoginSuggestion: SavedLoginSuggestion? = null,
+        val pullRefreshProgress: Float = 0f,
+        val diagnosticsVisible: Boolean = false,
     )
 
     private data class StartSlice(

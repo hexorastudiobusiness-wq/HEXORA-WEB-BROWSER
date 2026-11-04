@@ -148,6 +148,12 @@ data class BrowserUiState(
     val pendingCredentialSave: CredentialSavePrompt? = null,
     /** A saved login the user may choose to fill on the current page. */
     val savedLoginSuggestion: SavedLoginSuggestion? = null,
+    /** Pull-to-refresh drag progress (0..1.5) for the in-app indicator. */
+    val pullRefreshProgress: Float = 0f,
+    /** Whether the diagnostics dialog is open (overflow menu). */
+    val diagnosticsVisible: Boolean = false,
+    /** Counters describing the content surface; no URLs, no titles. */
+    val diagnosticsText: String = "",
     /** Long-press menu for a link/image/video/audio on the page, if open. */
     val pageContextMenu: PageContextMenu? = null,
     /** History matches for the text currently typed in the address bar. */
@@ -222,6 +228,8 @@ sealed interface BrowserAction {
     /** Fill the offered saved login into the current page (user tap only). */
     data object FillSavedLogin : BrowserAction
     data object DismissSavedLoginSuggestion : BrowserAction
+    data object ShowDiagnostics : BrowserAction
+    data object DismissDiagnostics : BrowserAction
     data object DismissPendingCredential : BrowserAction
     data object DismissPageContextMenu : BrowserAction
     data object OpenContextMenuLink : BrowserAction

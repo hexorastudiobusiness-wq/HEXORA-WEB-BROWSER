@@ -35,6 +35,13 @@ interface BrowserEngine {
     var onPullToRefresh: (() -> Unit)?
 
     /**
+     * Pull-to-refresh progress (0f..1.5f) for the in-app indicator. The engine
+     * reports it from Gecko's own touch result, so the value is honest: it only
+     * grows while the page is at its top and cannot scroll further.
+     */
+    var onPullProgress: ((Float) -> Unit)?
+
+    /**
      * Enables content-level tab swiping (used in fullscreen, where the
      * browser chrome — and its own swipe area — is hidden).
      */
@@ -47,6 +54,13 @@ interface BrowserEngine {
      * This is the deterministic replacement for timer-based recovery.
      */
     fun ensureContentDisplayed() {}
+
+    /**
+     * One-line counters describing what the content surface has been doing
+     * (binds, paint resets, display re-acquisitions). Shown in the in-app
+     * diagnostics dialog so a bug report does not need a logcat cable.
+     */
+    fun diagnostics(): String = ""
 
     /**
      * Ends the pull-to-refresh indicator. The tab layer calls this once the
