@@ -428,3 +428,27 @@ between the tap and the frame that should have shown the dialog — matching
   instead of the Material3 `Surface(onClick)` overload.
 * The dialog closes when the write actually succeeds; a rejected URL (invalid,
   duplicate, cap) keeps it open with the toast explaining why.
+
+## Start Page buttons were dead because the web surface took the touch (0.5.4)
+
+Everything else — dialog state in the ViewModel, an explicit clickable — did not
+help, which ruled out the dialog path: the tap never reached Compose at all.
+The web surface is a real `GeckoView` inside an `AndroidView`; while the Start
+Page is drawn above it, that View received the `MotionEvent` first and consumed
+it. Since 0.5.0 the surface stays mounted under the Start Page (that is what
+stopped the black screens), which is exactly when the buttons stopped working.
+
+Two changes, both needed:
+
+* `HexoraGeckoView.dispatchTouchEvent` returns false (no consumption) while the
+  engine says content touch is disabled, and the engine disables it whenever an
+  overlay is on top (Start Page, crash card, error card). The page gets touches
+  back the moment the overlay goes away; no view is detached, so no surface
+  churn and no black frames.
+* The Start Page's touch-blocking consumer now consumes on the **Main** pass
+  instead of **Final**: children (the tiles) still run first, but the event is
+  already marked handled before the dispatch can reach interop views.
+
+Plus a reliability net: the overflow menu carries an "Add shortcut" entry while
+another shortcut may be added, opening the same dialog from the chrome, so the
+feature is reachable even if an overlay ever swallows a gesture again.

@@ -335,6 +335,15 @@ class GeckoBrowserEngine(
     /** Which session owns which surface, for the foreground repair below. */
     private val surfaceOwners = mutableMapOf<HexoraGeckoView, GeckoBrowserSession>()
 
+    /**
+     * False while an overlay (Start Page, crash card, error card) covers the
+     * content: the web surfaces then ignore touches instead of consuming them,
+     * so the Compose UI on top receives the tap. A real View that consumes the
+     * MotionEvent first is what made Start Page buttons look dead.
+     */
+    @Volatile
+    internal var contentTouchEnabled = true
+
     /** The session currently on screen; only it may change the text zoom. */
     @Volatile
     private var activeSession: GeckoBrowserSession? = null
@@ -429,7 +438,15 @@ class GeckoBrowserEngine(
         host.bringChildToFront(surface)
     }
 
+    /** Applies [enabled] to every live surface; new surfaces inherit it. */
+    internal fun setContentTouchEnabled(enabled: Boolean) {
+        contentTouchEnabled = enabled
+        val views = synchronized(surfaceOwners) { surfaceOwners.keys.toList() }
+        views.forEach { it.touchDeliveryEnabled = enabled }
+    }
+
     internal fun bindSurface(view: HexoraGeckoView, session: GeckoBrowserSession) {
+        view.touchDeliveryEnabled = contentTouchEnabled
         synchronized(surfaceOwners) { surfaceOwners[view] = session }
     }
 
@@ -684,6 +701,26 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
     private val pullThresholdPx = PULL_THRESHOLD_DP * density
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
 
+    /**
+     * While false the view refuses the gesture outright (no consumption), so a
+     * Compose overlay drawn above it — Start Page, crash card, error card —
+     * receives the tap. A consuming View would swallow it first.
+     */
+    var touchDeliveryEnabled: Boolean = true
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (!touchDeliveryEnabled) {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                // Nothing took this gesture: make sure no stale pull state
+                // survives into the next real one.
+                pulling = false
+                reportPull(0f)
+            }
+            return false
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
     private var downY = 0f
     /** Gecko's answer for the current gesture; pessimistic until it arrives. */
     private var pageCanScrollUp = true
@@ -842,6 +879,7 @@ internal class GeckoBrowserSession(
             // Hexora provides its own offline credential vault; GeckoView's
             // Android Autofill bridge would replace that delegate.
             setAutofillEnabled(false)
+            touchDeliveryEnabled = engine.contentTouchEnabled
             onPullProgress = { progress -> engine.onPullProgress?.invoke(progress) }
             onPullRefresh = { engine.onPullToRefresh?.invoke() }
             onViewAttached = { attached ->
@@ -1174,6 +1212,10 @@ internal class GeckoBrowserSession(
 
     override fun presentContentView(container: View) {
         engine.present(this, container)
+    }
+
+    override fun setContentTouchEnabled(enabled: Boolean) {
+        engine.setContentTouchEnabled(enabled)
     }
 
     override fun setAutofillCredential(credential: AutofillCredential?) {

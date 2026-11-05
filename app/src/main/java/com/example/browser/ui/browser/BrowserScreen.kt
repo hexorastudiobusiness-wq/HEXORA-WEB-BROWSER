@@ -995,6 +995,21 @@ private fun BrowserPageContent(
             )
         }
 
+        // An overlay drawn above the web surface must own the gesture. The
+        // GeckoView is a real View and consumed the tap before any Compose
+        // button on the Start Page could see it — that is why the + tile and
+        // the shortcut tiles felt dead. While an overlay is visible the
+        // surface refuses touches; when it goes away the page gets them back.
+        val overlayOnTop = state.showStartPage || state.activeTabCrashed ||
+            state.errorMessage != null
+        val touchSession = state.activeSession
+        LaunchedEffect(touchSession, overlayOnTop) {
+            touchSession?.setContentTouchEnabled(!overlayOnTop)
+        }
+        DisposableEffect(touchSession) {
+            onDispose { touchSession?.setContentTouchEnabled(true) }
+        }
+
         if (state.showStartPage) {
             StartPage(
                 state = state,
@@ -1019,11 +1034,15 @@ private fun BrowserPageContent(
                     .fillMaxSize()
                     // Opaque and touch-blocking: the page underneath must not
                     // show through or receive touches meant for the Start Page.
+                    // Consumed on the MAIN pass, not Final: children (the tiles)
+                    // run first, and only then is the event marked handled, so
+                    // the native view underneath cannot take it — final-pass
+                    // consumption happens after the dispatch to interop views.
                     .background(MaterialTheme.colorScheme.background)
                     .pointerInput(Unit) {
                         awaitPointerEventScope {
                             while (true) {
-                                awaitPointerEvent(PointerEventPass.Final)
+                                awaitPointerEvent(PointerEventPass.Main)
                                     .changes.forEach { it.consume() }
                             }
                         }
@@ -2101,6 +2120,18 @@ private fun BrowserBottomBar(
                             onAction(BrowserAction.SavePageAsPdf)
                         },
                     )
+                    if (state.canAddStartShortcut) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.start_add_shortcut)) },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Add, contentDescription = null)
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onAction(BrowserAction.ShowAddShortcutDialog)
+                            },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.menu_add_to_home)) },
                         leadingIcon = {

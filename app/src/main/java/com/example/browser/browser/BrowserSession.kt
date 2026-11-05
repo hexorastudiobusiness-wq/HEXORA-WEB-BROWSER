@@ -368,6 +368,15 @@ interface BrowserSession {
      */
     fun presentContentView(container: View)
 
+    /**
+     * Enables or disables touch delivery to this tab's web surface. While an
+     * overlay covers the content (Start Page, crash card, error card) the
+     * native surface must not receive the gesture at all: a real View would
+     * consume the MotionEvent before the Compose overlay drawn above it ever
+     * sees it, which is what made Start Page buttons look dead.
+     */
+    fun setContentTouchEnabled(enabled: Boolean)
+
     /** Supplies (or clears) the locally saved login to offer on this page. */
     fun setAutofillCredential(credential: AutofillCredential?)
 
