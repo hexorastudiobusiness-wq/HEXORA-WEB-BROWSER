@@ -499,3 +499,26 @@ Diagnostics dialog:
 Reading it: taps > 0 with no dialog means the tap arrives and the dialog/state
 path is at fault; taps = 0 means Compose never saw the touch; touches blocked on
 a hidden container would mean the surface is still on the hit path.
+
+## The tap arrives, the click does not (0.5.7)
+
+Diagnostics from the device on a Start Page tab:
+
+```
+version=0.5.6 (33) bindings=0 surfaces=0 sessions=0 activeSession=suspended
+touchBlocked=0 contentHidden=true shortcutTaps=39
+```
+
+That kills the interop theory outright: with **no session and no surface at
+all**, there is no `GeckoView` on the hit path, and `shortcutTaps=39` proves the
+gesture does reach the Compose node (the counter sits on the tile and runs on
+the non-consuming Initial pass). So the touch is delivered, but the standard
+`Modifier.clickable` never turns it into a click — its tap only completes when
+nothing consumes the gesture on the way back up, and something above the tile
+does.
+
+The tile therefore completes the tap itself: the same watcher that counts the
+down also decides a tap (down → stay inside `touchSlop` → up) and calls the
+same `onClick`. It consumes nothing, so list scrolling is untouched, and
+`clickable` stays for ripple/semantics (calling the action twice is a no-op:
+the dialog request is a value that dedupes).

@@ -1692,12 +1692,37 @@ private fun AddShortcutTile(
         modifier = modifier
             .height(108.dp)
             .clip(RoundedCornerShape(26.dp))
+            // The tile completes the tap itself, on the Initial pass.
+            // Diagnostics proved the gesture arrives here (39 taps counted)
+            // while the standard clickable never produced a click: its tap
+            // only completes if nothing consumes the gesture on the way back
+            // up, and something above the tile does. This watcher never
+            // consumes anything, so scrolling still belongs to the list, and
+            // it decides a tap by itself: down, stay inside touch slop, up.
             .pointerInput(Unit) {
+                val slop = viewConfiguration.touchSlop
                 awaitPointerEventScope {
+                    var downX = 0f
+                    var downY = 0f
+                    var tracking = false
+                    var movedFar = false
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
-                        if (event.changes.any { it.pressed && !it.previousPressed }) {
+                        val change = event.changes.firstOrNull() ?: continue
+                        if (change.pressed && !change.previousPressed) {
+                            downX = change.position.x
+                            downY = change.position.y
+                            tracking = true
+                            movedFar = false
                             onTapSignal()
+                        } else if (tracking) {
+                            val dx = change.position.x - downX
+                            val dy = change.position.y - downY
+                            if (dx * dx + dy * dy > slop * slop) movedFar = true
+                            if (!change.pressed) {
+                                tracking = false
+                                if (!movedFar) onClick()
+                            }
                         }
                     }
                 }
