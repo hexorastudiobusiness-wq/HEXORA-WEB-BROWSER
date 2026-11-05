@@ -342,7 +342,7 @@ class GeckoBrowserEngine(
      * MotionEvent first is what made Start Page buttons look dead.
      */
     @Volatile
-    internal var contentTouchEnabled = true
+    internal var contentTouchesAllowed = true
 
     /** The session currently on screen; only it may change the text zoom. */
     @Volatile
@@ -440,13 +440,13 @@ class GeckoBrowserEngine(
 
     /** Applies [enabled] to every live surface; new surfaces inherit it. */
     internal fun setContentTouchEnabled(enabled: Boolean) {
-        contentTouchEnabled = enabled
+        contentTouchesAllowed = enabled
         val views = synchronized(surfaceOwners) { surfaceOwners.keys.toList() }
         views.forEach { it.touchDeliveryEnabled = enabled }
     }
 
     internal fun bindSurface(view: HexoraGeckoView, session: GeckoBrowserSession) {
-        view.touchDeliveryEnabled = contentTouchEnabled
+        view.touchDeliveryEnabled = contentTouchesAllowed
         synchronized(surfaceOwners) { surfaceOwners[view] = session }
     }
 
@@ -879,7 +879,7 @@ internal class GeckoBrowserSession(
             // Hexora provides its own offline credential vault; GeckoView's
             // Android Autofill bridge would replace that delegate.
             setAutofillEnabled(false)
-            touchDeliveryEnabled = engine.contentTouchEnabled
+            touchDeliveryEnabled = engine.contentTouchesAllowed
             onPullProgress = { progress -> engine.onPullProgress?.invoke(progress) }
             onPullRefresh = { engine.onPullToRefresh?.invoke() }
             onViewAttached = { attached ->
