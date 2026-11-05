@@ -438,11 +438,12 @@ class GeckoBrowserEngine(
         host.bringChildToFront(surface)
     }
 
-    /** Applies [enabled] to every live surface; new surfaces inherit it. */
-    internal fun setContentTouchEnabled(enabled: Boolean) {
-        contentTouchesAllowed = enabled
+    /** Applies [allowed] to every live surface; new surfaces inherit it. */
+    override fun setContentTouchAllowed(allowed: Boolean) {
+        if (contentTouchesAllowed == allowed) return
+        contentTouchesAllowed = allowed
         val views = synchronized(surfaceOwners) { surfaceOwners.keys.toList() }
-        views.forEach { it.touchDeliveryEnabled = enabled }
+        views.forEach { it.touchDeliveryEnabled = allowed }
     }
 
     internal fun bindSurface(view: HexoraGeckoView, session: GeckoBrowserSession) {
@@ -1212,10 +1213,6 @@ internal class GeckoBrowserSession(
 
     override fun presentContentView(container: View) {
         engine.present(this, container)
-    }
-
-    override fun setContentTouchEnabled(enabled: Boolean) {
-        engine.setContentTouchEnabled(enabled)
     }
 
     override fun setAutofillCredential(credential: AutofillCredential?) {

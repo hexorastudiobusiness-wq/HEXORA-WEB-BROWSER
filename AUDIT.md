@@ -452,3 +452,27 @@ Two changes, both needed:
 Plus a reliability net: the overflow menu carries an "Add shortcut" entry while
 another shortcut may be added, opening the same dialog from the chrome, so the
 feature is reachable even if an overlay ever swallows a gesture again.
+
+## Start Page touch ownership, third attempt (0.5.5)
+
+Device evidence that settled it: **the "Add shortcut" entry in the overflow menu
+worked, the "+" tile did not.** The dialog, the ViewModel action, the database
+and the Start Page refresh were all fine; only the tile — the one control drawn
+over the web surface — was dead.
+
+* An empty Start Page tab has **no session**: sessions are created lazily
+  (`createTab`: "an engine session is only created when the tab is actually
+  going to load something"). So `state.activeSession` is null there.
+* The 0.5.4 attempt routed the fix through the session
+  (`state.activeSession?.setContentTouchEnabled(false)`), which on that screen
+  is a no-op: the call never happened, and nothing logged a warning.
+* The container also keeps the *previous* tab's surface `VISIBLE` in that state,
+  so a live `GeckoView` is still a child view of the Compose host, and a real
+  View takes the gesture before Compose content drawn over it.
+
+The flag is now driven from the ViewModel through `BrowserEngine`
+(`setContentTouchAllowed`), computed from tab and page state on every revision,
+tab change and page-state change, plus explicitly when the Start Page flag flips
+or a tab crashes. Surfaces created later inherit the current value in
+`bindSurface`. Nothing is detached and no visibility changes, so the black
+screen work is untouched.

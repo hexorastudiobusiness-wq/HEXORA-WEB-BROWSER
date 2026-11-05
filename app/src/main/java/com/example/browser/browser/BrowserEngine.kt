@@ -56,6 +56,19 @@ interface BrowserEngine {
     fun ensureContentDisplayed() {}
 
     /**
+     * Enables or disables touch delivery to the web surfaces.
+     *
+     * While an overlay (Start Page, crash card, load-error card) covers the
+     * content, the surface must not take the gesture: GeckoView is a real View
+     * and consumes the MotionEvent before the Compose UI drawn on top of it,
+     * so every button over the content area was dead. Engine-level on purpose —
+     * it must not depend on the active tab having a session (an empty Start
+     * Page tab has none, which is why a session-scoped call silently did
+     * nothing).
+     */
+    fun setContentTouchAllowed(allowed: Boolean) {}
+
+    /**
      * One-line counters describing what the content surface has been doing
      * (binds, paint resets, display re-acquisitions). Shown in the in-app
      * diagnostics dialog so a bug report does not need a logcat cable.

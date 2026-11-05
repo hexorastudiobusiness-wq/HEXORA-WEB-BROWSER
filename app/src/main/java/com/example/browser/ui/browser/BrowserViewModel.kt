@@ -811,6 +811,19 @@ class BrowserViewModel(
         MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
     init {
+        // Touch ownership between the web surface and Compose content.
+        // GeckoView is a real View: it takes the gesture before any Compose
+        // button drawn over it, so while an overlay is on screen the surface
+        // must refuse touches. Driven here, from tab/page state, and through
+        // the ENGINE — a Start Page tab has no session yet (sessions are
+        // created lazily), and routing this through the session is exactly why
+        // the previous attempt silently did nothing.
+        viewModelScope.launch {
+            combine(_tabRevision, _activeTabId, _pageStates) { revision, activeId, states ->
+                Triple(revision, activeId, states)
+            }.collect { syncContentTouch() }
+        }
+
         // Tab thumbnails are not restored after process death, so screenshots
         // from a previous process would only be orphaned page images. (The
         // tab strip itself — URLs/titles — is restored via TabSessionStore.)
@@ -1481,11 +1494,28 @@ class BrowserViewModel(
         _findVisible.value = false
     }
 
+    /**
+     * Tells the engine whether the web surface may take touches right now.
+     * An overlay is on top whenever the Start Page is up, the tab crashed, or
+     * the load failed (the error card) — none of those may leave the native
+     * surface owning the gesture.
+     */
+    private fun syncContentTouch() {
+        val entry = activeEntry()
+        val pageState = entry?.let { _pageStates.value[it.tabId] }
+        val overlayOnTop = entry == null ||
+            entry.showStartPage ||
+            entry.crashed ||
+            pageState?.loadFailed == true
+        engine?.setContentTouchAllowed(!overlayOnTop)
+    }
+
     private fun setShowStartPage(entry: TabEntry, show: Boolean) {
         if (entry.showStartPage == show) return
         entry.showStartPage = show
         if (show) _userFullscreen.value = false
         _tabRevision.update { it + 1 }
+        syncContentTouch()
         requestPersistTabs()
     }
 
@@ -2272,6 +2302,9 @@ class BrowserViewModel(
         deadSession.close()
         entry.session = null
         entry.crashed = witnessed && entry.lastUrl.isNotBlank()
+        // The crash card is drawn over the content area; the surface must stop
+        // taking touches the moment it appears.
+        syncContentTouch()
         if (!entry.crashed && appInForeground &&
             entry.tabId == _activeTabId.value
         ) {
