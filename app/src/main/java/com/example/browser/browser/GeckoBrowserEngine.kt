@@ -344,6 +344,13 @@ class GeckoBrowserEngine(
     @Volatile
     internal var contentTouchesAllowed = true
 
+    /** True while the container is hidden under an overlay. */
+    @Volatile
+    private var contentHidden = false
+
+    /** Touches refused by the surface while an overlay was on top. */
+    private var blockedTouches = 0
+
     /** The session currently on screen; only it may change the text zoom. */
     @Volatile
     private var activeSession: GeckoBrowserSession? = null
@@ -387,6 +394,7 @@ class GeckoBrowserEngine(
                 ViewGroup.LayoutParams.MATCH_PARENT,
             )
         }
+        created.visibility = if (contentHidden) View.INVISIBLE else View.VISIBLE
         contentContainer = created
         contentContainerContext = context
         (created.parent as? ViewGroup)?.removeView(created)
@@ -436,6 +444,17 @@ class GeckoBrowserEngine(
             child.visibility = if (child === surface) View.VISIBLE else View.INVISIBLE
         }
         host.bringChildToFront(surface)
+    }
+
+    override fun setContentHidden(hidden: Boolean) {
+        if (contentHidden == hidden) return
+        contentHidden = hidden
+        contentContainer?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
+    }
+
+    /** Applied from [HexoraGeckoView] when it refuses a gesture. */
+    internal fun noteBlockedTouch() {
+        blockedTouches++
     }
 
     /** Applies [allowed] to every live surface; new surfaces inherit it. */
@@ -501,6 +520,8 @@ class GeckoBrowserEngine(
             if (appliedZoomPercent < 0) textZoomPercent else appliedZoomPercent,
         )
         append(" surfaces=").append(contentContainer?.childCount ?: 0)
+        append(" touchBlocked=").append(blockedTouches)
+        append(" contentHidden=").append(contentHidden)
     }
 
     override fun finishPullToRefresh() {
@@ -709,9 +730,13 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
      */
     var touchDeliveryEnabled: Boolean = true
 
+    /** Called for every gesture this view refuses while an overlay is up. */
+    var onBlockedTouch: (() -> Unit)? = null
+
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (!touchDeliveryEnabled) {
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                onBlockedTouch?.invoke()
                 // Nothing took this gesture: make sure no stale pull state
                 // survives into the next real one.
                 pulling = false
@@ -881,6 +906,7 @@ internal class GeckoBrowserSession(
             // Android Autofill bridge would replace that delegate.
             setAutofillEnabled(false)
             touchDeliveryEnabled = engine.contentTouchesAllowed
+            onBlockedTouch = { engine.noteBlockedTouch() }
             onPullProgress = { progress -> engine.onPullProgress?.invoke(progress) }
             onPullRefresh = { engine.onPullToRefresh?.invoke() }
             onViewAttached = { attached ->

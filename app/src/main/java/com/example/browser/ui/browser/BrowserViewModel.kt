@@ -169,6 +169,13 @@ class BrowserViewModel(
      */
     private val _shortcutDialog = MutableStateFlow<ShortcutDialogRequest?>(null)
 
+    /**
+     * Diagnostics: how many taps physically reached the "+" tile. It is a
+     * plain field on purpose — a `remember` inside the tile would reset with
+     * the same recomposition that (possibly) loses the tap.
+     */
+    private var shortcutTileTaps = 0
+
     /** Zoom shown by the panel: the active site's stored value, live-edited. */
     private val _zoomPercent = MutableStateFlow(SitePreferencesStore.DEFAULT_ZOOM)
 
@@ -1187,6 +1194,7 @@ class BrowserViewModel(
                 }
             }
             BrowserAction.DismissShortcutMessage -> _shortcutMessage.value = null
+            BrowserAction.NoteShortcutTileTap -> shortcutTileTaps++
             BrowserAction.ShowAddShortcutDialog ->
                 _shortcutDialog.value = ShortcutDialogRequest()
             is BrowserAction.ShowEditShortcutDialog ->
@@ -1508,6 +1516,7 @@ class BrowserViewModel(
             entry.crashed ||
             pageState?.loadFailed == true
         engine?.setContentTouchAllowed(!overlayOnTop)
+        engine?.setContentHidden(overlayOnTop)
     }
 
     private fun setShowStartPage(entry: TabEntry, show: Boolean) {
@@ -2679,6 +2688,7 @@ class BrowserViewModel(
                 else -> "dead"
             },
         )
+        append(" shortcutTaps=").append(shortcutTileTaps)
         append(" loading=").append(pageState.isLoading)
         append(" failed=").append(pageState.loadFailed)
         append(" err=").append(pageState.loadErrorCode).append('/')

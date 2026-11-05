@@ -69,6 +69,17 @@ interface BrowserEngine {
     fun setContentTouchAllowed(allowed: Boolean) {}
 
     /**
+     * Hides or shows the whole content container.
+     *
+     * Refusing touches is not enough while an overlay is on top: Compose picks
+     * the interop view as the hit target for the area it occupies, so nothing
+     * drawn over it receives the tap. An INVISIBLE container is skipped by the
+     * view hierarchy entirely. The view stays attached (the session is kept);
+     * only its surface is released, which the engine already recovers from.
+     */
+    fun setContentHidden(hidden: Boolean) {}
+
+    /**
      * One-line counters describing what the content surface has been doing
      * (binds, paint resets, display re-acquisitions). Shown in the in-app
      * diagnostics dialog so a bug report does not need a logcat cable.

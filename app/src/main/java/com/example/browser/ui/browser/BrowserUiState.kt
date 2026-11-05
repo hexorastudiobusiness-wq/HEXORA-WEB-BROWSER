@@ -263,6 +263,8 @@ sealed interface BrowserAction {
     data object OpenContextMenuMediaInNewTab : BrowserAction
     data object DownloadContextMenuLink : BrowserAction
     data object DownloadContextMenuMedia : BrowserAction
+    /** Diagnostics only: a tap physically reached the "+" tile. */
+    data object NoteShortcutTileTap : BrowserAction
     data object ShowAddShortcutDialog : BrowserAction
     data class ShowEditShortcutDialog(
         val id: Long,

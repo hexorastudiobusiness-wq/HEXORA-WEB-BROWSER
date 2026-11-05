@@ -1003,6 +1003,9 @@ private fun BrowserPageContent(
                 onRequestAddShortcut = {
                     onAction(BrowserAction.ShowAddShortcutDialog)
                 },
+                onShortcutTapSignal = {
+                    onAction(BrowserAction.NoteShortcutTileTap)
+                },
                 onRequestEditShortcut = { shortcut ->
                     onAction(
                         BrowserAction.ShowEditShortcutDialog(
@@ -1342,6 +1345,7 @@ private fun StartPage(
     onOpenUrl: (String) -> Unit,
     onNewTab: () -> Unit,
     onRequestAddShortcut: () -> Unit,
+    onShortcutTapSignal: () -> Unit,
     onRequestEditShortcut: (StartShortcut) -> Unit,
     onDeleteShortcut: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -1478,6 +1482,7 @@ private fun StartPage(
                         if (shortcut == null) {
                             AddShortcutTile(
                                 onClick = onRequestAddShortcut,
+                                onTapSignal = onShortcutTapSignal,
                                 modifier = Modifier.weight(1f),
                             )
                         } else {
@@ -1680,12 +1685,21 @@ private fun StartShortcutTile(
 @Composable
 private fun AddShortcutTile(
     onClick: () -> Unit,
+    onTapSignal: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
         modifier = modifier
             .height(108.dp)
             .clip(RoundedCornerShape(26.dp))
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.changes.any { it.changedToDown() }) onTapSignal()
+                    }
+                }
+            }
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(26.dp),
         color = MaterialTheme.colorScheme.surface,

@@ -476,3 +476,26 @@ tab change and page-state change, plus explicitly when the Start Page flag flips
 or a tab crashes. Surfaces created later inherit the current value in
 `bindSurface`. Nothing is detached and no visibility changes, so the black
 screen work is untouched.
+
+## Start Page tile: hide the container and measure (0.5.6)
+
+Refusing touches was not enough. Compose resolves the tap inside the content
+area to the interop view, so nothing drawn over a live web surface receives it —
+even when that view returns false from `dispatchTouchEvent`. The surface is now
+made `INVISIBLE` (engine-level, from the same overlay state) while an overlay is
+on top: an invisible view is skipped by hit-testing entirely. Nothing is
+detached and the session is untouched; only the surface is released, which the
+engine already recovers from (`ensureContentDisplayed`, paint-status recovery).
+
+This build also carries the measurement that ends the guessing, printed in the
+Diagnostics dialog:
+
+* `shortcutTaps=` — taps that physically reached the "+" tile (counted on the
+  Initial pointer pass, non-consuming, so the button's own handling is
+  unaffected).
+* `touchBlocked=` — gestures the web surface refused while an overlay was up.
+* `contentHidden=` — whether the container was hidden at that moment.
+
+Reading it: taps > 0 with no dialog means the tap arrives and the dialog/state
+path is at fault; taps = 0 means Compose never saw the touch; touches blocked on
+a hidden container would mean the surface is still on the hit path.
