@@ -426,6 +426,33 @@ fun BrowserScreen(
         )
     }
 
+    // The shortcut dialog is owned by the ViewModel and shown here, at the
+    // same level as the other dialogs, instead of inside the Start Page
+    // subtree. On device, state kept inside the Start Page lost the request
+    // between the tap and the next frame, so the + tile looked dead.
+    state.shortcutDialog?.let { request ->
+        ShortcutDialog(
+            title = stringResource(
+                if (request.id == null) {
+                    R.string.start_shortcut_add_title
+                } else {
+                    R.string.start_shortcut_edit_title
+                },
+            ),
+            initialName = request.title,
+            initialAddress = request.url,
+            onDismiss = { viewModel.onAction(BrowserAction.DismissShortcutDialog) },
+            onSave = { title, url ->
+                val id = request.id
+                if (id == null) {
+                    viewModel.onAction(BrowserAction.AddStartShortcut(title, url))
+                } else {
+                    viewModel.onAction(BrowserAction.EditStartShortcut(id, title, url))
+                }
+            },
+        )
+    }
+
     state.pageContextMenu?.let { menu ->
         PageContextMenuSheet(
             menu = menu,
@@ -973,11 +1000,17 @@ private fun BrowserPageContent(
                 state = state,
                 onOpenUrl = onOpenUrl,
                 onNewTab = onNewTab,
-                onAddShortcut = { title, url ->
-                    onAction(BrowserAction.AddStartShortcut(title, url))
+                onRequestAddShortcut = {
+                    onAction(BrowserAction.ShowAddShortcutDialog)
                 },
-                onEditShortcut = { id, title, url ->
-                    onAction(BrowserAction.EditStartShortcut(id, title, url))
+                onRequestEditShortcut = { shortcut ->
+                    onAction(
+                        BrowserAction.ShowEditShortcutDialog(
+                            id = shortcut.id,
+                            title = shortcut.title,
+                            url = shortcut.url,
+                        ),
+                    )
                 },
                 onDeleteShortcut = { id ->
                     onAction(BrowserAction.DeleteStartShortcut(id))
@@ -1308,40 +1341,11 @@ private fun StartPage(
     state: BrowserUiState,
     onOpenUrl: (String) -> Unit,
     onNewTab: () -> Unit,
-    onAddShortcut: (String, String) -> Unit,
-    onEditShortcut: (Long, String, String) -> Unit,
+    onRequestAddShortcut: () -> Unit,
+    onRequestEditShortcut: (StartShortcut) -> Unit,
     onDeleteShortcut: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var addDialogVisible by remember { mutableStateOf(false) }
-    var shortcutPendingEdit by remember { mutableStateOf<StartShortcut?>(null) }
-
-    if (addDialogVisible) {
-        ShortcutDialog(
-            title = stringResource(R.string.start_shortcut_add_title),
-            initialName = "",
-            initialAddress = "",
-            onDismiss = { addDialogVisible = false },
-            onSave = { title, url ->
-                onAddShortcut(title, url)
-                addDialogVisible = false
-            },
-        )
-    }
-
-    shortcutPendingEdit?.let { shortcut ->
-        ShortcutDialog(
-            title = stringResource(R.string.start_shortcut_edit_title),
-            initialName = shortcut.title,
-            initialAddress = shortcut.url,
-            onDismiss = { shortcutPendingEdit = null },
-            onSave = { title, url ->
-                onEditShortcut(shortcut.id, title, url)
-                shortcutPendingEdit = null
-            },
-        )
-    }
-
     LazyColumn(
         modifier = modifier.padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -1473,7 +1477,7 @@ private fun StartPage(
                     rowShortcuts.forEach { shortcut ->
                         if (shortcut == null) {
                             AddShortcutTile(
-                                onClick = { addDialogVisible = true },
+                                onClick = onRequestAddShortcut,
                                 modifier = Modifier.weight(1f),
                             )
                         } else {
@@ -1481,7 +1485,7 @@ private fun StartPage(
                                 shortcut = shortcut,
                                 icon = state.startShortcutIcons[shortcut.id],
                                 onClick = { onOpenUrl(shortcut.url) },
-                                onEdit = { shortcutPendingEdit = shortcut },
+                                onEdit = { onRequestEditShortcut(shortcut) },
                                 onDelete = { onDeleteShortcut(shortcut.id) },
                                 modifier = Modifier.weight(1f),
                             )
@@ -1679,8 +1683,10 @@ private fun AddShortcutTile(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        onClick = onClick,
-        modifier = modifier.height(108.dp),
+        modifier = modifier
+            .height(108.dp)
+            .clip(RoundedCornerShape(26.dp))
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(26.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(

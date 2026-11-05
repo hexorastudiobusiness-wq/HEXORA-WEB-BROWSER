@@ -161,6 +161,14 @@ class BrowserViewModel(
     /** One-shot shortcut feedback (string resource) for the UI toast. */
     private val _shortcutMessage = MutableStateFlow<Int?>(null)
 
+    /**
+     * Add/edit Start Page shortcut dialog. Deliberately ViewModel state: the
+     * Start Page is an overlay drawn over the web surface, and dialog state
+     * kept inside that subtree disappeared with a recomposition on device
+     * (tapping the + tile looked like a dead button).
+     */
+    private val _shortcutDialog = MutableStateFlow<ShortcutDialogRequest?>(null)
+
     /** Zoom shown by the panel: the active site's stored value, live-edited. */
     private val _zoomPercent = MutableStateFlow(SitePreferencesStore.DEFAULT_ZOOM)
 
@@ -335,11 +343,13 @@ class BrowserViewModel(
         _zoomPanelVisible,
         _zoomPercent,
         _shortcutMessage,
-    ) { chrome, zoomVisible, zoomPercent, shortcutMessage ->
+        _shortcutDialog,
+    ) { chrome, zoomVisible, zoomPercent, shortcutMessage, shortcutDialog ->
         chrome.copy(
             zoomPanelVisible = zoomVisible,
             zoomPercent = zoomPercent,
             shortcutMessage = shortcutMessage,
+            shortcutDialog = shortcutDialog,
         )
     }
 
@@ -461,6 +471,7 @@ class BrowserViewModel(
             zoomPanelVisible = start.chrome.zoomPanelVisible,
             zoomPercent = start.chrome.zoomPercent,
             shortcutMessage = start.chrome.shortcutMessage,
+            shortcutDialog = start.chrome.shortcutDialog,
             diagnosticsVisible = start.chrome.diagnosticsVisible,
             diagnosticsText = buildDiagnostics(activeEntry, activeState),
             savedLoginSuggestion = start.chrome.savedLoginSuggestion
@@ -1149,6 +1160,7 @@ class BrowserViewModel(
                             if (shortcutId == null) {
                                 R.string.shortcut_failed
                             } else {
+                                _shortcutDialog.value = null
                                 // If this site is already open and loaded, its
                                 // real icon can replace the letter placeholder
                                 // immediately.
@@ -1162,6 +1174,15 @@ class BrowserViewModel(
                 }
             }
             BrowserAction.DismissShortcutMessage -> _shortcutMessage.value = null
+            BrowserAction.ShowAddShortcutDialog ->
+                _shortcutDialog.value = ShortcutDialogRequest()
+            is BrowserAction.ShowEditShortcutDialog ->
+                _shortcutDialog.value = ShortcutDialogRequest(
+                    id = action.id,
+                    title = action.title,
+                    url = action.url,
+                )
+            BrowserAction.DismissShortcutDialog -> _shortcutDialog.value = null
             is BrowserAction.EditStartShortcut -> {
                 viewModelScope.launch {
                     val resolvedUrl = resolveUserInput(action.url)
@@ -1172,6 +1193,9 @@ class BrowserViewModel(
                         title = action.title,
                         url = resolvedUrl,
                     )
+                    if (updated) {
+                        _shortcutDialog.value = null
+                    }
                     if (updated && previous != null && previous.url != resolvedUrl) {
                         withContext(Dispatchers.IO) {
                             shortcutIconStore.delete(action.id)
@@ -2648,6 +2672,7 @@ class BrowserViewModel(
         val zoomPanelVisible: Boolean = false,
         val zoomPercent: Int = SitePreferencesStore.DEFAULT_ZOOM,
         val shortcutMessage: Int? = null,
+        val shortcutDialog: ShortcutDialogRequest? = null,
     )
 
     private data class StartSlice(

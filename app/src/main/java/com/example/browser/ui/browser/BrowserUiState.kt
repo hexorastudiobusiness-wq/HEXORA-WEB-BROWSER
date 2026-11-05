@@ -29,6 +29,13 @@ data class StartShortcut(
     val url: String,
 )
 
+/** Add ([id] == null) or edit request for the Start Page shortcut dialog. */
+data class ShortcutDialogRequest(
+    val id: Long? = null,
+    val title: String = "",
+    val url: String = "",
+)
+
 /** A pending "save this login?" prompt. The password never enters UI state. */
 data class CredentialSavePrompt(
     val origin: String,
@@ -153,6 +160,14 @@ data class BrowserUiState(
     val zoomPanelVisible: Boolean = false,
     /** One-shot message after a shortcut write (string resource), shown as a toast. */
     val shortcutMessage: Int? = null,
+    /**
+     * Open add/edit dialog for a Start Page shortcut; null when closed.
+     * It lives in the ViewModel, not in the Start Page composable, because the
+     * Start Page is drawn over the web surface and a dialog whose state lives
+     * in that subtree could be dropped by a recomposition — which is exactly
+     * how "tap the + tile, nothing happens" looked on device.
+     */
+    val shortcutDialog: ShortcutDialogRequest? = null,
     /** Zoom of the site in front of the user, in percent. */
     val zoomPercent: Int = 100,
     /** Whether the diagnostics dialog is open (overflow menu). */
@@ -248,6 +263,13 @@ sealed interface BrowserAction {
     data object OpenContextMenuMediaInNewTab : BrowserAction
     data object DownloadContextMenuLink : BrowserAction
     data object DownloadContextMenuMedia : BrowserAction
+    data object ShowAddShortcutDialog : BrowserAction
+    data class ShowEditShortcutDialog(
+        val id: Long,
+        val title: String,
+        val url: String,
+    ) : BrowserAction
+    data object DismissShortcutDialog : BrowserAction
     data class AddStartShortcut(val title: String, val url: String) : BrowserAction
     data class EditStartShortcut(val id: Long, val title: String, val url: String) : BrowserAction
     data class DeleteStartShortcut(val id: Long) : BrowserAction

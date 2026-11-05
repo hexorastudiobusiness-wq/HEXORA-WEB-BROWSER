@@ -407,3 +407,24 @@ a switch/refresh).
 3. **App-wide:** no leftover shared-view references, no duplicate string
    resources, no new API outside the pinned GeckoView, and the diagnostics
    counters still describe the per-tab model.
+
+## The Start Page "+" tile looked dead (0.5.3, local)
+
+Device: tapping the "+" tile on the Start Page did nothing, pressing Back then
+closed the app (so no dialog was on screen), and a second tap sometimes worked.
+
+The dialog's open/closed state lived in a `remember` inside `StartPage`. The
+Start Page is an overlay drawn over the web surface and recomposes on every
+browser state emission (title, progress, scroll), so the request could be lost
+between the tap and the frame that should have shown the dialog — matching
+"first tap does nothing, second sometimes works".
+
+* The dialog request (`ShortcutDialogRequest`: add when `id == null`, edit
+  otherwise) is now ViewModel state and the dialog is composed next to the
+  other app-level dialogs in `BrowserScreen`, outside the Start Page subtree.
+* The Start Page only dispatches `ShowAddShortcutDialog` /
+  `ShowEditShortcutDialog`; the tile no longer owns a dialog.
+* The tile uses an explicit `Modifier.clickable` on the clipped tile area
+  instead of the Material3 `Surface(onClick)` overload.
+* The dialog closes when the write actually succeeds; a rejected URL (invalid,
+  duplicate, cap) keeps it open with the toast explaining why.
