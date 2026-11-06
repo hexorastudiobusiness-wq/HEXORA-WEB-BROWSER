@@ -301,6 +301,16 @@ private fun AppearancePane(settings: BrowserSettingsState, viewModel: SettingsVi
         selected = settings.themeMode == ThemeMode.HEXORA,
         onClick = { viewModel.setThemeMode(ThemeMode.HEXORA) },
     )
+    RadioRow(
+        label = stringResource(R.string.theme_paper),
+        selected = settings.themeMode == ThemeMode.PAPER,
+        onClick = { viewModel.setThemeMode(ThemeMode.PAPER) },
+    )
+    RadioRow(
+        label = stringResource(R.string.theme_aurora),
+        selected = settings.themeMode == ThemeMode.AURORA,
+        onClick = { viewModel.setThemeMode(ThemeMode.AURORA) },
+    )
 }
 
 @Composable

@@ -12,7 +12,19 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 enum class ThemeMode {
-    SYSTEM, LIGHT, DARK, HEXORA;
+    SYSTEM,
+    LIGHT,
+    DARK,
+
+    /** Studio theme: the logo's blue and amber on near-black navy. */
+    HEXORA,
+
+    /** Ink on warm stock, no accent colour, serif text. */
+    PAPER,
+
+    /** Northern-lights palette: deep pine, mint and violet. */
+    AURORA,
+    ;
 
     companion object {
         fun fromName(name: String?): ThemeMode =

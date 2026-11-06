@@ -2642,7 +2642,11 @@ class BrowserViewModel(
     private fun ThemeMode.toWebColorScheme(): WebColorScheme = when (this) {
         ThemeMode.SYSTEM -> WebColorScheme.SYSTEM
         ThemeMode.LIGHT -> WebColorScheme.LIGHT
-        ThemeMode.DARK, ThemeMode.HEXORA -> WebColorScheme.DARK
+        ThemeMode.DARK, ThemeMode.HEXORA, ThemeMode.AURORA -> WebColorScheme.DARK
+        // Paper is a light theme: pages that honour prefers-color-scheme
+        // should render their light variant, or the sheet of paper would sit
+        // on top of a black page.
+        ThemeMode.PAPER -> WebColorScheme.LIGHT
     }
 
     /**

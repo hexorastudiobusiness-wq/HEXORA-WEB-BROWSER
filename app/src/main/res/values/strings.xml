@@ -73,6 +73,8 @@
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_hexora">Hexora Mode</string>
+    <string name="theme_paper">Paper</string>
+    <string name="theme_aurora">Aurora</string>
     <string name="settings_javascript">JavaScript</string>
     <string name="settings_javascript_summary">Takes effect on the next page load; a page that is already open keeps its current setting until it reloads.</string>
     <string name="settings_desktop_mode">Desktop site by default</string>
@@ -321,7 +323,7 @@
     <string name="about_browsing_title">The everyday part</string>
     <string name="about_browsing_tabs">Every tab keeps its own session, so coming back to one continues where you left it, and tabs left alone for a while get suspended to save memory and return the same way.</string>
     <string name="about_browsing_tray">A tab tray with previews, plus bookmarks, history, downloads with live progress, find in page, PDF export and printing.</string>
-    <string name="about_browsing_site">Desktop site and zoom are remembered per site, so you set them once and they stick. Four themes, the dark one included.</string>
+    <string name="about_browsing_site">Desktop site and zoom are remembered per site, so you set them once and they stick. Six themes, from a sheet of paper to a night sky.</string>
     <string name="about_browsing_default">You can make Hexora the default browser, and then a link from another app opens here.</string>
     <string name="about_engine_title">Engine and licences</string>
     <string name="about_engine_body">Pages are drawn by GeckoView, Mozilla\'s engine, under the Mozilla Public License 2.0 — that licence is why its source stays public, and the version we build against is listed on the Licences screen. Hexora\'s own code belongs to HEXORA-STUDIO and carries no open-source licence of ours. The Android libraries underneath — AndroidX, Jetpack Compose, Room, DataStore — are Apache 2.0. The full list is one tap away.</string>

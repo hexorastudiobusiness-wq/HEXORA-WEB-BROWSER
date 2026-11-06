@@ -133,6 +133,7 @@ import com.example.browser.browser.PageMediaKind
 import com.example.browser.browser.SitePermissionKind
 import com.example.browser.browser.WebPromptKind
 import com.example.browser.ui.components.AddressBar
+import com.example.browser.ui.theme.logoColorFilter
 import com.example.browser.util.HomeScreenShortcut
 import kotlinx.coroutines.delay
 
@@ -1348,6 +1349,9 @@ private fun StartPage(
                             R.string.start_logo_content_description,
                         ),
                         contentScale = ContentScale.Fit,
+                        // Paper is ink on stock: a blue-and-amber tile on it
+                        // is the one graphic the theme is supposed to remove.
+                        colorFilter = logoColorFilter(),
                         modifier = Modifier
                             .fillMaxSize()
                             .clip(RoundedCornerShape(30.dp)),

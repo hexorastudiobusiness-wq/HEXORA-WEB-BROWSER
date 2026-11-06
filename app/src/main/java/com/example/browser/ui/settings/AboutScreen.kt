@@ -38,6 +38,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.browser.BuildConfig
 import com.example.browser.R
+import com.example.browser.ui.theme.logoColorFilter
 import com.example.browser.util.BrowserRole
 
 /**
@@ -94,6 +95,8 @@ fun AboutScreen(
                         R.string.start_logo_content_description,
                     ),
                     contentScale = ContentScale.Fit,
+                    // Paper prints the mark in ink, like the start page does.
+                    colorFilter = logoColorFilter(),
                     modifier = Modifier
                         .size(124.dp)
                         .clip(RoundedCornerShape(28.dp)),

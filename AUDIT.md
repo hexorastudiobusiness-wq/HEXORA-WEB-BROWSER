@@ -1081,3 +1081,64 @@ spoken label; all 63 `BrowserAction` cases declared and handled in `onAction`;
 braces and parentheses balanced in every touched file.
 
 `versionCode` 40 / `versionName` 0.6.3.
+
+---
+
+## 29. 0.6.4 — the theme set, rebuilt around the current logo
+
+### Hexora Mode was drawn for the previous logo
+
+The scheme was orange-on-plum (`#E77E3D` accent, `#100B0F` ink). Those are
+colours from the logo this app no longer uses, so the theme sat next to the new
+icon like a different product. Sampled from
+`drawable-nodpi/hexora_logo.png`, the current mark is:
+
+| Element | Sampled |
+|---|---|
+| mark, blue | `#0F7BF0` |
+| mark, amber | `#FFA614` |
+| wordmark navy | `#04132E` |
+| lockup background | `#F1F3FA` |
+
+`HexoraColors` is now built from those: near-black navy background, light blue
+primary (`#7FB8FF` on dark surfaces, `#0A3E82` container), amber as the single
+accent, and surfaces in the same navy family instead of plum. Blue carries the
+interface and amber is used sparingly, which is the proportion the logo itself
+uses.
+
+### Paper
+
+`ThemeMode.PAPER`: a light scheme with no accent colour at all — warm stock
+(`#F2E9D8`) behind sheets of the same paper (`#FAF3E4`), ink `#33291D`, muted
+ink `#6B5B45`, and every container a shade between them. Errors are a muted
+brick (`#8C3B2E`) so the one colour that has to survive still reads as
+"something went wrong".
+
+Two things make it read as paper rather than as a beige theme:
+
+- **Serif typography.** `PaperTypography` maps every display, headline, title
+  and body style to `FontFamily.Serif`. Labels stay sans: they are chrome
+  (counters, buttons, bars) and a serif label at 11 sp only loses legibility.
+- **The logo is printed in ink.** `LocalPaperTheme` + `logoColorFilter()` draw
+  the start-page and About logos through a zero-saturation `ColorMatrix`. A
+  blue-and-amber tile on a sheet of paper would be the one graphic the theme
+  exists to remove.
+
+`toWebColorScheme()` maps PAPER to `LIGHT`, so pages that honour
+`prefers-color-scheme` do not render their dark variant on a paper background.
+
+### Aurora
+
+`ThemeMode.AURORA`: deep pine (`#06110F`) rather than another blue-black, mint
+(`#6FE3C4`) as the leading colour, violet (`#B49BFF`) as the second. Chosen so
+it is distinguishable from both Dark and Hexora Mode at a glance, and so the
+palette still has somewhere to go for accents without becoming a rainbow.
+
+### Wiring
+
+Two enum entries, two settings rows after "Hexora Mode", two scheme entries in
+`HexoraBrowserTheme`, one exhaustive `when` updated in the engine colour-scheme
+mapping. No hardcoded colours existed outside `ui/theme`, so every screen
+follows the new schemes without changes.
+
+`versionCode` 41 / `versionName` 0.6.4.
