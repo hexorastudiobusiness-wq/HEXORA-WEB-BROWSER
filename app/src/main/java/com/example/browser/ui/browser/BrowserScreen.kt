@@ -1336,16 +1336,19 @@ private fun StartPage(
                     .padding(top = 36.dp, bottom = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Box(modifier = Modifier.size(72.dp)) {
+                // The logo is the owner's own lockup — mark *and* the name —
+                // so it is drawn whole (Fit, never Crop) and the duplicate
+                // "Hexora" heading below it is gone.
+                Box(modifier = Modifier.size(148.dp)) {
                     Image(
                         painter = painterResource(R.drawable.hexora_logo),
                         contentDescription = stringResource(
                             R.string.start_logo_content_description,
                         ),
-                        contentScale = ContentScale.Crop,
+                        contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(18.dp)),
+                            .clip(RoundedCornerShape(30.dp)),
                     )
                     if (state.isPrivate) {
                         Surface(
@@ -1367,14 +1370,10 @@ private fun StartPage(
                     }
                 }
                 Text(
-                    text = stringResource(R.string.start_title),
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier.padding(top = 14.dp),
-                )
-                Text(
                     text = stringResource(R.string.start_subtitle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 14.dp),
                 )
                 if (state.tabs.isEmpty()) {
                     // Every tab is closed and there is no address bar on

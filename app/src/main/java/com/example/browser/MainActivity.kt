@@ -71,6 +71,7 @@ import com.example.browser.ui.history.HistoryScreen
 import com.example.browser.ui.history.HistoryViewModel
 import com.example.browser.ui.passwords.PasswordsScreen
 import com.example.browser.ui.passwords.PasswordsViewModel
+import com.example.browser.ui.settings.AboutScreen
 import com.example.browser.ui.settings.SettingsScreen
 import com.example.browser.ui.settings.SettingsViewModel
 import com.example.browser.ui.settings.SitePermissionsScreen
@@ -103,6 +104,7 @@ private object Routes {
     const val SETTINGS = "settings"
     const val SITE_PERMISSIONS = "site_permissions"
     const val PASSWORDS = "passwords"
+    const val ABOUT = "about"
 }
 
 class MainActivity : ComponentActivity() {
@@ -1371,8 +1373,15 @@ private fun HexoraNavHost(
                 onOpenSitePermissions = {
                     navController.navigate(Routes.SITE_PERMISSIONS)
                 },
+                onOpenAbout = { navController.navigate(Routes.ABOUT) },
                 onReportBug = onReportBug,
                 onSetDefaultBrowser = onSetDefaultBrowser,
+            )
+        }
+        composable(Routes.ABOUT) {
+            AboutScreen(
+                onBack = { navController.popBackStack() },
+                onReportBug = onReportBug,
             )
         }
         composable(Routes.SITE_PERMISSIONS) {

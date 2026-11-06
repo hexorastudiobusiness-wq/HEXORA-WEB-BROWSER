@@ -841,3 +841,63 @@ How the artwork is used, and why:
 
 `versionCode` 36 / `versionName` 0.5.9, so the new debug APK installs over the
 0.5.8 build on the phone instead of being refused.
+
+## 0.6.0 — Settings as a sidebar, About as a screen, and the real logo
+
+**Settings was one page.** Search engine, theme, four protection switches, the
+password vault, desktop mode, link handling, clear-data, default browser, bug
+reports, the developer address and the version number were stacked in a single
+`verticalScroll`. Finding one of them meant scrolling past the rest, and the
+page had no map of itself.
+
+It is now a sidebar of sections, the way Chrome splits Settings: a rail on the
+left (`Appearance`, `Search`, `Privacy & security`, `Tabs & links`, `Data`,
+`App`) and one pane on the right. Tapping a section switches the pane and the
+pane starts at its own top — `key(pane)` gives every section a fresh
+`rememberScrollState`, so nothing inherits the previous section's offset. The
+selected item is `secondaryContainer` with `onSecondaryContainer` content, and
+labels wrap to two short lines instead of ellipsising: a section name that
+cannot be read is a section that cannot be found. The selection survives
+rotation (`rememberSaveable`).
+
+What moved where:
+
+| Section | Contents |
+|---|---|
+| Appearance | the four themes |
+| Search | engine list, custom engine name + template |
+| Privacy & security | ETP, HTTPS-Only, Total Cookie Protection, JavaScript, Site permissions, saved-login switch + Manage |
+| Tabs & links | open links in a new tab, desktop site by default, the per-site zoom note |
+| Data | clear browsing data (confirm dialog) and exactly what it clears |
+| App | default browser, report a bug, About |
+
+**About is a destination, not a heading.** It has its own route
+(`Routes.ABOUT`), its own `TopAppBar` with a back arrow, and is reached from the
+`App` section as a row with a chevron. The old inline block is gone.
+
+The screen now says something: what Hexora is (GeckoView engine, no account, no
+sync, no analytics SDK), the protections that are on before the user touches
+anything (ETP, HTTPS-Only, Total Cookie Protection, per-site permissions,
+private tabs), where each kind of data lives (AES-GCM logins keyed in the
+Android Keystore, local database, bug reports handed to the owner's mail app),
+what the browser does (per-tab engine state restored instead of reloaded,
+suspension instead of discarding, tab tray, downloads, find in page, PDF and
+print), the engine and its licenses (GeckoView/MPL 2.0, AndroidX/Compose/Room/
+DataStore/Apache 2.0), and the developer block with the address shown as text
+as well as a button. Every claim maps to code in this repository — no
+"fast and secure" filler. `about_clear_data_scope` matches what
+`clearBrowsingData()` actually does (`StorageController.ClearFlags.ALL` plus the
+history table; bookmarks, logins and downloads are untouched).
+
+**The icon kept only half the artwork.** The owner's file is a lockup: the "K"
+mark *with* the name "Hexora BROWSER" beneath it. 0.5.9 cropped to the mark,
+because a wordmark at 48 dp is unreadable — a defensible call, but not what was
+asked for, and the same crop was used for the in-app logo where the name has
+room. All launcher assets, the adaptive foreground, the splash foreground and
+`hexora_logo.png` are now generated from a square that contains the whole
+lockup (mark + name), padded by edge replication so nothing touches the tile
+edge. On the Start Page the logo is drawn `ContentScale.Fit` at 148 dp — never
+`Crop` — and the separate "Hexora" heading is gone, since the artwork already
+carries the name; the "Fast, private, yours" line stays.
+
+`versionCode` 37 / `versionName` 0.6.0.
