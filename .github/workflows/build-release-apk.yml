@@ -88,7 +88,11 @@ jobs:
       - name: Verify APK signatures
         run: |
           set -euo pipefail
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          # Depth-limited on purpose: build-tools also ships
+          # lib/apksigner.jar, and a recursive find sorted the jar last, so
+          # 1.0.0's first run tried to execute a jar as a program.
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner \
+                        | sort -V | tail -1)
           test -n "$APKSIGNER"
           for apk in app/build/outputs/apk/release/*.apk; do
             echo "--- $apk"
@@ -97,8 +101,10 @@ jobs:
           # An unsigned or debug-signed APK must never reach the release: with
           # no signature at all apksigner fails here, and a debug certificate
           # is caught by the DN check below.
+          # sed, not `grep -m1`: grep exits at the first match, apksigner then
+          # dies of SIGPIPE, and pipefail turns that into a failed step.
           DN=$("$APKSIGNER" verify --print-certs app/build/outputs/apk/release/*.apk \
-                 | grep -m1 "Signer #1 certificate DN")
+                 | sed -n '/Signer #1 certificate DN/p')
           echo "$DN"
           case "$DN" in
             *"CN=Android Debug"*) echo "::error::APK is debug-signed"; exit 1 ;;
