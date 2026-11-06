@@ -72,6 +72,7 @@ import com.example.browser.ui.history.HistoryViewModel
 import com.example.browser.ui.passwords.PasswordsScreen
 import com.example.browser.ui.passwords.PasswordsViewModel
 import com.example.browser.ui.settings.AboutScreen
+import com.example.browser.ui.settings.LicencesScreen
 import com.example.browser.ui.settings.SettingsScreen
 import com.example.browser.ui.settings.SettingsViewModel
 import com.example.browser.ui.settings.SitePermissionsScreen
@@ -105,6 +106,7 @@ private object Routes {
     const val SITE_PERMISSIONS = "site_permissions"
     const val PASSWORDS = "passwords"
     const val ABOUT = "about"
+    const val LICENCES = "licences"
 }
 
 class MainActivity : ComponentActivity() {
@@ -1382,6 +1384,15 @@ private fun HexoraNavHost(
             AboutScreen(
                 onBack = { navController.popBackStack() },
                 onReportBug = onReportBug,
+                onOpenLicences = { navController.navigate(Routes.LICENCES) },
+            )
+        }
+        composable(Routes.LICENCES) {
+            LicencesScreen(
+                onBack = { navController.popBackStack() },
+                // Licence texts and the engine source are ordinary pages, so
+                // they open in Hexora itself rather than in an external app.
+                onOpenUrl = { url -> openInBrowser(url) },
             )
         }
         composable(Routes.SITE_PERMISSIONS) {

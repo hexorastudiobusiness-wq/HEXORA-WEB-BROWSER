@@ -54,6 +54,7 @@ import com.example.browser.util.BrowserRole
 fun AboutScreen(
     onBack: () -> Unit,
     onReportBug: () -> Unit,
+    onOpenLicences: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -144,8 +145,18 @@ fun AboutScreen(
                 AboutBullet(R.string.about_browsing_default)
             }
 
+            AboutCard(R.string.about_limits_title) {
+                AboutParagraph(R.string.about_limits_body)
+            }
+
             AboutCard(R.string.about_engine_title) {
                 AboutParagraph(R.string.about_engine_body)
+                OutlinedButton(
+                    onClick = onOpenLicences,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.about_licences_button))
+                }
             }
 
             AboutCard(R.string.about_developer_title) {

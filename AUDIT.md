@@ -955,3 +955,68 @@ room under the baseline). Content occupies ~71 % of the tile instead of 77 %.
   silent deletion.
 
 `versionCode` 38 / `versionName` 0.6.1.
+
+---
+
+## 27. 0.6.2 — the About page, corrected against the code
+
+The About copy written for 0.6.1 was reviewed twice: once for accuracy and
+once for whether it reads like a person. Both reviews came back with the same
+kind of finding, so this build fixes content and voice in one pass rather than
+two.
+
+### Claims that did not survive the audit
+
+- **"Nothing syncing in the background" was false.** GeckoView keeps its own
+  traffic alive whatever the app does: tracking-protection lists and CRLite
+  filters come from Mozilla Remote Settings
+  (`services.settings.poll_interval` = 24 h), and Google Safe Browsing lists
+  come from `safebrowsing.googleapis.com`
+  (`browser.safebrowsing.features.malware/phishing.update = true` in
+  `geckoview-prefs.js`; there is no GeckoView API that turns it off).
+  The paragraph now says what the traffic is and that it is lists and hashes,
+  not a browsing record.
+- **"Third-party cookies are kept apart per site" was false.** Partitioning is
+  deliberately off — `GeckoBrowserEngine.kt` explains why: without the Storage
+  Access API, Google sign-in loops. The bullet now says cookies stay with the
+  site that set them and points at the limitations section.
+- **"If a site can do HTTPS, Hexora connects over HTTPS" implied always-on.**
+  `httpsOnlyMode` defaults to `false` (`SettingsRepository.kt:66`). Rewritten as
+  a switch that is off until the user turns it on.
+- **"Nothing to leak" / "Uninstalling takes the rest with it."** Data on the
+  phone can still be read by anything that gets at the phone, and files written
+  to Downloads outlive an uninstall (`download/` has no private-mode branch, and
+  saved files go to the shared folder). Both sentences rewritten.
+- **"No server on my end collecting anything"** hid the obvious: a report that
+  the user sends arrives in the maintainer's inbox, with their address on it.
+  Now said in those words. The part that *was* true is kept: the payload is
+  device details, counters and an app log — `AppLog` and `buildDiagnostics`
+  write no URLs, titles or page text.
+- **Licence paragraph read as if Hexora's own code were Apache 2.0.** It is
+  not: no LICENSE file exists, so the app's own code is unlicensed. The
+  paragraph now separates GeckoView (MPL 2.0), the Android libraries (Apache
+  2.0) and Hexora's own code (© HEXORA-STUDIO, no open-source licence).
+
+### Voice
+
+No first person anywhere. The page speaks as the studio ("we", "our"), which
+also fixes the mismatch with "Contact us" and the HEXORA-STUDIO credit in the
+same screen. Rhythm was evened out as well: bullets are no longer
+claim-plus-because in every line, the one triadic list that repeated was cut
+back, and the slogan sentences that closed three paragraphs are gone.
+
+### New screen
+
+`LicencesScreen.kt` (`Routes.LICENCES`, reached from the engine card on About):
+GeckoView with the exact source tree and the MPL 2.0 text, the Apache 2.0
+library list with a link to the licence, and the note about Hexora's own code.
+This is also what MPL 2.0 §3.2 asks for in practice — recipients are told where
+the covered source is.
+
+### New section on About
+
+"What isn't here yet": no third-party cookie partitioning, no fingerprinting
+protection, no sync, no extensions, no tab hand-off between devices, and the
+plain statement that a site you are signed in to still sees what you do there.
+
+`versionCode` 39 / `versionName` 0.6.2.
