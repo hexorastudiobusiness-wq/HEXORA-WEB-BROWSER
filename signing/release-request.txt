@@ -5,3 +5,5 @@ it is the second, main-only way into `build-release-apk.yml` for the times
 when workflow dispatch is not available. Leaving the text unchanged is enough;
 the touch itself is the trigger, so bump this line each time a new release is
 cut.
+
+Second release attempt: 1.0.0 (the first run reached the signature check and stopped there).
