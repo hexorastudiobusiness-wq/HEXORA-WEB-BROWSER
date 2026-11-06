@@ -743,3 +743,67 @@ started 800 ms later does it navigate to the URL again and log
 The error code and category of every failure are still recorded in `AppLog`
 (`load error code=… category=…`), so the next shake report says which of the two
 it was.
+
+## 0.5.8 (cont.) — the resource layer, checked line by line against Firefox
+
+This pass was not written from memory. The shipped sources were read first:
+android-components `components/browser/state/.../engine/middleware/`
+(`TrimMemoryMiddleware.kt`, `SessionPrioritizationMiddleware.kt`,
+`SuspendMiddleware.kt`), `fenix/app/.../FenixApplication.kt`, and GeckoView's
+own javadoc for `GeckoSession.setActive`. Three things came out of it.
+
+**1. Firefox keeps ONE session high priority; this app kept four.** The rule is
+literal, in `SessionPrioritizationMiddleware`: `PRIORITY_HIGH` on the selected
+tab, `PRIORITY_DEFAULT` on the tab that was selected before it. Nothing else is
+boosted. GeckoView's contract for the hint is "keep this session's state as long
+as possible", and GeckoView gives every session its own content process — so the
+old warm-set policy (selected tab plus `SUSPEND_KEEP_INACTIVE_TABS` = four
+sessions) asked Gecko to keep four documents and four processes fully resident.
+That is the footprint an OEM task killer hunts, and being killed in the
+background is what turns "my tabs stay open" into "every tab reloaded". The
+policy is now `applySessionPriorities()`: exactly the selected tab is high, and
+`setPriorityHigh` still only emits a hint when the value changes, so walking the
+whole strip on a UI emission costs one comparison per tab.
+
+**2. The trim policy was already exact parity — and two things said about it
+earlier were wrong.** `TrimMemoryMiddleware.shouldCloseEngineSessions` reacts
+only to `TRIM_MEMORY_RUNNING_CRITICAL` and `TRIM_MEMORY_COMPLETE`;
+`determineTabsToSuspend` never suspends the selected tab, orders the rest by
+last access and keeps the 3 most recent (`MIN_ACTIVE_TABS`). This app does the
+same, at the same levels, with the same warm set. So: Firefox does **not**
+release tabs at `RUNNING_MODERATE`/`RUNNING_LOW`/`BACKGROUND`, and Firefox has no
+cap on simultaneously loaded tabs. Adding either would have been a deviation
+dressed up as parity, so both proposals are withdrawn.
+
+Two consequences worth writing down. Since API 34 Android no longer delivers
+`RUNNING_LOW`/`RUNNING_CRITICAL` to apps at all, so on Android 14+ the foreground
+half of this policy barely fires — for Firefox exactly as for this app; the
+background levels (`BACKGROUND`/`MODERATE`/`COMPLETE`) still arrive, and
+`COMPLETE` is the one that matters when the phone is about to kill the process.
+And the memory that is actually saved when a tab is suspended is the *document*
+in its content process, with its engine state written to
+`TabSessionStore` so selecting the tab restores instead of reloading.
+
+**3. `setActive` is what Firefox gets for free, and this app got not at all.**
+Firefox keeps one `GeckoView` and swaps sessions into it; the display of the tab
+that leaves is released, and `GeckoDisplay.release()` calls
+`GeckoSession.setActive(false)` for it. This app keeps one surface per tab
+instead, so the outgoing tab's display is only released if the platform tears
+its surface down — and no code ever told Gecko that the tab had left the screen.
+`present()` now marks the outgoing session inactive and the incoming one active
+(`GeckoBrowserSession.setSessionActive`), once per switch, in the same frame the
+tab is hidden, and a session reopened after a crash is re-applied as inactive.
+`setActive(false)` is the call that lets Gecko drop that document's memory and
+flush its engine state; `setActive(true)` is what makes the returning tab paint.
+
+Related, found while reading: suspension used to capture a thumbnail per tab — a
+GPU readback of the whole surface plus a decode and a disk write — *inside* the
+low-memory callback, spending the memory the callback exists to free. Firefox's
+middleware only closes sessions. The trim path now takes no previews and keeps
+whatever is already on disk.
+
+What this does **not** change, stated plainly: Firefox has one compositor, this
+app has one per shown tab, and that difference is what the black-pane class of
+bugs is made of. Converging means rewriting the surface layer to Mozilla's
+single-view model (`engineView.setCurrentSession`), which cannot be judged
+without a build and a device; it is the next step, not a side effect of this one.

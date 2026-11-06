@@ -423,10 +423,19 @@ class GeckoBrowserEngine(
     internal fun present(session: GeckoBrowserSession, container: View) {
         val host = container as? FrameLayout ?: return
         val becameActive = activeSession !== session
+        val previous = activeSession
         // Text zoom lives on the runtime, not on a session, so only the
         // session that is actually on screen may set it. A background tab
         // finishing a load used to overwrite the visible tab's factor.
         activeSession = session
+        if (becameActive) {
+            // One session is on screen: this one. The outgoing tab is told so
+            // before its view is hidden, in the same frame — see
+            // [GeckoBrowserSession.setSessionActive] for why nothing else does
+            // this for a per-tab-surface app.
+            previous?.setSessionActive(false)
+            session.setSessionActive(true)
+        }
         val surface = session.obtainSurface(host.context, this) ?: return
         if (surface.parent !== host) {
             (surface.parent as? ViewGroup)?.removeView(surface)
@@ -1246,6 +1255,10 @@ internal class GeckoBrowserSession(
     @Volatile
     private var priorityHigh: Boolean = false
 
+    /** Last active/inactive state handed to Gecko for this session. */
+    @Volatile
+    private var sessionActive: Boolean = false
+
     /**
      * Set when Gecko reports this session's content process died
      * (`onCrash`/`onKill`). A later defensive reopen must restore the saved
@@ -1259,6 +1272,9 @@ internal class GeckoBrowserSession(
     internal fun ensureOpen() {
         if (closed || geckoSession.isOpen) return
         geckoSession.open(engine.runtime)
+        // A reopened session is inactive until it is put on screen again; the
+        // state survives the close/reopen exactly like the priority hint.
+        if (!sessionActive) geckoSession.setActive(false)
         geckoSession.setPriorityHint(
             if (priorityHigh) {
                 GeckoSession.PRIORITY_HIGH
@@ -1500,6 +1516,25 @@ internal class GeckoBrowserSession(
 
     override fun goForward() {
         if (!closed && geckoSession.isOpen && _state.value.canGoForward) geckoSession.goForward()
+    }
+
+    /**
+     * Whether this session is on screen, as Gecko understands it.
+     *
+     * Mozilla's own engine never calls this: Firefox has ONE GeckoView and
+     * swaps sessions into it, and `GeckoView.releaseSession()` /
+     * `GeckoDisplay.release()` call `setActive(false)` for the tab that leaves.
+     * This app keeps one surface per tab instead, so a hidden tab's display is
+     * only released when the platform happens to tear its surface down — the
+     * outgoing tab therefore has to be told explicitly. `setActive(false)` is
+     * what lets Gecko drop that document's memory footprint and flush its
+     * state; `setActive(true)` on the way back is what makes the returning tab
+     * paint again.
+     */
+    internal fun setSessionActive(active: Boolean) {
+        if (sessionActive == active && geckoSession.isOpen) return
+        sessionActive = active
+        if (!closed && geckoSession.isOpen) geckoSession.setActive(active)
     }
 
     override fun setPriorityHigh(high: Boolean) {

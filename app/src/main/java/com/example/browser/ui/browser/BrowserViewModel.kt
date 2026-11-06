@@ -1325,7 +1325,7 @@ class BrowserViewModel(
                 switchTab(next.tabId)
             }
         }
-        updateWarmPriorities()
+        applySessionPriorities()
         // Closing a tab is a structural change: write the strip now instead of
         // waiting for the 400 ms debounce, otherwise a tab closed right before
         // the app is killed comes back on the next cold start.
@@ -1602,10 +1602,12 @@ class BrowserViewModel(
 
     /**
      * Called on genuine low-memory signals. Mirrors Mozilla's
-     * TrimMemoryMiddleware: the selected tab and the
-     * [SUSPEND_KEEP_INACTIVE_TABS] most recently used inactive tabs are
-     * never suspended; only colder sessions are closed (their saved state
-     * and thumbnail are kept, so they restore when selected again).
+     * `TrimMemoryMiddleware.determineTabsToSuspend`: the selected tab is never
+     * suspended, sessions are ordered by last access and the
+     * [SUSPEND_KEEP_INACTIVE_TABS] most recently used (`MIN_ACTIVE_TABS` in
+     * that file) are kept; only colder sessions are closed. Their saved engine
+     * state and thumbnail stay, so selecting one restores it instead of
+     * reloading it.
      */
     fun suspendTabsOutsideWarmSet() {
         val activeId = _activeTabId.value
@@ -1619,7 +1621,7 @@ class BrowserViewModel(
                     entry.tabId != activeId &&
                     entry.tabId !in warmInactiveIds
             }
-            .forEach { suspendTab(it) }
+            .forEach { suspendTab(it, capturePreview = false) }
     }
 
     /**
@@ -1656,7 +1658,13 @@ class BrowserViewModel(
     /**
      * Central low-memory policy (the tab layer owns it, like Mozilla's
      * middleware chain — the Activity only forwards the raw signal).
-     * Exact levels only: RUNNING_CRITICAL and COMPLETE.
+     *
+     * Exactly Mozilla's rule (`TrimMemoryMiddleware.shouldCloseEngineSessions`):
+     * `RUNNING_CRITICAL` in the foreground and `COMPLETE` in the background.
+     * Firefox deliberately does nothing at `RUNNING_MODERATE`/`RUNNING_LOW`/
+     * `BACKGROUND` — Gecko applies its own per-session memory pressure for
+     * inactive sessions — and every ordinary tab release here would throw away
+     * exactly the state that makes a tab come back without reloading.
      */
     fun onLowMemory(level: Int) {
         if (level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
@@ -1880,7 +1888,7 @@ class BrowserViewModel(
         _activeTabId.value = active.tabId
         restoreTab(active)
         if (active.showStartPage) scheduleLaunchStableMark()
-        updateWarmPriorities()
+        applySessionPriorities()
         tabRestoreComplete = true
         requestPersistTabs()
     }
@@ -2201,7 +2209,7 @@ class BrowserViewModel(
             }
         }
         if (makeActive) activateTab(entry.tabId)
-        updateWarmPriorities()
+        applySessionPriorities()
         persistTabsNow()
         return entry.tabId
     }
@@ -2247,7 +2255,7 @@ class BrowserViewModel(
             session.loadUrl(entry.lastUrl)
         }
         entry.savedState = null
-        updateWarmPriorities()
+        applySessionPriorities()
     }
 
     private fun activateTab(tabId: String) {
@@ -2274,7 +2282,7 @@ class BrowserViewModel(
         _savedLoginSuggestion.value = null
         _activeTabId.value = tabId
         touchLru(tabId)
-        updateWarmPriorities()
+        applySessionPriorities()
         // Text zoom is a process-wide Gecko setting (there is no per-session
         // font factor). Re-apply the selected site's value so the tab that is
         // now on screen renders at the zoom its panel shows, instead of
@@ -2290,49 +2298,40 @@ class BrowserViewModel(
     }
 
     /**
-     * Gecko prioritisation, exactly Mozilla's
-     * SessionPrioritizationMiddleware: only the *selected* tab is high
-     * priority; every other session stays default priority. Keeping a
-     * whole warm set high (the old behaviour) boosts several content
-     * processes at once, which makes aggressive OEM memory managers more
-     * likely to kill the app process itself. Inactive tabs are cheap to
-     * bring back from their saved engine state instead.
+     * Session prioritisation, exactly Mozilla's
+     * `SessionPrioritizationMiddleware` (android-components,
+     * `browser/state/.../engine/middleware/SessionPrioritizationMiddleware.kt`):
+     * ONE session is `PRIORITY_HIGH` — the selected tab's — and the tab that
+     * was selected before it is put back to `PRIORITY_DEFAULT`. GeckoView's
+     * contract for that hint is "keep this session's state as long as
+     * possible", so raising it for a warm set (the previous behaviour: the
+     * selected tab plus three others) asked Gecko to keep four documents —
+     * and, because GeckoView gives every session its own content process,
+     * four content processes — fully alive. That is the footprint the OEM
+     * task killer goes after on a phone, and being killed in the background
+     * is what makes every tab come back as a reload. Firefox keeps exactly
+     * one session high; so does this.
+     *
+     * Cheap by construction: `setPriorityHigh` only sends a hint when the
+     * value actually changes, so walking the strip on every UI emission is
+     * one comparison per tab.
      */
-    private fun updateWarmPriorities() {
-        // Firefox keeps only the selected tab HIGH because every tab there
-        // lives in its own content process, and boosting several processes
-        // invites the OEM memory killer to take the whole app instead.
-        //
-        // We do not: the whole app shares ONE Gecko content process, so this
-        // hint does not pick a process — it decides how willing Gecko is to
-        // keep a session's document in memory ("GeckoView will keep the
-        // session state as long as possible"). Demoting the outgoing tab on
-        // every switch was therefore us telling Gecko "this tab is
-        // expendable", and on a phone that is short of RAM Gecko acted on it:
-        // the document went away, and the next switch had to restore the tab
-        // from its saved state — which in Gecko is a fresh network load. That
-        // is the reload-on-every-switch the owner reports, and it has nothing
-        // to do with how long the tab sat in the background.
-        //
-        // Warm set = selected tab + the SUSPEND_KEEP_INACTIVE_TABS most
-        // recently used inactive tabs, so two tabs always survive while a
-        // large tab strip still cannot pin everything.
+    private fun applySessionPriorities() {
         val activeId = _activeTabId.value
-        val warm = HashSet<String>(SUSPEND_KEEP_INACTIVE_TABS + 1)
-        activeId?.let { warm.add(it) }
-        lruOrder
-            .filter { it != activeId }
-            .takeLast(SUSPEND_KEEP_INACTIVE_TABS)
-            .forEach { warm.add(it) }
         _tabs.value.forEach { entry ->
-            entry.session?.setPriorityHigh(entry.tabId in warm)
+            entry.session?.setPriorityHigh(entry.tabId == activeId)
         }
     }
 
-    private fun suspendTab(entry: TabEntry) {
+    private fun suspendTab(entry: TabEntry, capturePreview: Boolean = true) {
         val session = entry.session ?: return
         if (entry.tabId == _activeTabId.value) return
-        captureThumbnail(entry.tabId)
+        // A thumbnail is a GPU readback of the whole surface plus a decode and
+        // a disk write. Doing that for every suspended tab *during* the
+        // low-memory callback spends the memory that callback exists to free
+        // (Firefox's TrimMemoryMiddleware only closes sessions), so the trim
+        // path keeps whatever preview is already on disk.
+        if (capturePreview) captureThumbnail(entry.tabId)
         entry.savedState = session.latestSavedState() ?: entry.savedState
         sessionJobs.remove(entry.tabId)?.cancel()
         sessionsClosedByApp++

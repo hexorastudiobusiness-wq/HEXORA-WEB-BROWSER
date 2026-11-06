@@ -73,22 +73,28 @@ Use the current stable GeckoView APIs available at implementation time. Do not i
 
 ## 4. Browser Sessions
 
-Each tab owns its own browser session **and its own GeckoView**, which is
-Mozilla's model: `GeckoEngineView` owns one `GeckoView` per tab and the
-embedder only chooses which one is shown. The engine owns a single
-`FrameLayout` per Activity; every live tab's `SwipeableHostLayout` is a child of
-it, exactly one child is `VISIBLE`, the rest are `INVISIBLE`. Switching tabs
-therefore changes visibility, not the bound session `(see §4.1)`.
+Each tab owns its own browser session **and its own GeckoView**. This is *not*
+Mozilla's model and should not be described as such: Firefox for Android keeps
+one `GeckoEngineView` with one `GeckoView` and swaps the session into it
+(`engineView.setCurrentSession`, and `GeckoView.releaseSession()` on the tab that
+leaves). This app instead keeps one surface per tab: the engine owns a single
+`FrameLayout` per Activity, every live tab's `SwipeableHostLayout` is a child of
+it, exactly one child is `VISIBLE`, the rest are `INVISIBLE`, so a switch changes
+visibility and not the bound session `(see §4.1)`.
 
-This replaced a single shared `GeckoView` whose session was swapped on every
-switch (0.5.0). That design forced a display release/acquire per tab switch and
-made unrelated pages share one compositor, which is where reloading tabs,
-cross-tab repaints and most black-pane reports came from. Do **not** reintroduce
-it.
+The single-view design was tried (0.5.0) and was the source of reloading tabs,
+cross-tab repaints and most black-pane reports, so per-tab surfaces stay for now.
+The price of that choice is stated honestly: Firefox has one compositor and this
+app has one per shown tab, a hidden tab's display is only released when the
+platform tears its surface down, and the outgoing tab therefore has to be told
+`GeckoSession.setActive(false)` explicitly at the switch (it is, in
+`present()`). Converging on Mozilla's single-view model is a real surface-layer
+rewrite, not a tweak.
 
-Live sessions are kept warm: the selected tab plus the three most recently used
-inactive tabs get `PRIORITY_HIGH`, so Gecko keeps their documents. Suspension
-(below) — not silent reloading — is the memory control for colder tabs.
+Priority follows Mozilla's `SessionPrioritizationMiddleware` literally: exactly
+one session — the selected tab's — is `PRIORITY_HIGH`; the tab that was selected
+before it goes back to `PRIORITY_DEFAULT`. Suspension (below) — not silent
+reloading — is the memory control for colder tabs.
 
 ### 4.1 Content-surface invariants (GeckoView)
 
