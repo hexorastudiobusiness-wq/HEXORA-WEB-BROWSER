@@ -711,3 +711,35 @@ nothing here can tell it apart from an intact pane, and the evidence for the
 next step will have to be the log. What the counters already answer: whether the
 repair ran (`switchRepairs`/`switchRebinds` growing), which tells us whether the
 remaining black pane is this defect or a different one.
+
+## 0.5.8 (cont.) — the Google sign-in page and its dead Retry
+
+The owner's note that the load-failure card appeared **only on Google's sign-in
+page** is the useful part, because that page is not a page: it is a chain of
+POSTs and redirects across `accounts.google.com`. Two separate defects show up
+there and nowhere else.
+
+**1. A card for a navigation that had already lost the race.** `onLoadError`
+fired for a request that a later redirect had superseded, while the session had
+already moved on to the next URL. `NS_BINDING_ABORTED` was filtered (that is the
+common shape of the race), but the same race also arrives as other codes, and
+the card was painted over a page that was fine — or over a load that was still
+in flight.
+
+The filter is now about *state*, not about a code list: an error is treated as
+stale when the tab finished a successful load less than 1.5 s ago, the session's
+current URL is a real http(s) page, and that URL differs from the URI that
+failed. Nothing is hidden otherwise — an HTTP/DNS failure for the URL on screen
+still shows the card.
+
+**2. Retry could not help a POST-backed failure.** The old Retry re-navigated
+the failed URL (after 0.5.8's first pass) — but Google's flow is a POST result,
+which cannot be replayed by navigating to its URL again (and re-navigating after
+a *halted* load was why reload looked dead in the first place). Retry now tries
+a real `reload()` first, which preserves the request, and only if no load has
+started 800 ms later does it navigate to the URL again and log
+`retry: reload did not start, re-navigating`.
+
+The error code and category of every failure are still recorded in `AppLog`
+(`load error code=… category=…`), so the next shake report says which of the two
+it was.

@@ -44,6 +44,7 @@ import org.mozilla.geckoview.WebResponse
 import com.example.browser.download.DownloadFileName
 import com.example.browser.util.AppLog
 import com.example.browser.util.CredentialOrigin
+import com.example.browser.util.UrlUtils
 
 /** Gecko's NS_BINDING_ABORTED: the request was superseded, it did not fail. */
 private const val NS_BINDING_ABORTED = 0x804B0002.toInt()
@@ -791,6 +792,13 @@ class GeckoBrowserEngine(
         /** Grace after a paint reset on the visible tab before the display is re-acquired. */
         const val PAINT_RESET_REPAIR_MS = 350L
 
+        /**
+         * A load error that arrives this soon after a *successful* page stop,
+         * for a different URI than the one on screen, belongs to a redirect
+         * that already lost the race (Google sign-in is a chain of them).
+         */
+        const val STALE_ERROR_WINDOW_MS = 1500L
+
         private val RUNTIME_LOCK = Any()
 
         @Volatile
@@ -1103,6 +1111,10 @@ internal class GeckoBrowserSession(
      * repainted tab from a black one, so these three numbers are the signal the
      * activation repair below is driven by — per session, never global.
      */
+    /** When this tab last finished a load successfully (for stale-error filtering). */
+    @Volatile
+    private var lastSuccessfulStopAt = 0L
+
     @Volatile
     internal var hasPainted = false
 
@@ -2284,6 +2296,26 @@ internal class GeckoBrowserSession(
             // error card with Retry for it is what made Google's sign-in look
             // broken over and over.
             if (error.code == NS_BINDING_ABORTED) return null
+            // A redirect chain reports the failure of a navigation that has
+            // already been superseded — Google's sign-in is nothing but such a
+            // chain, and that is the page the owner saw the card on. The
+            // session's current URL is the authority on what is on screen: if
+            // it is a real page and it is not the URI that failed, this is a
+            // stale error, not a failure worth a card with a Retry.
+            val currentUrl = _state.value.url
+            val justFinished = System.currentTimeMillis() - lastSuccessfulStopAt <
+                STALE_ERROR_WINDOW_MS
+            if (justFinished &&
+                currentUrl.isNotBlank() &&
+                UrlUtils.isHttpUrl(currentUrl) &&
+                uri != null &&
+                !sameDocument(uri, currentUrl)
+            ) {
+                AppLog.event(
+                    "stale load error ignored code=${error.code}",
+                )
+                return null
+            }
             // Counters only (code/category, never the URL): the bug report the
             // shake gesture prepares must be able to say what failed.
             AppLog.event("load error code=${error.code} category=${error.category}")
@@ -2333,6 +2365,15 @@ internal class GeckoBrowserSession(
         }
     }
 
+    /**
+     * Same document, ignoring the fragment: a redirect that only changes
+     * `#hash` is the same page and must not be read as a stale error.
+     */
+    private fun sameDocument(left: String, right: String): Boolean {
+        fun bare(value: String): String = value.substringBefore('#').trimEnd('/')
+        return bare(left) == bare(right)
+    }
+
     private val progressDelegate = object : GeckoSession.ProgressDelegate {
         override fun onSessionStateChange(
             session: GeckoSession,
@@ -2370,6 +2411,7 @@ internal class GeckoBrowserSession(
         }
 
         override fun onPageStop(session: GeckoSession, success: Boolean) {
+            if (success) lastSuccessfulStopAt = System.currentTimeMillis()
             _state.update {
                 it.copy(
                     isLoading = false,

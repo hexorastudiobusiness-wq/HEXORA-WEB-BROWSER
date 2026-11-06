@@ -1758,11 +1758,26 @@ class BrowserViewModel(
         }
         val pageState = _pageStates.value[entry.tabId]
         val target = pageState?.url?.ifBlank { entry.lastUrl }.orEmpty()
+        val tabId = entry.tabId
+        val liveSession = entry.session
         if (pageState?.loadFailed == true && UrlUtils.isHttpUrl(target)) {
-            AppLog.event("retry: re-navigating after a halted load")
-            entry.session?.loadUrl(target)
+            // Try a real reload first: for a POST-backed page (Google's sign-in
+            // result is one) reloading preserves the request, while navigating
+            // to the same URL again would not. A halted load makes reload a
+            // no-op, and that case falls through to a fresh navigation below.
+            liveSession?.reload()
+            if (liveSession != null) {
+                viewModelScope.launch {
+                    delay(RETRY_RENAVIGATE_DELAY_MS)
+                    if (entry.session !== liveSession) return@launch
+                    val state = _pageStates.value[tabId] ?: return@launch
+                    if (state.isLoading || !state.loadFailed) return@launch
+                    AppLog.event("retry: reload did not start, re-navigating")
+                    liveSession.loadUrl(target)
+                }
+            }
         } else {
-            entry.session?.reload()
+            liveSession?.reload()
         }
         engine?.verifyDisplayAfterReload()
     }
@@ -2806,6 +2821,12 @@ class BrowserViewModel(
 
         /** Quiet period after which requested tab-strip writes are flushed. */
         const val PERSIST_DEBOUNCE_MS = 400L
+
+        /**
+         * How long a Retry waits for a reload to actually start before it
+         * navigates to the page again (a halted load never starts).
+         */
+        const val RETRY_RENAVIGATE_DELAY_MS = 800L
 
         /** A launch must survive this long before it counts as stable. */
         const val LAUNCH_STABLE_DELAY_MS = 10_000L
