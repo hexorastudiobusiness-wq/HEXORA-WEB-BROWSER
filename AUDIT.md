@@ -680,25 +680,34 @@ no `onFirstComposite` behind it. No previous release had any code that listened
 to that per tab, which is why six releases of "fixes" never touched the real
 thing.
 
-0.5.8 now does three things on every tab activation, in this order:
+0.5.8 keeps a **per-tab** paint state, driven only by Gecko's own callbacks
+(`onFirstComposite` sets it, `onPaintStatusReset` clears it), and acts on it in
+four places:
 
-1. **Re-bind, always.** `present()` → `onSurfaceShown()` → `reacquireDisplay()`
-   (`releaseSession()` + `setSession()` on that tab's own surface). This is the
-   tray cure applied silently at the moment of the switch. It is a repaint of
-   the live session: no load, no new session, no scroll/history change.
-2. **Escalate if Gecko still says the pane is empty.** At 700 ms and 2200 ms
-   the tab's own paint state is read (`painted` = a frame exists;
-   `onPaintStatusReset` clears it). If it is still empty, the tab's host is
-   removed from the container and added again — the literal tray round-trip.
-3. **Say it out loud.** Two new counters in the diagnostics line, read from a
-   bug report: `switchRebinds=` (how many switches re-bound their session) and
-   `switchRepairs=` (how many needed the re-attach). Events are written to
-   `AppLog` as well.
+1. **At the switch, before the empty pane can be shown.** If the tab's paint
+   state says "the painted content is gone" (which is what happens when its
+   surface was destroyed while hidden), the tab's host is removed from the
+   container and added back — `fullReattach()`, the literal tray round-trip:
+   detach, `releaseSession()`, attach, `setSession()`. A tab whose paint state
+   is intact is shown as before, with no extra work and no flash.
+2. **At +700 ms and +2200 ms after a switch**, if no frame was composed for
+   that tab, `reacquireDisplay()` re-binds the session; the later check
+   escalates to `fullReattach()` again and logs
+   `tab switch: pane still unpainted`.
+3. **While the tab is on screen**: `onPaintStatusReset` on the active session
+   (the minimise case, a GPU reset, a surface loss) schedules the same
+   re-attach after 350 ms unless a frame arrives first.
+4. **On resume and after a reload/retry**, the same per-tab state decides, so
+   those paths cannot leave an empty pane either.
 
-The truthful limit: step 1 assumes GeckoView starts compositing against the new
-surface once the session is re-bound. If it does not, step 2 does the full
-re-attach within a second. What is *not* claimed: that every black pane is gone
-on every device — the verification has to come from the device, and the counters
-above are what will say whether the repair ran at all (`switchRebinds` growing
-while tabs stay visible) or whether the pane is still empty (`switchRepairs`
-growing, or the "still unpainted" log line).
+Two counters are added to the diagnostics line for the next bug report:
+`switchRebinds=` (re-binds because a frame never arrived) and
+`switchRepairs=` (full re-attaches). Event lines go to `AppLog` too, so the
+shake report answers "did the repair run?" without a cable.
+
+The truthful limit: the repair is driven by Gecko reporting that the painted
+content is gone. If a device loses the surface *silently* — no reset, no frame —
+nothing here can tell it apart from an intact pane, and the evidence for the
+next step will have to be the log. What the counters already answer: whether the
+repair ran (`switchRepairs`/`switchRebinds` growing), which tells us whether the
+remaining black pane is this defect or a different one.
