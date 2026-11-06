@@ -421,10 +421,6 @@ private fun PrivacyPane(
         checked = settings.httpsOnlyMode,
         onCheckedChange = { viewModel.setHttpsOnlyMode(it) },
     )
-    SettingsRow(
-        label = stringResource(R.string.settings_total_cookie_protection),
-        summary = stringResource(R.string.settings_total_cookie_protection_summary),
-    )
     SwitchRow(
         label = stringResource(R.string.settings_javascript),
         summary = stringResource(R.string.settings_javascript_summary),

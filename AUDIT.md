@@ -1020,3 +1020,64 @@ protection, no sync, no extensions, no tab hand-off between devices, and the
 plain statement that a site you are signed in to still sees what you do there.
 
 `versionCode` 39 / `versionName` 0.6.2.
+
+---
+
+## 28. 0.6.3 — the dead strings, and what the sweep found around them
+
+### Wired, not invented
+
+- `action_tabs` — the tab counter in the bottom bar draws its number as text
+  inside a `clickable` container, and `clickable` merges descendant semantics.
+  TalkBack read a bare digit and never said what the button opens. The button
+  now carries `contentDescription = "<label>, <count>"`.
+- `action_reset_zoom` — the reset button already existed and already worked;
+  the string is now its spoken label, because the button's visible text is the
+  value it resets to ("100%"), which reads as a value, not as an action.
+- `default_browser_already` — `startDefaultBrowserRequest()` used to launch a
+  role request the system answers with nothing when the role is already held.
+  It now says so before doing anything.
+- `action_undo`, `tabs_closed_message` — `UndoCloseAllTabs`, `undoCloseAllTabs()`
+  and the `lastCloseAllIds` batch had existed in the ViewModel with no caller.
+  The tray's "Close all" now shows a snackbar with Undo; the action restores the
+  batch in its original order and returns to the browser. No ViewModel change
+  was needed, which is the point: the feature was already built, only unwired.
+
+### Deleted
+
+`bug_report_shake_hint`, `file_picker_title`, `settings_cookies`,
+`settings_cookies_summary`, `settings_text_zoom`, `settings_text_zoom_summary`.
+The shake detector (`ShakeDetector`, started in `MainActivity`) and the file
+pickers (`OpenDocument`, `OpenMultipleDocuments`, `PickVisualMedia`,
+`PickMultipleVisualMedia`, `OpenDocumentTree`) are untouched: those two strings
+had no reference, so the gallery/file-manager chooser behaves exactly as before.
+
+Per-site cookie control exists already, as "Clear site data" in the overflow
+menu (`ClearSiteData` → `engine.clearSiteData(host)`), which is why the planned
+settings row was redundant rather than missing.
+
+### Found by the sweep and fixed
+
+- **Settings carried the same false claim About just lost**: a static row
+  "Total Cookie Protection — Always on: third-party cookies are partitioned by
+  site". Partitioning is off. Row and both strings removed.
+- `settings_javascript_summary` said "Applies to new browsing sessions after
+  restart"; `applyContentControls()` pushes `setJavaScriptEnabled` to the live
+  runtime as soon as the switch moves. Rewritten.
+- `settings_https_only_summary` said "Upgrades or blocks"; the mode this app
+  sets is `HTTPS_ONLY`, i.e. it blocks. Rewritten.
+- `settings_data_intro` said "Nothing syncs anywhere, because there is nowhere
+  to sync to" — the same overclaim corrected on the About page. Rewritten.
+- `BrowserUiState.recentlyClosedCount` was declared, copied through the slice
+  pipeline and never written: always zero. The field and its slice plumbing are
+  gone.
+
+### Sweep results on this tree
+
+305 strings, 0 unreferenced, 0 referenced-but-missing; every `R.drawable`,
+`R.mipmap`, `R.xml` reference resolves to a file; every XML parses; 0 `TODO`;
+0 private members with no second mention; 0 `IconButton` blocks without a
+spoken label; all 63 `BrowserAction` cases declared and handled in `onAction`;
+braces and parentheses balanced in every touched file.
+
+`versionCode` 40 / `versionName` 0.6.3.

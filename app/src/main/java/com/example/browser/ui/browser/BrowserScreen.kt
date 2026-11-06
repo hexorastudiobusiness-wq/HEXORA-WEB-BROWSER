@@ -116,6 +116,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -1954,8 +1956,20 @@ private fun BrowserBottomBar(
                 )
             }
 
-            // Tabs button with a Firefox-style tab counter.
-            IconButton(modifier = Modifier.size(buttonSize), onClick = onOpenTabs) {
+            // Tabs button with a Firefox-style tab counter. The count is
+            // drawn as text inside a clickable container, and clickable
+            // merges its children's semantics — so without an explicit label
+            // TalkBack announces a bare digit and never says what the button
+            // opens. The label carries the count for the same reason.
+            val tabsLabel = stringResource(R.string.action_tabs)
+            IconButton(
+                modifier = Modifier
+                    .size(buttonSize)
+                    .semantics {
+                        contentDescription = "$tabsLabel, ${state.tabs.size}"
+                    },
+                onClick = onOpenTabs,
+            ) {
                 Box(
                     modifier = Modifier
                         .size(26.dp)

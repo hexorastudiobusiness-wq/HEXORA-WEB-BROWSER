@@ -562,6 +562,16 @@ class MainActivity : ComponentActivity() {
      * no button.
      */
     private fun startDefaultBrowserRequest() {
+        // Already the default: the role request is a no-op the system may not
+        // even answer, so a tap would look broken. Say what is true instead.
+        if (BrowserRole.isDefault(this)) {
+            Toast.makeText(
+                this,
+                R.string.default_browser_already,
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
         val intent = pendingRoleIntent ?: BrowserRole.requestIntent(this)
         if (intent == null) {
             openDefaultBrowserSettings()

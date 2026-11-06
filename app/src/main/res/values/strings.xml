@@ -74,9 +74,7 @@
     <string name="theme_dark">Dark</string>
     <string name="theme_hexora">Hexora Mode</string>
     <string name="settings_javascript">JavaScript</string>
-    <string name="settings_javascript_summary">Applies to new browsing sessions after restart</string>
-    <string name="settings_cookies">Cookies</string>
-    <string name="settings_cookies_summary">Stored preference — per-site cookie controls are planned</string>
+    <string name="settings_javascript_summary">Takes effect on the next page load; a page that is already open keeps its current setting until it reloads.</string>
     <string name="settings_desktop_mode">Desktop site by default</string>
     <string name="settings_desktop_mode_summary">Applies to new tabs</string>
     <string name="settings_open_links_new_tab">Open links in a new tab</string>
@@ -118,7 +116,6 @@
     <string name="download_status_failed">Failed</string>
     <string name="download_status_cancelled">Cancelled</string>
     <string name="download_status_unknown">Unknown</string>
-    <string name="file_picker_title">Choose an app</string>
     <string name="file_source_title">Choose source</string>
     <string name="file_source_gallery">Gallery / Photos</string>
     <string name="file_source_files">Files</string>
@@ -136,8 +133,6 @@
     <string name="context_open_media_new_tab">Open media in new tab</string>
     <string name="context_copy_media_address">Copy media address</string>
     <string name="context_share_media_address">Share media address</string>
-    <string name="settings_text_zoom">Text size</string>
-    <string name="settings_text_zoom_summary">Scales text on pages; applied on next page load</string>
     <string name="settings_zoom_info_title">Zoom</string>
     <string name="settings_zoom_info_summary">Zoom is saved per site. Open a page and use Menu (⋮) → Zoom to change it; 100% resets. Desktop site is remembered per site too.</string>
     <string name="settings_password_manager">Save and autofill passwords</string>
@@ -237,9 +232,7 @@
     <string name="settings_tracking_protection">Enhanced Tracking Protection</string>
     <string name="settings_tracking_protection_summary">Blocks known trackers on every tab</string>
     <string name="settings_https_only">HTTPS-Only Mode</string>
-    <string name="settings_https_only_summary">Upgrades or blocks plain HTTP connections</string>
-    <string name="settings_total_cookie_protection">Total Cookie Protection</string>
-    <string name="settings_total_cookie_protection_summary">Always on: third-party cookies are partitioned by site</string>
+    <string name="settings_https_only_summary">Blocks pages that can\'t be loaded over HTTPS instead of showing them in the clear.</string>
 
     <!-- Page actions and printing -->
     <string name="menu_share_page">Share page</string>
@@ -293,7 +286,6 @@
     <string name="bug_report_copy">Copy report</string>
     <string name="bug_report_copied">Report copied</string>
     <string name="bug_report_no_mail_app">No email app found on this device</string>
-    <string name="bug_report_shake_hint">Shake the phone to report a bug</string>
 
     <!-- 0.6.0: Settings is a sidebar of sections, About is its own screen. -->
     <string name="settings_section_appearance">Appearance</string>
@@ -306,7 +298,7 @@
     <string name="settings_privacy_intro">What gets blocked before you touch anything, and what never leaves the phone.</string>
     <string name="settings_per_site_title">Per-site permissions</string>
     <string name="settings_credentials_title">Saved logins</string>
-    <string name="settings_data_intro">Everything here sits on this phone. Nothing syncs anywhere, because there is nowhere to sync to.</string>
+    <string name="settings_data_intro">Everything here sits on this phone. There is no account and no server of ours for it to sync to.</string>
     <string name="settings_clear_data_scope">Cookies, cache, site storage and history go. Bookmarks, saved logins and downloads stay.</string>
     <string name="settings_app_intro">Default browser, bug reports, and what build you are running.</string>
     <string name="settings_about_row_summary">What this is, what it protects, and where it stops</string>

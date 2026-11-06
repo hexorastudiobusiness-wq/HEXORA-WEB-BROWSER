@@ -545,3 +545,15 @@ hint در GeckoView این است: «تا جای ممکن حالتِ این سش
 **بخشِ تازه در صفحهٔ درباره:** «What isn't here yet» — پارتیشن‌بندیِ کوکیِ شخص‌ثالث نیست، محافظتِ fingerprinting نیست، سینک نیست، افزونه نیست، انتقالِ تب بین دستگاه‌ها نیست، و این جملهٔ صریح که سایتی که در آن لاگین کرده‌ای همچنان می‌بیند چه می‌کنی.
 
 `versionCode` ۳۹ / `versionName` ۰.۶.۲.
+
+## ۲۸. پیوست ۰.۶.۳ — رشته‌های مرده، و چیزهایی که مرورِ بعدی پیدا کرد
+
+**چهار مورد وصل شدند:** برچسبِ گفتاریِ شمارندهٔ تب (`action_tabs`)، برچسبِ گفتاریِ دکمهٔ ریستِ زوم (`action_reset_zoom` — دکمه از قبل کار می‌کرد، فقط TalkBack برایش می‌گفت «۱۰۰٪» و نمی‌گفت چه می‌کند)، پیامِ «از قبل مرورگر پیش‌فرض است» (`default_browser_already`)، و اسنکبارِ Undo بعد از «بستنِ همهٔ تب‌ها» (`action_undo` + `tabs_closed_message`). نکتهٔ دومی: `UndoCloseAllTabs` و دستهٔ `lastCloseAllIds` از چند نسخه قبل کامل در ViewModel بودند و هیچ‌کس صدایشان نمی‌زد؛ حالا صدایش می‌زنیم و تب‌ها به همان ترتیبِ اصلی برمی‌گردند.
+
+**شش رشته حذف شد:** `bug_report_shake_hint`، `file_picker_title`، `settings_cookies`، `settings_cookies_summary`، `settings_text_zoom`، `settings_text_zoom_summary`. هر دو چیزی که نگرانش بودی دست‌نخورده است: `ShakeDetector` سرِ جایش است، و انتخاب فایل همان `OpenDocument`/`OpenMultipleDocuments`/`PickVisualMedia`/`PickMultipleVisualMedia`/`OpenDocumentTree` است — پس همان گالری و فایل‌منیجر و دوربین را می‌دهد. کوکیِ هر سایت هم از قبل هست: «Clear site data» در منوی ⋮.
+
+**و چیزی که مرور پیدا کرد و مهم‌تر از خودِ رشته‌ها بود:** در تنظیمات یک ردیفِ ثابت بود با متنِ «Total Cookie Protection — Always on: third-party cookies are partitioned by site». همان دروغی که از صفحهٔ درباره برداشتم، اینجا زنده بود. ردیف و هر دو رشته‌اش حذف شد. سه توضیحِ کهنه هم اصلاح شد: JavaScript (می‌گفت بعد از ری‌استارت، در حالی که فوراً روی runtime اعمال می‌شود)، HTTPS-Only (می‌گفت «upgrades or blocks»، در حالی که حالتِ انتخاب‌شده «بلاک» است)، و `settings_data_intro` (همان «هیچ‌جا سینک نمی‌شود»). فیلدِ مردهٔ `recentlyClosedCount` هم حذف شد: تعریف شده بود، در سه لایه کپی می‌شد و هیچ‌جا نوشته نمی‌شد.
+
+**نتیجهٔ مرورِ کامل روی این درخت:** ۳۰۵ رشته، هیچ‌کدام بی‌استفاده و هیچ‌کدام گم‌شده؛ هر ارجاعِ drawable/mipmap/xml به یک فایل می‌رسد؛ همهٔ XMLها پارس می‌شوند؛ صفر `TODO`؛ صفر عضوِ private بدونِ ارجاعِ دوم؛ صفر `IconButton` بدونِ برچسب؛ هر ۶۳ کنشِ `BrowserAction` هم اعلام و هم در `onAction` رسیدگی می‌شوند؛ آکولاد و پرانتز در همهٔ فایل‌های دست‌خورده متوازن.
+
+`versionCode` ۴۰ / `versionName` ۰.۶.۳.

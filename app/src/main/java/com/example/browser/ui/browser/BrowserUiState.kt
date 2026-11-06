@@ -134,8 +134,6 @@ data class BrowserUiState(
     val findVisible: Boolean = false,
     val findResult: FindResultUi = FindResultUi(),
     /** Current text zoom (50..200), mirrors the persisted setting. */
-    /** Number of tabs available for "undo close all" (0 = nothing to undo). */
-    val recentlyClosedCount: Int = 0,
     /** tabId -> counter bumped whenever a fresh thumbnail is stored. */
     val thumbnailVersions: Map<String, Int> = emptyMap(),
     /** Engine bootstrap failure (e.g. GeckoView could not start). */
