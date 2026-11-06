@@ -807,3 +807,37 @@ app has one per shown tab, and that difference is what the black-pane class of
 bugs is made of. Converging means rewriting the surface layer to Mozilla's
 single-view model (`engineView.setCurrentSession`), which cannot be judged
 without a build and a device; it is the next step, not a side effect of this one.
+
+## 0.5.9 — the brand icon, from the artwork itself
+
+The owner's file (`file_0000000097e08210866fb96a12738cb5.png`, 1254×1254, the
+"K" mark above the `Hexora BROWSER` wordmark) is now the app's icon. Nothing of
+the old icon is left: every launcher asset, the adaptive foreground, the in-app
+logo and the Android 12 splash foreground were regenerated from that file, and
+the old files were replaced in place.
+
+How the artwork is used, and why:
+
+- **the mark, not the wordmark.** A launcher icon is drawn at 48 dp; the wordmark
+  is unreadable there, so the icon is the square around the "K", taken from the
+  artwork at its native resolution (no scaling of the mark itself).
+- **the artwork's own background is kept.** Keying the near-white background out
+  to get a transparent mark is possible but leaves the tinted drop shadows as a
+  halo on a dark tile (three thresholds were tried and all three left visible
+  residue). The tile is instead the artwork's own pixels, extended outwards by
+  edge replication so the mark has breathing room inside the 66 dp safe zone.
+- **one square, five densities.** `mipmap-*/ic_launcher.png` is the tile with an
+  18 % corner radius (48/72/96/144/192 px); `mipmap-*/ic_launcher_foreground.png`
+  is the same tile at 78 % of the 108 dp canvas centred on transparency, which is
+  larger than the 72 dp the launcher shows, so the mask reveals the tile
+  edge-to-edge — no dark ring and no seam (the tinted mark sits at ~70 % of the
+  visible area). `@color/ic_launcher_background` stays `#0A141F`; it is never
+  visible under that foreground and keeps the pre-splash window dark.
+- **in-app**: `hexora_logo.png` (512 px) is the same square — the Start Page
+  already crops and rounds it (72 dp, 18 dp radius).
+- **splash**: `hexora_logo_splash_foreground.png` is the tile at 72 % of a
+  1024 px canvas; `mipmap-anydpi-v31/ic_splash.xml` still masks it, so Android 12
+  shows the light tile in a circle over the black splash background.
+
+`versionCode` 36 / `versionName` 0.5.9, so the new debug APK installs over the
+0.5.8 build on the phone instead of being refused.
