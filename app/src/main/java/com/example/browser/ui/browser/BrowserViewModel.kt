@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.browser.BuildConfig
+import com.example.browser.R
 import com.example.browser.browser.BrowserEngine
 import com.example.browser.browser.BrowserSession
 import com.example.browser.browser.BrowserSessionConfig
@@ -26,9 +28,11 @@ import com.example.browser.data.repository.StartShortcutRepository
 import com.example.browser.data.settings.BrowserSettingsState
 import com.example.browser.data.settings.PersistedTab
 import com.example.browser.data.settings.SettingsRepository
+import com.example.browser.data.settings.SitePreferencesStore
 import com.example.browser.data.settings.TabSessionStore
 import com.example.browser.data.settings.ThemeMode
 import com.example.browser.download.DownloadFileName
+import com.example.browser.util.AppLog
 import com.example.browser.util.CredentialOrigin
 import com.example.browser.util.ShortcutIconStore
 import com.example.browser.util.TabThumbnailStore
@@ -86,6 +90,7 @@ class BrowserViewModel(
     private val shortcutIconStore: ShortcutIconStore,
     private val faviconFetcher: FaviconFetcher,
     private val tabSessionStore: TabSessionStore,
+    private val sitePreferencesStore: SitePreferencesStore,
 ) : ViewModel() {
 
     private var engine: BrowserEngine? = null
@@ -123,7 +128,6 @@ class BrowserViewModel(
 
     private val _tabs = MutableStateFlow<List<TabEntry>>(emptyList())
     private val _tabRevision = MutableStateFlow(0L)
-    private var contentViewGeneration = 0L
     private val persistenceMutex = Mutex()
     private val _activeTabId = MutableStateFlow<String?>(null)
     private val _pageStates = MutableStateFlow<Map<String, SessionPageState>>(emptyMap())
@@ -142,6 +146,46 @@ class BrowserViewModel(
      */
     private var lastCloseAllIds: Set<String> = emptySet()
     private val _pendingCredentialPrompt = MutableStateFlow<CredentialSavePrompt?>(null)
+
+    /**
+     * A saved login the user may tap to fill. Nothing is written into the page
+     * until they do (the engine only offers; see SavedLoginOffered).
+     */
+    private val _savedLoginSuggestion = MutableStateFlow<SavedLoginSuggestion?>(null)
+
+    /** Live pull-to-refresh progress reported by the engine (0f..1.5f). */
+    private val _pullProgress = MutableStateFlow(0f)
+
+    /** Zoom panel (the floating vertical slider) visibility. */
+    private val _zoomPanelVisible = MutableStateFlow(false)
+
+    /** One-shot shortcut feedback (string resource) for the UI toast. */
+    private val _shortcutMessage = MutableStateFlow<Int?>(null)
+
+    /**
+     * Add/edit Start Page shortcut dialog. Deliberately ViewModel state: the
+     * Start Page is an overlay drawn over the web surface, and dialog state
+     * kept inside that subtree disappeared with a recomposition on device
+     * (tapping the + tile looked like a dead button).
+     */
+    private val _shortcutDialog = MutableStateFlow<ShortcutDialogRequest?>(null)
+
+    /** Zoom shown by the panel: the active site's stored value, live-edited. */
+    private val _zoomPercent = MutableStateFlow(SitePreferencesStore.DEFAULT_ZOOM)
+
+    /**
+     * Per-site zoom/desktop preferences, mirrored in memory so the engine can
+     * resolve a site's zoom synchronously on page start (DataStore reads are
+     * async and a page must not lay out at the wrong zoom first).
+     */
+    private var siteZoom: Map<String, Int> = emptyMap()
+    private var siteDesktop: Map<String, Boolean> = emptyMap()
+    private var zoomPersistJob: Job? = null
+
+    // Counters for the in-app diagnostics dialog (no logs, no cable).
+    private var sessionsCreated = 0
+    private var sessionsClosedByApp = 0
+    private var tabsRestored = 0
     private val _shortcutIcons = MutableStateFlow<Map<Long, Bitmap>>(emptyMap())
     private val shortcutIconFetchesInFlight = mutableSetOf<Long>()
     private val shortcutIconLastAttemptAt = mutableMapOf<Long, Long>()
@@ -269,7 +313,7 @@ class BrowserViewModel(
         TabsSlice(tabs, activeId, states, thumbs, revision)
     }
 
-    private val chromeSlice = combine(
+    private val chromeBaseSlice = combine(
         _findVisible,
         _userFullscreen,
         _recentlyClosed,
@@ -277,6 +321,35 @@ class BrowserViewModel(
         _pageContextMenu,
     ) { find, fs, closed, prompt, contextMenu ->
         ChromeSlice(find, fs, closed.size, prompt, contextMenu)
+    }
+
+    private val chromeSliceWithLogin = combine(
+        chromeBaseSlice,
+        _savedLoginSuggestion,
+    ) { chrome, suggestion ->
+        chrome.copy(savedLoginSuggestion = suggestion)
+    }
+
+    private val chromeSliceWithPull = combine(
+        chromeSliceWithLogin,
+        _pullProgress,
+    ) { chrome, pull ->
+        chrome.copy(pullRefreshProgress = pull)
+    }
+
+    private val chromeSlice = combine(
+        chromeSliceWithPull,
+        _zoomPanelVisible,
+        _zoomPercent,
+        _shortcutMessage,
+        _shortcutDialog,
+    ) { chrome, zoomVisible, zoomPercent, shortcutMessage, shortcutDialog ->
+        chrome.copy(
+            zoomPanelVisible = zoomVisible,
+            zoomPercent = zoomPercent,
+            shortcutMessage = shortcutMessage,
+            shortcutDialog = shortcutDialog,
+        )
     }
 
     private val historyAndBookmarks = combine(
@@ -360,6 +433,8 @@ class BrowserViewModel(
             certificateIssuer = activeState.certificateIssuer,
             isPrivate = activeEntry?.isPrivate ?: false,
             loadFailed = activeState.loadFailed,
+            loadErrorCode = activeState.loadErrorCode,
+            loadErrorCategory = activeState.loadErrorCategory,
             isBookmarked = bookmarked && activeEntry?.isPrivate != true,
             isDesktopMode = activeEntry?.desktopMode ?: false,
             isFullscreen = BrowserPresentationPolicy.isFullscreen(
@@ -370,12 +445,10 @@ class BrowserViewModel(
             ),
             findVisible = start.chrome.findVisible,
             findResult = activeState.findResult,
-            textZoomPercent = currentSettings.textZoomPercent,
             recentlyClosedCount = start.chrome.recentlyClosedCount,
             thumbnailVersions = slice.thumbnails,
             errorMessage = error,
             activeSession = activeEntry?.session,
-            contentViewGeneration = contentViewGeneration,
             showStartPage = activeEntry?.showStartPage ?: slice.tabs.isEmpty(),
             activeTabCrashed = activeEntry?.crashed == true,
             hasWebPage = activeState.url.isNotBlank() ||
@@ -393,6 +466,13 @@ class BrowserViewModel(
                 start.icons
             },
             pendingCredentialSave = start.chrome.pendingCredentialSave,
+            pullRefreshProgress = start.chrome.pullRefreshProgress,
+            zoomPanelVisible = start.chrome.zoomPanelVisible,
+            zoomPercent = start.chrome.zoomPercent,
+            shortcutMessage = start.chrome.shortcutMessage,
+            shortcutDialog = start.chrome.shortcutDialog,
+            savedLoginSuggestion = start.chrome.savedLoginSuggestion
+                ?.takeIf { suggestion -> suggestion.tabId == activeEntry?.tabId },
             pageContextMenu = start.chrome.pageContextMenu,
             // Private tabs never surface the normal browsing history.
             addressSuggestions = if (activeEntry?.isPrivate == true) {
@@ -728,10 +808,30 @@ class BrowserViewModel(
         MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
     init {
+        // Touch ownership between the web surface and Compose content.
+        // GeckoView is a real View: it takes the gesture before any Compose
+        // button drawn over it, so while an overlay is on screen the surface
+        // must refuse touches. Driven here, from tab/page state, and through
+        // the ENGINE — a Start Page tab has no session yet (sessions are
+        // created lazily), and routing this through the session is exactly why
+        // the previous attempt silently did nothing.
+        viewModelScope.launch {
+            combine(_tabRevision, _activeTabId, _pageStates) { revision, activeId, states ->
+                Triple(revision, activeId, states)
+            }.collect { syncContentTouch() }
+        }
+
         // Tab thumbnails are not restored after process death, so screenshots
         // from a previous process would only be orphaned page images. (The
         // tab strip itself — URLs/titles — is restored via TabSessionStore.)
         viewModelScope.launch(Dispatchers.IO) { thumbnailStore.clearAll() }
+
+        viewModelScope.launch {
+            sitePreferencesStore.zoomByHost.collect { siteZoom = it }
+        }
+        viewModelScope.launch {
+            sitePreferencesStore.desktopByHost.collect { siteDesktop = it }
+        }
 
         viewModelScope.launch {
             // Engine bootstrap must degrade to the error state, never crash
@@ -739,10 +839,21 @@ class BrowserViewModel(
             // or damaged installation, and the user should see that instead
             // of a process death before the first frame.
             try {
+            // Read the per-site maps *before* the first page starts. The
+            // DataStore collectors below are asynchronous, so a restored tab
+            // or a cold start could otherwise begin loading before the stored
+            // zoom arrived and render at 100% while the UI said 75% — the
+            // exact bug this release fixes.
+            siteZoom = sitePreferencesStore.zoomByHost.first()
+            siteDesktop = sitePreferencesStore.desktopByHost.first()
             val initialSettings = settingsRepository.settings.first()
             val createdEngine = engineFactory(initialSettings.javaScriptEnabled)
             engine = createdEngine
-            createdEngine.setTextZoomPercent(initialSettings.textZoomPercent)
+            // Zoom is per site: the engine asks this map on every page start
+            // and falls back to 100% for sites the user never adjusted.
+            createdEngine.siteZoomProvider = { host ->
+                siteZoom[SitePreferencesStore.normalizeHost(host)]
+            }
             createdEngine.setPreferredColorScheme(initialSettings.themeMode.toWebColorScheme())
             createdEngine.applyContentControls(
                 javaScriptEnabled = initialSettings.javaScriptEnabled,
@@ -774,6 +885,7 @@ class BrowserViewModel(
             }
             createdEngine.onTabSwipe = { delta -> handleFullscreenTabSwipe(delta) }
             createdEngine.onPullToRefresh = { handlePullToRefresh() }
+            createdEngine.onPullProgress = { progress -> _pullProgress.value = progress }
             // If the previous launch died before becoming usable, the
             // persisted engine state of some tab is the prime suspect:
             // restore URLs only, so the same state cannot kill every
@@ -827,13 +939,11 @@ class BrowserViewModel(
                 }
             }
         }
-        // Keep the engine's text zoom in sync with the persisted setting.
-        // Also react immediately when the local password vault is toggled:
+        // React immediately when the local password vault is toggled:
         // disabling it must remove credentials already offered to pages.
         viewModelScope.launch {
             var lastPasswordManagerEnabled: Boolean? = null
             settings.collect { current ->
-                engine?.setTextZoomPercent(current.textZoomPercent)
                 engine?.setPreferredColorScheme(current.themeMode.toWebColorScheme())
                 engine?.applyContentControls(
                     javaScriptEnabled = current.javaScriptEnabled,
@@ -894,10 +1004,12 @@ class BrowserViewModel(
                 } else {
                     setShowStartPage(entry, false)
                     restoreForExplicitNavigation(entry)
-                    entry.session?.loadUrl(resolveUserInput(action.input))
+                    val target = resolveUserInput(action.input)
+                    applyStoredDesktopMode(entry, target)
+                    entry.session?.loadUrl(target)
                 }
             }
-            BrowserAction.Reload -> activeSession()?.reload()
+            BrowserAction.Reload -> recoverActivePage()
             BrowserAction.StopLoading -> activeSession()?.stopLoading()
             BrowserAction.GoBack -> activeSession()?.goBack()
             BrowserAction.GoForward -> activeSession()?.goForward()
@@ -943,8 +1055,6 @@ class BrowserViewModel(
             BrowserAction.ClearBrowsingData -> clearBrowsingData()
             BrowserAction.ClearSiteData -> clearSiteData()
             BrowserAction.ToggleDesktopMode -> toggleDesktopMode()
-            is BrowserAction.SetTextZoom ->
-                viewModelScope.launch { settingsRepository.setTextZoomPercent(action.percent) }
             BrowserAction.OpenFind -> _findVisible.value = true
             BrowserAction.CloseFind -> {
                 _findVisible.value = false
@@ -975,6 +1085,43 @@ class BrowserViewModel(
             BrowserAction.UndoCloseAllTabs -> undoCloseAllTabs()
             BrowserAction.SavePendingCredential -> savePendingCredential()
             BrowserAction.DismissPendingCredential -> dismissPendingCredential()
+            BrowserAction.FillSavedLogin -> {
+                val suggestion = _savedLoginSuggestion.value
+                _savedLoginSuggestion.value = null
+                if (suggestion != null) {
+                    // The engine re-checks the origin at fill time, so a
+                    // navigation since the offer cannot leak the password.
+                    entry(suggestion.tabId)?.session?.fillSavedCredentialNow()
+                }
+            }
+            BrowserAction.DismissSavedLoginSuggestion -> {
+                _savedLoginSuggestion.value = null
+            }
+            BrowserAction.ShowZoomPanel -> {
+                _zoomPercent.value = siteZoom[
+                    SitePreferencesStore.hostOf(currentPageUrl()).orEmpty()
+                ] ?: SitePreferencesStore.DEFAULT_ZOOM
+                _zoomPanelVisible.value = true
+            }
+            BrowserAction.HideZoomPanel -> {
+                _zoomPanelVisible.value = false
+                persistSiteZoom(_zoomPercent.value, immediate = true)
+            }
+            is BrowserAction.SetSiteZoom -> {
+                val percent = action.percent.coerceIn(
+                    SitePreferencesStore.MIN_ZOOM,
+                    SitePreferencesStore.MAX_ZOOM,
+                )
+                _zoomPercent.value = percent
+                // Applied live so the page reflows under the user's finger.
+                engine?.setTextZoomPercent(percent)
+                persistSiteZoom(percent)
+            }
+            BrowserAction.ResetSiteZoom -> {
+                _zoomPercent.value = SitePreferencesStore.DEFAULT_ZOOM
+                engine?.setTextZoomPercent(SitePreferencesStore.DEFAULT_ZOOM)
+                persistSiteZoom(SitePreferencesStore.DEFAULT_ZOOM)
+            }
             BrowserAction.DismissPageContextMenu ->
                 _pageContextMenu.value = null
             BrowserAction.OpenContextMenuLink -> openContextMenuLink(newTab = false)
@@ -990,17 +1137,47 @@ class BrowserViewModel(
             is BrowserAction.AddStartShortcut -> {
                 viewModelScope.launch {
                     val resolvedUrl = resolveUserInput(action.url)
-                    val shortcutId = shortcutRepository.add(
-                        title = action.title,
-                        url = resolvedUrl,
-                    ) ?: return@launch
-                    // If this site is already open and loaded, its real icon
-                    // can replace the letter placeholder immediately.
-                    loadedPageUrlForShortcut(resolvedUrl)?.let { pageUrl ->
-                        fetchShortcutIcon(listOf(shortcutId), pageUrl)
+                    // Never fail silently again: the old code returned without
+                    // a word when the URL was a duplicate or the cap was hit,
+                    // which is indistinguishable from "the button is dead".
+                    val existing = shortcutRepository.shortcuts.first()
+                    _shortcutMessage.value = when {
+                        resolvedUrl.isBlank() -> R.string.shortcut_invalid
+                        existing.any { it.url.equals(resolvedUrl, ignoreCase = true) } ->
+                            R.string.shortcut_duplicate
+                        existing.size >= StartShortcutRepository.MAX_SHORTCUTS ->
+                            R.string.shortcut_limit
+                        else -> {
+                            val shortcutId = shortcutRepository.add(
+                                title = action.title,
+                                url = resolvedUrl,
+                            )
+                            if (shortcutId == null) {
+                                R.string.shortcut_failed
+                            } else {
+                                _shortcutDialog.value = null
+                                // If this site is already open and loaded, its
+                                // real icon can replace the letter placeholder
+                                // immediately.
+                                loadedPageUrlForShortcut(resolvedUrl)?.let { pageUrl ->
+                                    fetchShortcutIcon(listOf(shortcutId), pageUrl)
+                                }
+                                R.string.shortcut_added
+                            }
+                        }
                     }
                 }
             }
+            BrowserAction.DismissShortcutMessage -> _shortcutMessage.value = null
+            BrowserAction.ShowAddShortcutDialog ->
+                _shortcutDialog.value = ShortcutDialogRequest()
+            is BrowserAction.ShowEditShortcutDialog ->
+                _shortcutDialog.value = ShortcutDialogRequest(
+                    id = action.id,
+                    title = action.title,
+                    url = action.url,
+                )
+            BrowserAction.DismissShortcutDialog -> _shortcutDialog.value = null
             is BrowserAction.EditStartShortcut -> {
                 viewModelScope.launch {
                     val resolvedUrl = resolveUserInput(action.url)
@@ -1011,6 +1188,9 @@ class BrowserViewModel(
                         title = action.title,
                         url = resolvedUrl,
                     )
+                    if (updated) {
+                        _shortcutDialog.value = null
+                    }
                     if (updated && previous != null && previous.url != resolvedUrl) {
                         withContext(Dispatchers.IO) {
                             shortcutIconStore.delete(action.id)
@@ -1054,14 +1234,9 @@ class BrowserViewModel(
 
     fun switchTab(tabId: String) {
         val entry = entry(tabId) ?: return
-        val session = entry.session
-        if (session != null && !session.isUsable()) {
-            // The content process died while this tab sat in the background
-            // and no death event reached us (or it was missed): suspend it
-            // instead of binding a dead session, which rendered a white
-            // page even Refresh could not revive.
-            handleDeadSession(entry, session)
-        }
+        // Switching tabs must never recreate anything: a session that exists
+        // is bound as-is, and only a suspended tab (no session at all) is
+        // restored. Recreating a live session here reloaded the page.
         if (entry.session == null) {
             // Selecting a suspended/crashed tab is the user's explicit
             // "restore this tab" (Firefox RestoreUseCase semantics).
@@ -1069,7 +1244,6 @@ class BrowserViewModel(
             restoreTab(entry)
         }
         activateTab(tabId)
-        updateWarmPriorities()
     }
 
     /** Explicit restore of a crashed active tab (crash card button). */
@@ -1151,7 +1325,11 @@ class BrowserViewModel(
                 switchTab(next.tabId)
             }
         }
-        updateWarmPriorities()
+        applySessionPriorities()
+        // Closing a tab is a structural change: write the strip now instead of
+        // waiting for the 400 ms debounce, otherwise a tab closed right before
+        // the app is killed comes back on the next cold start.
+        persistTabsNow()
     }
 
     /** Opens [url] (from Start Page/bookmarks/history/another app). */
@@ -1167,6 +1345,7 @@ class BrowserViewModel(
         }
         setShowStartPage(entry, false)
         restoreForExplicitNavigation(entry)
+        applyStoredDesktopMode(entry, url)
         entry.session?.loadUrl(url)
     }
 
@@ -1297,11 +1476,29 @@ class BrowserViewModel(
         _findVisible.value = false
     }
 
+    /**
+     * Tells the engine whether the web surface may take touches right now.
+     * An overlay is on top whenever the Start Page is up, the tab crashed, or
+     * the load failed (the error card) — none of those may leave the native
+     * surface owning the gesture.
+     */
+    private fun syncContentTouch() {
+        val entry = activeEntry()
+        val pageState = entry?.let { _pageStates.value[it.tabId] }
+        val overlayOnTop = entry == null ||
+            entry.showStartPage ||
+            entry.crashed ||
+            pageState?.loadFailed == true
+        engine?.setContentTouchAllowed(!overlayOnTop)
+        engine?.setContentHidden(overlayOnTop)
+    }
+
     private fun setShowStartPage(entry: TabEntry, show: Boolean) {
         if (entry.showStartPage == show) return
         entry.showStartPage = show
         if (show) _userFullscreen.value = false
         _tabRevision.update { it + 1 }
+        syncContentTouch()
         requestPersistTabs()
     }
 
@@ -1405,10 +1602,12 @@ class BrowserViewModel(
 
     /**
      * Called on genuine low-memory signals. Mirrors Mozilla's
-     * TrimMemoryMiddleware: the selected tab and the
-     * [SUSPEND_KEEP_INACTIVE_TABS] most recently used inactive tabs are
-     * never suspended; only colder sessions are closed (their saved state
-     * and thumbnail are kept, so they restore when selected again).
+     * `TrimMemoryMiddleware.determineTabsToSuspend`: the selected tab is never
+     * suspended, sessions are ordered by last access and the
+     * [SUSPEND_KEEP_INACTIVE_TABS] most recently used (`MIN_ACTIVE_TABS` in
+     * that file) are kept; only colder sessions are closed. Their saved engine
+     * state and thumbnail stay, so selecting one restores it instead of
+     * reloading it.
      */
     fun suspendTabsOutsideWarmSet() {
         val activeId = _activeTabId.value
@@ -1422,7 +1621,7 @@ class BrowserViewModel(
                     entry.tabId != activeId &&
                     entry.tabId !in warmInactiveIds
             }
-            .forEach { suspendTab(it) }
+            .forEach { suspendTab(it, capturePreview = false) }
     }
 
     /**
@@ -1435,16 +1634,10 @@ class BrowserViewModel(
      * an empty tab even though the tab strip still showed its site.
      */
     fun onAppForegrounded() {
-        // Check for quietly-killed sessions *before* flipping the flag:
-        // handleDeadSession() classifies a death as user-witnessed from it,
-        // and a process the system killed while we were backgrounded must
-        // be restored silently below, never presented as a crashed tab.
-        _tabs.value.forEach { entry ->
-            val session = entry.session ?: return@forEach
-            if (!session.isUsable()) {
-                handleDeadSession(entry, session, witnessed = false)
-            }
-        }
+        // Sessions are only ever torn down in response to a death Gecko
+        // actually reported (SessionDied). Polling isUsable() here used to
+        // recreate sessions on every return to the app: recreating a session
+        // reloads the page, which is what made returning look like a refresh.
         appInForeground = true
         // Returning to the app is the explicit "this tab is needed again"
         // moment: a tab whose process died quietly in the background is
@@ -1458,13 +1651,20 @@ class BrowserViewModel(
 
     /** Called by the Activity when the app leaves the foreground. */
     fun onAppBackgrounded() {
+        engine?.noteAppBackgrounded()
         appInForeground = false
     }
 
     /**
      * Central low-memory policy (the tab layer owns it, like Mozilla's
      * middleware chain — the Activity only forwards the raw signal).
-     * Exact levels only: RUNNING_CRITICAL and COMPLETE.
+     *
+     * Exactly Mozilla's rule (`TrimMemoryMiddleware.shouldCloseEngineSessions`):
+     * `RUNNING_CRITICAL` in the foreground and `COMPLETE` in the background.
+     * Firefox deliberately does nothing at `RUNNING_MODERATE`/`RUNNING_LOW`/
+     * `BACKGROUND` — Gecko applies its own per-session memory pressure for
+     * inactive sessions — and every ordinary tab release here would throw away
+     * exactly the state that makes a tab come back without reloading.
      */
     fun onLowMemory(level: Int) {
         if (level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
@@ -1475,20 +1675,43 @@ class BrowserViewModel(
     }
 
     /**
-     * Recreate the entire AndroidView host after a long background interval,
-     * exactly as leaving content for the tab selector and selecting a tab does.
-     * Reattaching the SAME child to the SAME host did not reproduce that path.
-     * The engine session stays open; this only resets the display/view lifecycle.
+     * Called after the window has a surface again (Activity onResume). A tab
+     * whose session died while backgrounded is restored, then the engine is
+     * asked to verify — from Gecko's own paint callbacks — that the visible
+     * page really is on screen. No timers, no blind re-creation.
      */
-    fun onBrowserResumed(backgroundDurationMs: Long) {
-        if (backgroundDurationMs < REBIND_AFTER_BACKGROUND_MS) return
+    fun onBrowserResumed() {
         val active = activeEntry() ?: return
-        if (active.showStartPage || active.crashed) return
-        if (active.session == null) restoreTab(active)
-        if (active.session?.isUsable() == true) {
-            contentViewGeneration++
-            _tabRevision.update { it + 1 }
+        // Only a tab that genuinely has no session (suspended, or restored
+        // after a reported death) is rebuilt here; a live session is never
+        // touched, because rebuilding it would reload the page.
+        if (!active.showStartPage && !active.crashed) {
+            val session = active.session
+            if (session == null) {
+                restoreTab(active)
+            } else if (!session.isUsable()) {
+                // A session that is still referenced but already closed is
+                // what an error card with a dead Retry was made of: nothing
+                // reloads it and the tray round-trip was the only cure.
+                handleDeadSession(active, session, witnessed = false)
+                if (active.session == null) {
+                    active.crashed = false
+                    restoreTab(active)
+                }
+            }
         }
+        _pullProgress.value = 0f
+        engine?.finishPullToRefresh()
+        // Re-apply the overlay state as well: a container left INVISIBLE while
+        // the app was away repainted nothing, and nothing else changes the
+        // flag on return because the overlays are the same as before.
+        syncContentTouch()
+        engine?.ensureContentDisplayed()
+        // Black tabs after a return: if Gecko dropped the painted content while
+        // we were away and never reports a new frame, the display is
+        // re-acquired — the same repair as re-selecting the tab, which is what
+        // had to be done by hand.
+        engine?.verifyPaintAfterResume()
     }
 
     /**
@@ -1499,11 +1722,72 @@ class BrowserViewModel(
      */
     private fun handlePullToRefresh() {
         val entry = activeEntry() ?: return
-        val session = entry.session ?: return
         if (_pageStates.value[entry.tabId]?.isPageFullscreen == true) {
             _userFullscreen.value = true
         }
-        session.reload()
+        recoverActivePage()
+    }
+
+    /**
+     * Retry / refresh, made to work in the state the owner actually found:
+     * an error card up, and every recovery button doing nothing while selecting
+     * the tab from the tray fixed it.
+     *
+     * Three reasons that could be true, all handled here:
+     *  - the tab has **no session at all** (its content process died while the
+     *    app was away, or the session was dropped): the old code called
+     *    `session?.reload()` on `null`, i.e. nothing at all. Restoring the tab
+     *    is exactly what the tray does through `switchTab`.
+     *  - the session is there but closed: it is suspended and rebuilt.
+     *  - the session is alive but the load it shows was **halted**: the load
+     *    error handler returns `null` to stop Gecko's own error page, and
+     *    `reload()` of a halted load is a no-op. The page is navigated to again
+     *    instead of reloaded.
+     *
+     * Finally the engine is asked to verify that the surface actually painted;
+     * if it did not, the display is re-acquired from the live session.
+     */
+    private fun recoverActivePage() {
+        val entry = activeEntry() ?: return
+        if (entry.showStartPage) return
+        val session = entry.session
+        if (session == null || !session.isUsable()) {
+            _savedLoginSuggestion.value = null
+            if (session != null) handleDeadSession(entry, session, witnessed = false)
+            // An explicit retry is the user's restore decision, exactly like
+            // selecting the tab or the crash card's own button.
+            entry.crashed = false
+            if (entry.session == null) {
+                AppLog.event("retry: tab had no usable session, restoring")
+                restoreTab(entry)
+            }
+            engine?.verifyDisplayAfterReload()
+            return
+        }
+        val pageState = _pageStates.value[entry.tabId]
+        val target = pageState?.url?.ifBlank { entry.lastUrl }.orEmpty()
+        val tabId = entry.tabId
+        val liveSession = entry.session
+        if (pageState?.loadFailed == true && UrlUtils.isHttpUrl(target)) {
+            // Try a real reload first: for a POST-backed page (Google's sign-in
+            // result is one) reloading preserves the request, while navigating
+            // to the same URL again would not. A halted load makes reload a
+            // no-op, and that case falls through to a fresh navigation below.
+            liveSession?.reload()
+            if (liveSession != null) {
+                viewModelScope.launch {
+                    delay(RETRY_RENAVIGATE_DELAY_MS)
+                    if (entry.session !== liveSession) return@launch
+                    val state = _pageStates.value[tabId] ?: return@launch
+                    if (state.isLoading || !state.loadFailed) return@launch
+                    AppLog.event("retry: reload did not start, re-navigating")
+                    liveSession.loadUrl(target)
+                }
+            }
+        } else {
+            liveSession?.reload()
+        }
+        engine?.verifyDisplayAfterReload()
     }
 
     /** Fullscreen tab swipes are detected by the engine's content view. */
@@ -1584,7 +1868,13 @@ class BrowserViewModel(
                 tabId = newTabId(),
                 session = null,
                 isPrivate = false,
-                desktopMode = saved.desktopMode ?: desktopMode,
+                // The per-site choice wins over the mode saved with the tab,
+                // so a site the user switched to desktop stays that way after
+                // a restart regardless of how the tab was left.
+                desktopMode = SitePreferencesStore.hostOf(saved.url)
+                    ?.let { siteDesktop[it] }
+                    ?: saved.desktopMode
+                    ?: desktopMode,
                 lastUrl = saved.url,
                 lastTitle = saved.title,
                 savedState = saved.engineState?.takeUnless { skipEngineState }
@@ -1598,7 +1888,7 @@ class BrowserViewModel(
         _activeTabId.value = active.tabId
         restoreTab(active)
         if (active.showStartPage) scheduleLaunchStableMark()
-        updateWarmPriorities()
+        applySessionPriorities()
         tabRestoreComplete = true
         requestPersistTabs()
     }
@@ -1736,9 +2026,49 @@ class BrowserViewModel(
         val entry = activeEntry() ?: return
         entry.desktopMode = !entry.desktopMode
         entry.session?.setDesktopMode(entry.desktopMode)
+        // Remember the choice for this site, so returning to it later (also
+        // after a restart) keeps the same rendering mode.
+        SitePreferencesStore.hostOf(currentPageUrl())?.let { host ->
+            val enabled = entry.desktopMode
+            viewModelScope.launch { sitePreferencesStore.setDesktop(host, enabled) }
+        }
         // Refresh derived UI (tab item state) even though session state also updates.
         _tabRevision.update { it + 1 }
         requestPersistTabs()
+    }
+
+    /** URL currently shown by the active tab, URL bar included. */
+    private fun currentPageUrl(): String {
+        val entry = activeEntry() ?: return ""
+        val state = _pageStates.value[entry.tabId]
+        return state?.url?.takeIf { it.isNotBlank() } ?: entry.lastUrl
+    }
+
+    /**
+     * Applies this site's stored "desktop site" choice before a navigation.
+     * Applying it after the load would reload the page, so it happens here,
+     * while the tab is still on its previous document.
+     */
+    private fun applyStoredDesktopMode(entry: TabEntry, url: String) {
+        val host = SitePreferencesStore.hostOf(url) ?: return
+        val stored = siteDesktop[host] ?: return
+        if (entry.desktopMode == stored) return
+        entry.desktopMode = stored
+        // No reload: a navigation is about to start, and reloading the old
+        // document first would double-load the tab (visible flash).
+        entry.session?.setDesktopMode(stored, reload = false)
+        _tabRevision.update { it + 1 }
+        requestPersistTabs()
+    }
+
+    /** Saves the active site's zoom; debounced while the slider is dragged. */
+    private fun persistSiteZoom(percent: Int, immediate: Boolean = false) {
+        val host = SitePreferencesStore.hostOf(currentPageUrl()) ?: return
+        zoomPersistJob?.cancel()
+        zoomPersistJob = viewModelScope.launch {
+            if (!immediate) delay(350)
+            sitePreferencesStore.setZoom(host, percent)
+        }
     }
 
     private fun switchAdjacentTab(delta: Int) {
@@ -1851,7 +2181,7 @@ class BrowserViewModel(
                         isPrivate = isPrivate,
                         desktopMode = desktopMode,
                     ),
-                )
+                ).also { sessionsCreated++ }
             } catch (e: Exception) {
                 _engineError.value = e.message ?: e.javaClass.simpleName
                 return null
@@ -1873,15 +2203,19 @@ class BrowserViewModel(
         touchLru(entry.tabId)
         if (session != null) {
             attachSession(entry, session)
-            if (target.isNotBlank()) session.loadUrl(target)
+            if (target.isNotBlank()) {
+                applyStoredDesktopMode(entry, target)
+                session.loadUrl(target)
+            }
         }
         if (makeActive) activateTab(entry.tabId)
-        updateWarmPriorities()
+        applySessionPriorities()
         persistTabsNow()
         return entry.tabId
     }
 
     private fun restoreTab(entry: TabEntry) {
+        tabsRestored++
         // A Start Page tab has no page to restore. Creating an engine
         // session for it (which fullscreen tab-switching did when it
         // landed on an empty tab) binds a blank Gecko surface that has
@@ -1914,13 +2248,14 @@ class BrowserViewModel(
             }
         }
         entry.session = session
+        sessionsCreated++
         attachSession(entry, session)
         if (!restoredFromState && entry.lastUrl.isNotBlank()) {
             // No (usable) saved navigation state: reopen the page.
             session.loadUrl(entry.lastUrl)
         }
         entry.savedState = null
-        updateWarmPriorities()
+        applySessionPriorities()
     }
 
     private fun activateTab(tabId: String) {
@@ -1934,45 +2269,78 @@ class BrowserViewModel(
         if (entry(tabId)?.showStartPage == true) {
             _userFullscreen.value = false
         }
-        // Snapshot the outgoing tab for the tab switcher while it is still
-        // the rendered one (Firefox captures tab thumbnails on switch,
-        // not after every page load).
-        if (previousId != null) captureThumbnail(previousId)
-        // GeckoView itself marks the rendered session active/inactive as its
-        // surface is acquired/released during bindContentView(). Toggling
-        // sessions manually here raced that surface lifecycle and could leave
-        // a previously shown tab with a dead compositor (black until reload).
+        // No thumbnail capture here. A capture is a GPU readback of the whole
+        // surface, and doing it on every switch is a visible stutter on a slow
+        // phone. Tiles are refreshed when the tab tray is opened
+        // (captureActiveThumbnail) and after each finished load.
+        // Each tab owns its own surface, so GeckoView marks a session
+        // active/inactive on that surface alone; nothing here needs to touch
+        // display state, and doing so in the past left dead compositors.
         _findVisible.value = false
         _pageContextMenu.value = null
+        // An offer belongs to the page the user was looking at.
+        _savedLoginSuggestion.value = null
         _activeTabId.value = tabId
         touchLru(tabId)
-        updateWarmPriorities()
+        applySessionPriorities()
+        // Text zoom is a process-wide Gecko setting (there is no per-session
+        // font factor). Re-apply the selected site's value so the tab that is
+        // now on screen renders at the zoom its panel shows, instead of
+        // inheriting whatever the previous tab's page load left behind.
+        val targetEntry = entry(tabId)
+        val targetUrl = _pageStates.value[tabId]?.url?.takeIf { it.isNotBlank() }
+            ?: targetEntry?.lastUrl
+        engine?.setTextZoomPercent(
+            SitePreferencesStore.hostOf(targetUrl)
+                ?.let { host -> siteZoom[host] }
+                ?: SitePreferencesStore.DEFAULT_ZOOM,
+        )
     }
 
     /**
-     * Gecko prioritisation, exactly Mozilla's
-     * SessionPrioritizationMiddleware: only the *selected* tab is high
-     * priority; every other session stays default priority. Keeping a
-     * whole warm set high (the old behaviour) boosts several content
-     * processes at once, which makes aggressive OEM memory managers more
-     * likely to kill the app process itself. Inactive tabs are cheap to
-     * bring back from their saved engine state instead.
+     * Session prioritisation, exactly Mozilla's
+     * `SessionPrioritizationMiddleware` (android-components,
+     * `browser/state/.../engine/middleware/SessionPrioritizationMiddleware.kt`):
+     * ONE session is `PRIORITY_HIGH` — the selected tab's — and the tab that
+     * was selected before it is put back to `PRIORITY_DEFAULT`. GeckoView's
+     * contract for that hint is "keep this session's state as long as
+     * possible", so raising it for a warm set (the previous behaviour: the
+     * selected tab plus three others) asked Gecko to keep four documents —
+     * and, because GeckoView gives every session its own content process,
+     * four content processes — fully alive. That is the footprint the OEM
+     * task killer goes after on a phone, and being killed in the background
+     * is what makes every tab come back as a reload. Firefox keeps exactly
+     * one session high; so does this.
+     *
+     * Cheap by construction: `setPriorityHigh` only sends a hint when the
+     * value actually changes, so walking the strip on every UI emission is
+     * one comparison per tab.
      */
-    private fun updateWarmPriorities() {
+    private fun applySessionPriorities() {
         val activeId = _activeTabId.value
         _tabs.value.forEach { entry ->
             entry.session?.setPriorityHigh(entry.tabId == activeId)
         }
     }
 
-    private fun suspendTab(entry: TabEntry) {
+    private fun suspendTab(entry: TabEntry, capturePreview: Boolean = true) {
         val session = entry.session ?: return
         if (entry.tabId == _activeTabId.value) return
-        captureThumbnail(entry.tabId)
+        // A thumbnail is a GPU readback of the whole surface plus a decode and
+        // a disk write. Doing that for every suspended tab *during* the
+        // low-memory callback spends the memory that callback exists to free
+        // (Firefox's TrimMemoryMiddleware only closes sessions), so the trim
+        // path keeps whatever preview is already on disk.
+        if (capturePreview) captureThumbnail(entry.tabId)
         entry.savedState = session.latestSavedState() ?: entry.savedState
         sessionJobs.remove(entry.tabId)?.cancel()
+        sessionsClosedByApp++
         session.close()
         entry.session = null
+        clearFailureState(entry.tabId)
+        // The captured engine state is the tab's only remaining page state;
+        // nothing else emits for a suspension, so ask for a write explicitly.
+        requestPersistTabs()
     }
 
     /**
@@ -1995,17 +2363,41 @@ class BrowserViewModel(
     ) {
         if (entry.session !== deadSession) return
         clearPendingForTab(entry.tabId)
+        // The failure state is deliberately NOT cleared here. For a quiet
+        // death (no crash card) the error card is the only recovery the user
+        // can see; Retry now restores the tab, so the card must stay up until
+        // a session exists again. It is replaced by the new session's state in
+        // attachSession().
         entry.savedState = deadSession.latestSavedState() ?: entry.savedState
         sessionJobs.remove(entry.tabId)?.cancel()
         deadSession.close()
         entry.session = null
         entry.crashed = witnessed && entry.lastUrl.isNotBlank()
+        // The crash card is drawn over the content area; the surface must stop
+        // taking touches the moment it appears.
+        syncContentTouch()
         if (!entry.crashed && appInForeground &&
             entry.tabId == _activeTabId.value
         ) {
             // Nothing worth showing a crash state for (e.g. a start-page
             // tab): recreate it right away.
             restoreTab(entry)
+        }
+    }
+
+    /** Drops a stale load failure for a tab that no longer has a session. */
+    private fun clearFailureState(tabId: String) {
+        _pageStates.update { states ->
+            val state = states[tabId] ?: return@update states
+            if (!state.loadFailed && !state.isLoading) return@update states
+            states + (
+                tabId to state.copy(
+                    isLoading = false,
+                    loadFailed = false,
+                    loadErrorCode = 0,
+                    loadErrorCategory = 0,
+                )
+            )
         }
     }
 
@@ -2031,8 +2423,15 @@ class BrowserViewModel(
                         // finishes (see finishedLoad below).
                         session.setAutofillCredential(null)
                     }
+                    if (state.isLoading) {
+                        // A new page invalidates an offer from the previous one.
+                        _savedLoginSuggestion.update { current ->
+                            current?.takeIf { it.tabId != entry.tabId }
+                        }
+                    }
                     val finishedLoad = wasLoading && !state.isLoading
                     wasLoading = state.isLoading
+                    if (finishedLoad) engine?.finishPullToRefresh()
                     if (finishedLoad && !state.loadFailed) {
                         if (!entry.isPrivate && UrlUtils.isHttpUrl(state.url)) {
                             historyRepository.recordVisit(state.url, state.title)
@@ -2102,6 +2501,15 @@ class BrowserViewModel(
                             handleAndroidPermission(entry.tabId, event)
                         is BrowserSessionEvent.WebPromptRequested ->
                             handleWebPrompt(entry.tabId, event)
+                        is BrowserSessionEvent.SavedLoginOffered -> {
+                            if (!entry.isPrivate && entry.tabId == _activeTabId.value) {
+                                _savedLoginSuggestion.value = SavedLoginSuggestion(
+                                    tabId = entry.tabId,
+                                    host = event.host,
+                                    username = event.username,
+                                )
+                            }
+                        }
                         is BrowserSessionEvent.CredentialSubmitted ->
                             handleCredentialSubmitted(entry, event)
                         is BrowserSessionEvent.PrintRequested -> {
@@ -2331,6 +2739,49 @@ class BrowserViewModel(
         super.onCleared()
     }
 
+    /**
+     * The app-state section of a bug report prepared by the shake gesture:
+     * build, engine counters, tab/session counts. No URLs, no page titles.
+     */
+    fun appStateReport(): String {
+        val entry = activeEntry()
+        val pageState = entry?.let { _pageStates.value[it.tabId] } ?: SessionPageState()
+        return buildDiagnostics(entry, pageState)
+    }
+
+    /**
+     * Plain-text diagnostics shown in the overflow menu. It exists because the
+     * two remaining reports (a black pane and a tab that reloads) can only be
+     * settled by knowing what the content surface actually did on that device.
+     * No URLs, no page titles: counters only.
+     */
+    private fun buildDiagnostics(
+        entry: TabEntry?,
+        pageState: SessionPageState,
+    ): String = buildString {
+        // Which build is this? Answerable from the screen itself.
+        append("version=").append(BuildConfig.VERSION_NAME)
+        append(" (").append(BuildConfig.VERSION_CODE).append(')')
+        append('\n')
+        append(engine?.diagnostics().orEmpty())
+        append("\nsessions=").append(sessionsCreated)
+        append(" restored=").append(tabsRestored)
+        append(" suspended=").append(sessionsClosedByApp)
+        append(" tabs=").append(_tabs.value.size)
+        append("\nactiveSession=").append(
+            when {
+                entry == null -> "none"
+                entry.session == null -> "suspended"
+                entry.session?.isUsable() == true -> "alive"
+                else -> "dead"
+            },
+        )
+        append(" loading=").append(pageState.isLoading)
+        append(" failed=").append(pageState.loadFailed)
+        append(" err=").append(pageState.loadErrorCode).append('/')
+            .append(pageState.loadErrorCategory)
+    }
+
     private data class TabsSlice(
         val tabs: List<TabEntry>,
         val activeId: String?,
@@ -2345,6 +2796,12 @@ class BrowserViewModel(
         val recentlyClosedCount: Int,
         val pendingCredentialSave: CredentialSavePrompt?,
         val pageContextMenu: PageContextMenu?,
+        val savedLoginSuggestion: SavedLoginSuggestion? = null,
+        val pullRefreshProgress: Float = 0f,
+        val zoomPanelVisible: Boolean = false,
+        val zoomPercent: Int = SitePreferencesStore.DEFAULT_ZOOM,
+        val shortcutMessage: Int? = null,
+        val shortcutDialog: ShortcutDialogRequest? = null,
     )
 
     private data class StartSlice(
@@ -2361,14 +2818,14 @@ class BrowserViewModel(
          */
         const val SUSPEND_KEEP_INACTIVE_TABS = 3
 
-        /**
-         * After this long in the background the rendered surface is
-         * recreated on return even when all sessions are still alive.
-         */
-        const val REBIND_AFTER_BACKGROUND_MS = 30_000L
-
         /** Quiet period after which requested tab-strip writes are flushed. */
         const val PERSIST_DEBOUNCE_MS = 400L
+
+        /**
+         * How long a Retry waits for a reload to actually start before it
+         * navigates to the page again (a halted load never starts).
+         */
+        const val RETRY_RENAVIGATE_DELAY_MS = 800L
 
         /** A launch must survive this long before it counts as stable. */
         const val LAUNCH_STABLE_DELAY_MS = 10_000L

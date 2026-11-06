@@ -20,6 +20,18 @@
     <string name="tab_crashed_message">This tab crashed. Your other tabs are unaffected.</string>
     <string name="action_restore_tab">Restore tab</string>
     <string name="action_retry">Retry</string>
+    <!-- Why a page failed, so the user (and a screenshot) can tell the
+         difference between a network problem and an engine problem. -->
+    <string name="page_load_failed_network">Network error. Check your connection.</string>
+    <string name="page_load_failed_offline">You are offline.</string>
+    <string name="page_load_failed_security">Secure connection failed.</string>
+    <string name="page_load_failed_redirect">Too many redirects.</string>
+    <string name="page_load_failed_renderer">The page rendering process stopped.</string>
+    <string name="page_load_failed_code">code %1$d</string>
+    <!-- A saved login may be filled only when the user taps Fill. -->
+    <string name="saved_login_available">Saved login for %1$s</string>
+    <string name="action_fill_login">Fill</string>
+    <string name="action_dismiss">Dismiss</string>
 
     <!-- Menu -->
     <string name="menu_new_tab">New tab</string>
@@ -81,7 +93,7 @@
     <string name="menu_desktop_site">Desktop site</string>
     <string name="menu_find_in_page">Find in page</string>
     <string name="menu_fullscreen">Fullscreen</string>
-    <string name="menu_zoom">Text size</string>
+    <string name="menu_zoom">Zoom</string>
     <string name="menu_add_to_home">Add to Home screen</string>
     <string name="menu_downloads">Downloads</string>
     <string name="menu_clear_site_data">Clear site data</string>
@@ -126,6 +138,8 @@
     <string name="context_share_media_address">Share media address</string>
     <string name="settings_text_zoom">Text size</string>
     <string name="settings_text_zoom_summary">Scales text on pages; applied on next page load</string>
+    <string name="settings_zoom_info_title">Zoom</string>
+    <string name="settings_zoom_info_summary">Zoom is saved per site. Open a page and use Menu (⋮) → Zoom to change it; 100% resets. Desktop site is remembered per site too.</string>
     <string name="settings_password_manager">Save and autofill passwords</string>
     <string name="settings_password_manager_summary">Stored encrypted on this device only; Hexora never sends them anywhere</string>
     <string name="passwords_manage">Manage saved logins</string>
@@ -160,6 +174,11 @@
     <string name="start_shortcut_name_hint">Optional</string>
     <string name="start_shortcut_address">Address</string>
     <string name="start_shortcut_address_hint">example.com</string>
+    <string name="shortcut_added">Shortcut added</string>
+    <string name="shortcut_duplicate">That site is already a shortcut</string>
+    <string name="shortcut_limit">Shortcut limit reached (10)</string>
+    <string name="shortcut_invalid">Enter a site address, e.g. example.com</string>
+    <string name="shortcut_failed">Could not save the shortcut</string>
     <string name="start_shortcut_remove_hint">Long-press a shortcut to edit or delete it.</string>
     <string name="start_shortcuts_private">Your shortcuts are hidden in private tabs.</string>
     <string name="tabs_empty">No open tabs</string>
@@ -248,4 +267,34 @@
     <string name="external_link_failed">No app can open this link</string>
     <string name="auth_username">Username</string>
     <string name="auth_password">Password</string>
+
+    <!-- About, contact and bug reports -->
+    <string name="about_title">About</string>
+    <string name="about_developed_by">Developer &amp; Designed By: HEXORA-STUDIO</string>
+    <string name="about_contact">Contact us</string>
+    <string name="about_contact_summary">%1$s</string>
+    <string name="about_report_bug">Report a bug</string>
+    <string name="about_report_bug_summary">Shake the phone at any time, or open the report from here.</string>
+    <string name="about_version">Hexora %1$s (%2$d)</string>
+
+    <!-- Default browser -->
+    <string name="default_browser_title">Make Hexora your browser?</string>
+    <string name="default_browser_message">Hexora can open every link you tap, in this app, instead of being asked each time. You can change this later in Android settings.</string>
+    <string name="default_browser_confirm">Make it the default</string>
+    <string name="default_browser_later">Not now</string>
+    <string name="default_browser_settings">Open Android settings</string>
+    <string name="default_browser_settings_hint">Android did not show its own dialog. Open the app settings and choose Hexora under “Open by default”.</string>
+    <string name="default_browser_already">Hexora is already your default browser</string>
+    <string name="settings_default_browser">Default browser</string>
+    <string name="settings_default_browser_summary">Open tapped links with Hexora</string>
+
+    <!-- Bug report -->
+    <string name="bug_report_title">Report a bug</string>
+    <string name="bug_report_message">Describe what happened. The device details, the app state and the app log are attached to the report; nothing is sent until you press send in your mail app.</string>
+    <string name="bug_report_hint">What went wrong?</string>
+    <string name="bug_report_send">Send by email</string>
+    <string name="bug_report_copy">Copy report</string>
+    <string name="bug_report_copied">Report copied</string>
+    <string name="bug_report_no_mail_app">No email app found on this device</string>
+    <string name="bug_report_shake_hint">Shake the phone to report a bug</string>
 </resources>

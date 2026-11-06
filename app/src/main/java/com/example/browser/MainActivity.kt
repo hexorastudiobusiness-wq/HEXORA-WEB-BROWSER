@@ -8,13 +8,13 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
 import android.app.KeyguardManager
+import android.app.SearchManager
 import android.hardware.biometrics.BiometricPrompt
 import android.graphics.pdf.PdfRenderer
 import android.graphics.pdf.PdfDocument
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.ParcelFileDescriptor
-import android.os.SystemClock
 import android.print.PageRange
 import android.print.PrintAttributes
 import android.print.PrintDocumentAdapter
@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -75,7 +76,15 @@ import com.example.browser.ui.settings.SettingsViewModel
 import com.example.browser.ui.settings.SitePermissionsScreen
 import com.example.browser.ui.tabs.TabsScreen
 import com.example.browser.ui.theme.HexoraBrowserTheme
+import com.example.browser.util.AppLog
+import com.example.browser.util.BrowserRole
+import com.example.browser.util.BugReport
+import com.example.browser.util.DeviceInfo
+import com.example.browser.util.ShakeDetector
 import com.example.browser.util.UrlUtils
+import com.example.browser.ui.components.BugReportDialog
+import com.example.browser.ui.components.DefaultBrowserDialog
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -117,12 +126,43 @@ class MainActivity : ComponentActivity() {
                     settingsRepository = container.settingsRepository,
                     thumbnailStore = container.tabThumbnailStore,
                     tabSessionStore = container.tabSessionStore,
+                    sitePreferencesStore = container.sitePreferencesStore,
                 )
             }
         }
     }
 
     private var pendingFilePickerRequest: BrowserViewModel.FilePickerRequest? = null
+
+    /** Set by the shake gesture (or the About screen) to open the report. */
+    private val bugReportRequested = MutableStateFlow(false)
+
+    /** First-launch offer; set once, before the first frame. */
+    private val askDefaultBrowser = MutableStateFlow(false)
+
+    /** Shown when the system refused its own role dialog. */
+    private val defaultBrowserFallback = MutableStateFlow(false)
+
+    /** Null when the system cannot offer the role dialog at all. */
+    private var pendingRoleIntent: Intent? = null
+
+    private val shakeDetector = ShakeDetector {
+        AppLog.event("shake: preparing bug report")
+        bugReportRequested.value = true
+    }
+
+    /**
+     * The role dialog's outcome. A request the system declines (already denied
+     * twice, or the skin hides it) must lead somewhere: the owner is offered the
+     * settings route instead of being left with nothing.
+     */
+    private val roleRequestLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        if (!BrowserRole.isDefault(this)) {
+            defaultBrowserFallback.value = true
+        }
+    }
 
     /** Last external http(s) URI this Activity instance chain consumed. */
     private var lastHandledViewUri: String? = null
@@ -356,13 +396,40 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null || intent?.dataString != lastHandledViewUri) {
             handleViewIntent(intent)
         }
+        // A WEB_SEARCH re-delivered after a restore would search twice.
+        if (savedInstanceState == null) {
+            handleWebSearchIntent(intent)
+        }
         collectDownloadRequests()
         collectPdfPrintRequests()
         collectExternalLinkRequests()
         collectFilePickerRequests()
 
+        // First launch on this install: offer to become the default browser.
+        // Asked once, from a tap, never in the background — a request the
+        // system posts and nobody answers is auto-denied, and two auto-denials
+        // lock the app out of the dialog for good.
+        pendingRoleIntent = BrowserRole.requestIntent(this)
+        if (savedInstanceState == null && BrowserRole.shouldAskOnLaunch(this)) {
+            BrowserRole.markAsked(this)
+            AppLog.event("first launch: offering default browser")
+            askDefaultBrowser.value = true
+        }
+
         setContent {
             val settings by browserViewModel.settings.collectAsState()
+            val reportRequested by bugReportRequested.collectAsState()
+            val offerDefaultBrowser by askDefaultBrowser.collectAsState()
+            val defaultBrowserNeedsSettings by defaultBrowserFallback.collectAsState()
+            // Read the device block while the owner is still typing, so the
+            // first report is not delayed by the ROM property lookups.
+            LaunchedEffect(reportRequested) {
+                if (reportRequested) {
+                    withContext(Dispatchers.IO) {
+                        runCatching { DeviceInfo.summary(this@MainActivity) }
+                    }
+                }
+            }
             HexoraBrowserTheme(themeMode = settings.themeMode) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -380,7 +447,42 @@ class MainActivity : ComponentActivity() {
                         onAuthenticatePasswords = { callback ->
                             authenticateForPasswords(callback)
                         },
+                        onReportBug = { bugReportRequested.value = true },
+                        onSetDefaultBrowser = { startDefaultBrowserRequest() },
                     )
+                    if (offerDefaultBrowser || defaultBrowserNeedsSettings) {
+                        DefaultBrowserDialog(
+                            // Only the system's own dialog is offered when it
+                            // exists and the previous attempt did not fail.
+                            canRequestRole = !defaultBrowserNeedsSettings &&
+                                pendingRoleIntent != null,
+                            onRequestRole = {
+                                askDefaultBrowser.value = false
+                                startDefaultBrowserRequest()
+                            },
+                            onOpenSettings = {
+                                askDefaultBrowser.value = false
+                                defaultBrowserFallback.value = false
+                                openDefaultBrowserSettings()
+                            },
+                            onDismiss = {
+                                askDefaultBrowser.value = false
+                                defaultBrowserFallback.value = false
+                            },
+                        )
+                    }
+                    if (reportRequested) {
+                        BugReportDialog(
+                            buildReport = { description ->
+                                BugReport.build(
+                                    context = this@MainActivity,
+                                    description = description,
+                                    appState = browserViewModel.appStateReport(),
+                                )
+                            },
+                            onDismiss = { bugReportRequested.value = false },
+                        )
+                    }
                     fileSourcePickerRequest?.let { request ->
                         FileSourcePickerSheet(
                             showCamera = request.captureMode != 0,
@@ -413,11 +515,8 @@ class MainActivity : ComponentActivity() {
         browserViewModel.onLowMemory(level)
     }
 
-    private var backgroundedAtMs: Long = 0L
-
     override fun onStop() {
         super.onStop()
-        backgroundedAtMs = SystemClock.elapsedRealtime()
         browserViewModel.onAppBackgrounded()
         // The saved-login vault never stays unlocked while the app is in
         // the background: returning to Hexora must re-authenticate before
@@ -435,20 +534,61 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Surface recovery runs only now — posted past the resume, when
-        // the window surface actually exists again. At onStart the same
-        // rebind intermittently landed on a not-yet-recreated surface and
-        // the tabs stayed white.
-        val backgroundDurationMs = if (backgroundedAtMs == 0L) {
-            0L
-        } else {
-            SystemClock.elapsedRealtime() - backgroundedAtMs
+        // Shake-to-report is armed only while the app is in front of the owner.
+        if (!shakeDetector.start(this)) {
+            AppLog.event("shake detector: no accelerometer")
         }
-        backgroundedAtMs = 0L
+        // Content verification is posted past the resume, when the window
+        // surface actually exists again.
         window.decorView.post {
-            browserViewModel.onBrowserResumed(backgroundDurationMs)
+            browserViewModel.onBrowserResumed()
         }
     }
+
+    override fun onPause() {
+        super.onPause()
+        shakeDetector.stop()
+    }
+
+    /**
+     * Asks the system to make Hexora the default browser.
+     *
+     * When the role dialog is unavailable the owner is taken to the screen that
+     * can actually change it; a button that silently does nothing is worse than
+     * no button.
+     */
+    private fun startDefaultBrowserRequest() {
+        val intent = pendingRoleIntent ?: BrowserRole.requestIntent(this)
+        if (intent == null) {
+            openDefaultBrowserSettings()
+            return
+        }
+        pendingRoleIntent = intent
+        val launched = runCatching { roleRequestLauncher.launch(intent) }.isSuccess
+        if (!launched) {
+            AppLog.event("default browser: role dialog unavailable")
+            openDefaultBrowserSettings()
+        }
+    }
+
+    /** App details ("Open by default"), then the system default-apps list. */
+    private fun openDefaultBrowserSettings() {
+        val openedAppDetails = runCatching {
+            startActivity(BrowserRole.settingsIntent(this))
+        }.isSuccess
+        if (openedAppDetails) return
+        val openedDefaults = runCatching {
+            startActivity(BrowserRole.defaultAppsSettingsIntent(this))
+        }.isSuccess
+        if (!openedDefaults) {
+            Toast.makeText(
+                this,
+                R.string.default_browser_settings_hint,
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -457,6 +597,7 @@ class MainActivity : ComponentActivity() {
         // original one from the first launch.
         setIntent(intent)
         handleViewIntent(intent)
+        handleWebSearchIntent(intent)
     }
 
     /** Device-credential/biometric gate for the saved-login manager. */
@@ -531,6 +672,17 @@ class MainActivity : ComponentActivity() {
                     browserViewModel.handleExternalUrl(url)
                 }
         }
+    }
+
+    /** `ACTION_WEB_SEARCH` from another app or the search key. */
+    private fun handleWebSearchIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_WEB_SEARCH) return
+        val query = intent.getStringExtra(SearchManager.QUERY)?.trim().orEmpty()
+        if (query.isEmpty()) return
+        val settings = browserViewModel.settings.value
+        val url = settings.searchEngine.searchUrl(query, settings.customSearchTemplate)
+        AppLog.event("web search intent")
+        browserViewModel.handleExternalUrl(url)
     }
 
     /**
@@ -1135,6 +1287,8 @@ private fun HexoraNavHost(
     thumbnailStore: com.example.browser.util.TabThumbnailStore,
     onClearCacheAndExit: () -> Unit,
     onAuthenticatePasswords: ((() -> Unit) -> Unit) = { callback -> callback() },
+    onReportBug: () -> Unit = {},
+    onSetDefaultBrowser: () -> Unit = {},
 ) {
     val navController = rememberNavController()
 
@@ -1217,6 +1371,8 @@ private fun HexoraNavHost(
                 onOpenSitePermissions = {
                     navController.navigate(Routes.SITE_PERMISSIONS)
                 },
+                onReportBug = onReportBug,
+                onSetDefaultBrowser = onSetDefaultBrowser,
             )
         }
         composable(Routes.SITE_PERMISSIONS) {

@@ -31,6 +31,14 @@ data class SessionPageState(
     val certificateSubject: String = "",
     val certificateIssuer: String = "",
     val loadFailed: Boolean = false,
+    /**
+     * Gecko error code/category for the failed load, when the engine reported
+     * one (`WebRequestError`). 0 means "failure without a specific error",
+     * e.g. a cancelled or superseded navigation. Shown to the user so a
+     * screenshot is enough to diagnose a failure.
+     */
+    val loadErrorCode: Int = 0,
+    val loadErrorCategory: Int = 0,
     val isDesktopMode: Boolean = false,
     /** The page itself requested fullscreen (e.g. a video player). */
     val isPageFullscreen: Boolean = false,
@@ -236,6 +244,18 @@ sealed interface BrowserSessionEvent {
         val label: String?,
     ) : BrowserSessionEvent
 
+    /**
+     * A login field was focused and the password vault has a saved login for
+     * the current page. Nothing has been filled: the user decides, and the
+     * shell calls [BrowserSession.fillSavedCredentialNow] only on an explicit
+     * tap.
+     */
+    data class SavedLoginOffered(
+        override val sessionId: String,
+        val host: String,
+        val username: String,
+    ) : BrowserSessionEvent
+
     /** A login form was submitted; the app may ask whether to save it. */
     data class CredentialSubmitted(
         override val sessionId: String,
@@ -286,8 +306,14 @@ interface BrowserSession {
      */
     fun isUsable(): Boolean
 
-    /** Switches desktop/mobile rendering for this tab and reloads the page. */
-    fun setDesktopMode(enabled: Boolean)
+    /**
+     * Switches desktop/mobile rendering for this tab.
+     *
+     * [reload] must be false when the caller is about to navigate anyway:
+     * reloading the old document first was a wasted load (and a visible
+     * flash) on every link that opened in a site with a stored mode.
+     */
+    fun setDesktopMode(enabled: Boolean, reload: Boolean = true)
 
     /** Finds [query] in the page; [forward] = false searches backwards. */
     fun findText(query: String, forward: Boolean)
@@ -329,22 +355,29 @@ interface BrowserSession {
     fun setPriorityHigh(high: Boolean)
 
     /**
-     * Returns the browser's single shared native content view and binds this
-     * session to it. GeckoView tab switching is designed around one attached
-     * GeckoView whose session is replaced; creating a separate surface-backed
-     * view per tab can leave previously shown tabs white/black. Typed as a
-     * plain [View] so no engine type leaks into the UI layer.
+     * Returns the app-wide content container for [context]: a plain view group
+     * that holds one surface per tab. Typed as a plain [View] so no engine type
+     * leaks into the UI layer.
      */
-    fun createContentView(context: Context): View
+    fun contentContainer(context: Context): View
 
-    /** Binds this session to the already-created shared content [view]. */
-    fun renderContentView(view: View)
-
-    /** Detaches [view] from this session without closing the session. */
-    fun releaseContentView(view: View)
+    /**
+     * Shows this session's own surface inside [container] and hides the others.
+     * Every tab owns its GeckoView (Mozilla's model), so this never re-binds
+     * another tab's page onto a shared view.
+     */
+    fun presentContentView(container: View)
 
     /** Supplies (or clears) the locally saved login to offer on this page. */
     fun setAutofillCredential(credential: AutofillCredential?)
+
+    /**
+     * Fills the page's current login fields with the credential installed by
+     * [setAutofillCredential]. Never called automatically: filling a password
+     * without the user asking is exactly what this API exists to prevent.
+     * Returns false when there is nothing to fill.
+     */
+    fun fillSavedCredentialNow(): Boolean
 
     /** Releases the session and its view. The session cannot be reused afterwards. */
     fun close()

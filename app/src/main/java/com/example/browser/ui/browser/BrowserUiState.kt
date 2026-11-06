@@ -29,6 +29,13 @@ data class StartShortcut(
     val url: String,
 )
 
+/** Add ([id] == null) or edit request for the Start Page shortcut dialog. */
+data class ShortcutDialogRequest(
+    val id: Long? = null,
+    val title: String = "",
+    val url: String = "",
+)
+
 /** A pending "save this login?" prompt. The password never enters UI state. */
 data class CredentialSavePrompt(
     val origin: String,
@@ -113,6 +120,9 @@ data class BrowserUiState(
     val certificateIssuer: String = "",
     val isPrivate: Boolean = false,
     val loadFailed: Boolean = false,
+    /** Gecko's error code/category for [loadFailed]; 0 when unknown. */
+    val loadErrorCode: Int = 0,
+    val loadErrorCategory: Int = 0,
     /**
      * The active tab's page crashed (Firefox-style crashed tab): show the
      * restore card instead of the page until the user restores it.
@@ -124,7 +134,6 @@ data class BrowserUiState(
     val findVisible: Boolean = false,
     val findResult: FindResultUi = FindResultUi(),
     /** Current text zoom (50..200), mirrors the persisted setting. */
-    val textZoomPercent: Int = 100,
     /** Number of tabs available for "undo close all" (0 = nothing to undo). */
     val recentlyClosedCount: Int = 0,
     /** tabId -> counter bumped whenever a fresh thumbnail is stored. */
@@ -133,7 +142,6 @@ data class BrowserUiState(
     val errorMessage: String? = null,
     /** Engine session of the active tab; used only to create its native view. */
     val activeSession: BrowserSession? = null,
-    val contentViewGeneration: Long = 0L,
     /** True when the Chrome-like Hexora Start Page covers the web content. */
     val showStartPage: Boolean = true,
     /** True when a real web page exists underneath the Start Page. */
@@ -144,10 +152,39 @@ data class BrowserUiState(
     /** Cached site icons by shortcut id; absent ids use the letter placeholder. */
     val startShortcutIcons: Map<Long, Bitmap> = emptyMap(),
     val pendingCredentialSave: CredentialSavePrompt? = null,
+    /** A saved login the user may choose to fill on the current page. */
+    val savedLoginSuggestion: SavedLoginSuggestion? = null,
+    /** Pull-to-refresh drag progress (0..1.5) for the in-app indicator. */
+    val pullRefreshProgress: Float = 0f,
+    /** Floating per-site zoom panel (vertical slider) visibility. */
+    val zoomPanelVisible: Boolean = false,
+    /** One-shot message after a shortcut write (string resource), shown as a toast. */
+    val shortcutMessage: Int? = null,
+    /**
+     * Open add/edit dialog for a Start Page shortcut; null when closed.
+     * It lives in the ViewModel, not in the Start Page composable, because the
+     * Start Page is drawn over the web surface and a dialog whose state lives
+     * in that subtree could be dropped by a recomposition — which is exactly
+     * how "tap the + tile, nothing happens" looked on device.
+     */
+    val shortcutDialog: ShortcutDialogRequest? = null,
+    /** Zoom of the site in front of the user, in percent. */
+    val zoomPercent: Int = 100,
     /** Long-press menu for a link/image/video/audio on the page, if open. */
     val pageContextMenu: PageContextMenu? = null,
     /** History matches for the text currently typed in the address bar. */
     val addressSuggestions: List<AddressSuggestion> = emptyList(),
+)
+
+/**
+ * A stored login that could be filled into the page in front of the user.
+ * Never applied automatically: the address and password are written only when
+ * the user taps [BrowserAction.FillSavedLogin].
+ */
+data class SavedLoginSuggestion(
+    val tabId: String,
+    val host: String,
+    val username: String,
 )
 
 /** Explicit user actions sent from the UI to [BrowserViewModel] (ARCHITECTURE.md §14). */
@@ -189,7 +226,6 @@ sealed interface BrowserAction {
     data object ClearBrowsingData : BrowserAction
     data object ClearSiteData : BrowserAction
     data object ToggleDesktopMode : BrowserAction
-    data class SetTextZoom(val percent: Int) : BrowserAction
     data object OpenFind : BrowserAction
     data object CloseFind : BrowserAction
     data object ClearFind : BrowserAction
@@ -204,6 +240,14 @@ sealed interface BrowserAction {
     data object CloseAllTabs : BrowserAction
     data object UndoCloseAllTabs : BrowserAction
     data object SavePendingCredential : BrowserAction
+    /** Fill the offered saved login into the current page (user tap only). */
+    data object FillSavedLogin : BrowserAction
+    data object DismissSavedLoginSuggestion : BrowserAction
+    data object ShowZoomPanel : BrowserAction
+    data object HideZoomPanel : BrowserAction
+    data object ResetSiteZoom : BrowserAction
+    data class SetSiteZoom(val percent: Int) : BrowserAction
+    data object DismissShortcutMessage : BrowserAction
     data object DismissPendingCredential : BrowserAction
     data object DismissPageContextMenu : BrowserAction
     data object OpenContextMenuLink : BrowserAction
@@ -213,6 +257,14 @@ sealed interface BrowserAction {
     data object OpenContextMenuMediaInNewTab : BrowserAction
     data object DownloadContextMenuLink : BrowserAction
     data object DownloadContextMenuMedia : BrowserAction
+    /** Diagnostics only: a tap physically reached the "+" tile. */
+    data object ShowAddShortcutDialog : BrowserAction
+    data class ShowEditShortcutDialog(
+        val id: Long,
+        val title: String,
+        val url: String,
+    ) : BrowserAction
+    data object DismissShortcutDialog : BrowserAction
     data class AddStartShortcut(val title: String, val url: String) : BrowserAction
     data class EditStartShortcut(val id: Long, val title: String, val url: String) : BrowserAction
     data class DeleteStartShortcut(val id: Long) : BrowserAction

@@ -73,11 +73,62 @@ Use the current stable GeckoView APIs available at implementation time. Do not i
 
 ## 4. Browser Sessions
 
-Each tab owns its own browser session. Rendering uses one shared,
-attached GeckoView owned by the engine layer: switching tabs replaces the
-session bound to that view (`renderContentView`) instead of creating a new
-surface-backed view per tab. Live sessions are kept at high priority;
-suspension (below) — not priority demotion — is the memory control.
+Each tab owns its own browser session **and its own GeckoView**. This is *not*
+Mozilla's model and should not be described as such: Firefox for Android keeps
+one `GeckoEngineView` with one `GeckoView` and swaps the session into it
+(`engineView.setCurrentSession`, and `GeckoView.releaseSession()` on the tab that
+leaves). This app instead keeps one surface per tab: the engine owns a single
+`FrameLayout` per Activity, every live tab's `SwipeableHostLayout` is a child of
+it, exactly one child is `VISIBLE`, the rest are `INVISIBLE`, so a switch changes
+visibility and not the bound session `(see §4.1)`.
+
+The single-view design was tried (0.5.0) and was the source of reloading tabs,
+cross-tab repaints and most black-pane reports, so per-tab surfaces stay for now.
+The price of that choice is stated honestly: Firefox has one compositor and this
+app has one per shown tab, a hidden tab's display is only released when the
+platform tears its surface down, and the outgoing tab therefore has to be told
+`GeckoSession.setActive(false)` explicitly at the switch (it is, in
+`present()`). Converging on Mozilla's single-view model is a real surface-layer
+rewrite, not a tweak.
+
+Priority follows Mozilla's `SessionPrioritizationMiddleware` literally: exactly
+one session — the selected tab's — is `PRIORITY_HIGH`; the tab that was selected
+before it goes back to `PRIORITY_DEFAULT`. Suspension (below) — not silent
+reloading — is the memory control for colder tabs.
+
+### 4.1 Content-surface invariants (GeckoView)
+
+These follow Mozilla's own `GeckoEngineView`/`NestedGeckoView` and exist because
+every previous "black tab" and "tab re-loads on switch" report traced back to a
+violation of one of them:
+
+1. **One view per tab, created once.** `obtainSurface()` builds a tab's
+   `SwipeableHostLayout` + `HexoraGeckoView` the first time that tab is shown
+   and keeps it afterwards. The container `AndroidView` is stable for the whole
+   Activity; a tab switch never recreates a Compose node, a surface or a
+   session.
+2. **The container never unmounts while a tab exists.** The Start Page, crash
+   card and error card are drawn *on top of* the content container instead of
+   replacing it.
+3. **Release before detach.** `HexoraGeckoView.onDetachedFromWindow()` calls
+   `releaseSession()` before `super`, so GeckoView never closes the session and
+   the page survives; the session is re-bound in `onAttachedToWindow` (see
+   `obtainSurface`). A tab that is merely hidden keeps its view attached, so
+   only the platform's surface comes and goes — a repaint, never a load.
+4. **No opaque cover.** `GeckoView.coverUntilFirstPaint(color)` sets the
+   session's compositor clear colour *and* paints an opaque SurfaceView
+   background that only GeckoView's internal FIRST_PAINT callback removes. On a
+   long-lived view whose compositor keeps running that callback may never
+   fire again, leaving a
+   permanent black pane. Hexora therefore does not cover the surface.
+5. **Paint verification, not timers.** On foreground return the engine checks
+   every child surface: if the platform dropped one and GeckoView forgot its
+   session, the owning session is bound again (a repaint, not a reload). No
+   timers, no shared-compositor re-acquisition.
+6. **Pull-to-refresh is answered by Gecko.** Each tab's `HexoraGeckoView`
+   keeps every touch; whether a pull may start is decided by APZ
+   (`InputResultDetail`), never by app-side heuristics. There is no
+   `SwipeRefreshLayout` — it broke ordinary scrolling in 0.4.7.
 
 A browser tab should contain:
 
@@ -471,8 +522,8 @@ The MVP sequence that built this project is complete. For new work:
    ViewModel → engine/session → repository), not in a Composable.
 2. Verify uncertain GeckoView APIs against the pinned dependency's docs
    or source before writing code.
-3. Make the smallest targeted change; keep the shared-`GeckoView`
-   rendering model and the security baseline intact.
+3. Make the smallest targeted change; keep the per-tab `GeckoView` model
+   (§4/§4.1) and the security baseline intact.
 4. Add or update unit tests where pure logic changed.
 5. Let CI compile and test; verify output assets; ask the owner to verify
    runtime behavior on a real device.
@@ -546,6 +597,37 @@ A change is done only when:
   both small and large screens; keep touch targets usable even when a
   control's visible glyph is deliberately compact (e.g. tab close).
 
+## 26a. Display Recovery, Reporting, and the Default-Browser Role (0.5.8)
+
+**Display recovery.** GeckoView drops a surface's painted content when the app
+is away and signals it with `onPaintStatusReset`. A surface that never reports a
+new frame afterwards stays black even though its document is alive — which is
+why re-selecting the tab from the tray (a `setSession`/`present`) repaired it.
+The engine therefore owns three hooks, all "re-acquire the display", never
+"reload the page": `noteAppBackgrounded()` snapshots the reset counter,
+`verifyPaintAfterResume()` re-binds the active surface after a grace period when
+the counter moved and nothing was composed, and `setContentHidden()` always
+re-applies the container's visibility (a container hidden under an overlay
+before backgrounding otherwise stayed hidden). The ViewModel re-asserts the
+overlay state in `onBrowserResumed()`.
+
+**No in-app diagnostics.** The window, its action, its state and the Start Page
+tap counter are gone. `BrowserEngine.diagnostics()` remains, consumed only by
+the bug report.
+
+**Bug reporting.** `util/AppLog` is an in-memory (250-entry) log plus the last
+uncaught exception; `util/DeviceInfo` describes the device, build and ROM
+(vendor properties via `getprop`); `util/ShakeDetector` turns three acceleration
+peaks inside 1.2 s into a request; `util/BugReport` composes the text and hands
+it to the owner's mail app (`ACTION_SEND`) or the clipboard. The app itself
+never transmits anything.
+
+**Default browser.** `util/BrowserRole` wraps `RoleManager`; the request is only
+started from a tap, and an unavailable/declined request falls back to the
+settings route. The manifest carries `CATEGORY_APP_BROWSER` on the launcher
+filter — without it the app is neither offered in link choosers nor eligible for
+the role — plus a `WEB_SEARCH` filter answered by the in-app search engine.
+
 ## 27. Documentation Maintenance
 
 - `README.md` — owner/user facing: features, install, warnings, builds.
@@ -557,4 +639,4 @@ A change is done only when:
 Docs that contradict the code are bugs. Fix them in the same commit as
 the behavior change.
 
-Debug audit 0.4.5 (versionCode 21): see [AUDIT.md](AUDIT.md) for fixes and verification boundaries.
+Debug audits: [AUDIT.md](AUDIT.md) (0.4.5 onward, latest 0.5.8) for fixes and verification boundaries.

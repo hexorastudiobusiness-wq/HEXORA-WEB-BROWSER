@@ -89,14 +89,15 @@ Current shipped state (update this section on every release):
 
 - All tabs live in `BrowserViewModel`, keyed by a stable UUID `tabId`.
   Session events are mapped back to tabs via `BrowserSession.id`.
-- **One `GeckoSession` per tab; sessions are never shared** between
-  unrelated tabs. But rendering uses **one shared `GeckoView`** owned by the
-  engine: tab switches swap the session bound to that view. A fresh
-  lightweight `FrameLayout` host is returned per `AndroidView` composition,
-  the engine moves its single `GeckoView` into it, and the old session is
-  released *before* the new one is set. This exact arrangement fixed a
-  confirmed white/black-tab bug. **Do not regress it** (no per-tab
-  `GeckoView`, no priority demotion of live sessions).
+- **One `GeckoSession` and one `GeckoView` per tab**, never shared between
+  unrelated tabs — Mozilla's own model (`GeckoEngineView` owns a GeckoView per
+  tab). The engine owns a single `FrameLayout` per Activity; every live tab's
+  host is a child of it and exactly one child is visible. A tab switch changes
+  visibility only: no re-bind, no display release/acquire, no session restore.
+  The earlier design (one shared `GeckoView`, session swapped per switch) was
+  removed in 0.5.0 because it reloaded tabs and shared one compositor between
+  unrelated pages. **Do not regress it** (no shared view; no priority
+  demotion of live sessions).
 - Memory control is **tab suspension** following Firefox's model:
   sessions are created lazily, the selected tab gets high priority, and
   low-memory/trim signals suspend colder inactive tabs (engine state
@@ -315,3 +316,22 @@ The essentials, so nobody has to argue about this again:
 - [ ] Persian final report with limitations stated honestly
 
 Debug audit 0.4.5 (versionCode 21): see [AUDIT.md](AUDIT.md) for fixes and verification boundaries.
+
+## 0.5.8
+
+* `util/AppLog` is the app's own log (250-line ring buffer, last crash). Log
+  events worth reporting; never log URLs, titles or credentials.
+* `util/DeviceInfo` reads device/build/ROM identity (`getprop` for vendor
+  versions). `util/ShakeDetector` is the shake gesture; `util/BugReport` builds
+  the report and the mail/contact intents. `util/BrowserRole` owns
+  `RoleManager` and the default-browser flow.
+* `ui/components/ReportDialogs.kt` holds the bug-report and default-browser
+  dialogs. They are shown from `MainActivity`, because both need the Activity
+  (launchers, mail intent) and the ViewModel (app state).
+* No in-app diagnostics UI. Engine counters (`BrowserEngine.diagnostics()`) are
+  only consumed by the bug report now.
+* After a return from the background the engine re-asserts the display:
+  `noteAppBackgrounded()` snapshots the paint-reset counter,
+  `verifyPaintAfterResume()` re-binds a surface that never painted again, and
+  `setContentHidden()` always re-applies visibility. Never "fix" a black tab by
+  reloading it.

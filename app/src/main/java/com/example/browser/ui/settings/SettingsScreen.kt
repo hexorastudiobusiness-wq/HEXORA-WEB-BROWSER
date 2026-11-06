@@ -1,6 +1,7 @@
 package com.example.browser.ui.settings
 
 import android.widget.Toast
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,9 +40,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.example.browser.BuildConfig
 import com.example.browser.R
 import com.example.browser.data.settings.ThemeMode
-import com.example.browser.ui.components.ZoomSlider
 import com.example.browser.util.SearchEngine
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -52,6 +53,8 @@ fun SettingsScreen(
     onClearBrowsingData: () -> Unit,
     onOpenPasswords: () -> Unit,
     onOpenSitePermissions: () -> Unit = {},
+    onSetDefaultBrowser: () -> Unit = {},
+    onReportBug: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val settings by viewModel.settings.collectAsState()
@@ -241,21 +244,17 @@ fun SettingsScreen(
                 onCheckedChange = { viewModel.setDesktopMode(it) },
             )
             Spacer(Modifier.height(12.dp))
+            // Zoom is per site and lives in the page's overflow menu, so a
+            // global slider here would silently disagree with what the page
+            // in front of the user is actually rendering (the old bug).
             Text(
-                text = stringResource(R.string.settings_text_zoom),
+                text = stringResource(R.string.settings_zoom_info_title),
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
-                text = stringResource(R.string.settings_text_zoom_summary),
+                text = stringResource(R.string.settings_zoom_info_summary),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            ZoomSlider(
-                percent = settings.textZoomPercent,
-                onPercentCommitted = { percent ->
-                    viewModel.setTextZoomPercent(percent)
-                },
-                modifier = Modifier.fillMaxWidth(),
             )
             SwitchRow(
                 label = stringResource(R.string.settings_open_links_new_tab),
@@ -273,6 +272,80 @@ fun SettingsScreen(
             ) {
                 Text(stringResource(R.string.menu_clear_data))
             }
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+            SettingsSectionTitle(stringResource(R.string.about_title))
+            ListItem(
+                headlineContent = {
+                    Text(stringResource(R.string.about_developed_by))
+                },
+                supportingContent = {
+                    // The address is shown, not only linked: it must be
+                    // readable on a device with no mail app installed.
+                    Text(
+                        text = com.example.browser.util.BrowserRole.DEVELOPER_EMAIL,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+            )
+            OutlinedButton(
+                onClick = {
+                    // Explicit contact, no report payload: the address is
+                    // prefilled and the composer opened, so nothing is sent
+                    // without the owner writing and pressing send.
+                    val intent = com.example.browser.util.BugReport.contactIntent()
+                    try {
+                        context.startActivity(intent)
+                    } catch (error: android.content.ActivityNotFoundException) {
+                        Toast.makeText(
+                            context,
+                            com.example.browser.util.BrowserRole.DEVELOPER_EMAIL,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.about_contact))
+            }
+            OutlinedButton(
+                onClick = onReportBug,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.about_report_bug))
+            }
+            Text(
+                text = stringResource(R.string.about_report_bug_summary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = onSetDefaultBrowser,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.settings_default_browser))
+            }
+            Text(
+                text = stringResource(R.string.settings_default_browser_summary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Spacer(Modifier.height(24.dp))
+            // Build identity, bottom of Settings: the answer to "is this the
+            // build I just downloaded?".
+            Text(
+                text = stringResource(
+                    R.string.about_version,
+                    BuildConfig.VERSION_NAME,
+                    BuildConfig.VERSION_CODE,
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+            )
             Spacer(Modifier.height(24.dp))
         }
     }

@@ -57,9 +57,11 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Print
@@ -73,6 +75,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -104,6 +107,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -117,17 +121,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.key
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.browser.R
+import com.example.browser.browser.BrowserSession
 import com.example.browser.browser.PageMediaKind
 import com.example.browser.browser.SitePermissionKind
 import com.example.browser.browser.WebPromptKind
 import com.example.browser.ui.components.AddressBar
-import com.example.browser.ui.components.ZoomSlider
 import com.example.browser.util.HomeScreenShortcut
 import kotlinx.coroutines.delay
 
@@ -151,6 +154,14 @@ fun BrowserScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    // Shortcut writes answer with a toast instead of doing nothing visible.
+    val shortcutMessage = state.shortcutMessage
+    LaunchedEffect(shortcutMessage) {
+        if (shortcutMessage != null) {
+            Toast.makeText(context, shortcutMessage, Toast.LENGTH_SHORT).show()
+            viewModel.onAction(BrowserAction.DismissShortcutMessage)
+        }
+    }
     val landscape =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val sitePermissionRequest by viewModel.sitePermissionRequest.collectAsState()
@@ -392,6 +403,33 @@ fun BrowserScreen(
             dismissButton = {
                 TextButton(onClick = { showClearDataConfirm = false }) {
                     Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+
+    // The shortcut dialog is owned by the ViewModel and shown here, at the
+    // same level as the other dialogs, instead of inside the Start Page
+    // subtree. On device, state kept inside the Start Page lost the request
+    // between the tap and the next frame, so the + tile looked dead.
+    state.shortcutDialog?.let { request ->
+        ShortcutDialog(
+            title = stringResource(
+                if (request.id == null) {
+                    R.string.start_shortcut_add_title
+                } else {
+                    R.string.start_shortcut_edit_title
+                },
+            ),
+            initialName = request.title,
+            initialAddress = request.url,
+            onDismiss = { viewModel.onAction(BrowserAction.DismissShortcutDialog) },
+            onSave = { title, url ->
+                val id = request.id
+                if (id == null) {
+                    viewModel.onAction(BrowserAction.AddStartShortcut(title, url))
+                } else {
+                    viewModel.onAction(BrowserAction.EditStartShortcut(id, title, url))
                 }
             },
         )
@@ -905,21 +943,70 @@ private fun BrowserPageContent(
             return
         }
 
+        // The web surface is created once and then stays mounted for as long
+        // as any tab exists — the Start Page, the crash card and the error
+        // card are drawn ON TOP of it instead of replacing it. Swapping the
+        // surface in and out of the composition (which is what the Start Page
+        // used to do) detached the GeckoView, and a detached/re-attached
+        // surface is what made pages come back black or re-load.
+        //
+        // The last session stays bound while the Start Page is visible (it is
+        // hidden underneath), so returning to that tab is not a re-bind either.
+        val surfaceSession = remember { mutableStateOf<BrowserSession?>(null) }
+        LaunchedEffect(state.activeSession) {
+            state.activeSession?.let { surfaceSession.value = it }
+        }
+        val session = state.activeSession ?: surfaceSession.value
+        if (session != null && state.tabs.isNotEmpty()) {
+            AndroidView(
+                // The container is stable for the whole Activity; the surfaces
+                // inside it belong to individual tabs and are never re-created
+                // by a tab switch.
+                factory = { ctx -> session.contentContainer(ctx) },
+                update = { view ->
+                    state.activeSession?.presentContentView(view)
+                },
+                onRelease = {
+                    // Surfaces outlive Compose nodes on purpose: a route change
+                    // must not cost a tab its page.
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+
         if (state.showStartPage) {
             StartPage(
                 state = state,
                 onOpenUrl = onOpenUrl,
                 onNewTab = onNewTab,
-                onAddShortcut = { title, url ->
-                    onAction(BrowserAction.AddStartShortcut(title, url))
+                onRequestAddShortcut = {
+                    onAction(BrowserAction.ShowAddShortcutDialog)
                 },
-                onEditShortcut = { id, title, url ->
-                    onAction(BrowserAction.EditStartShortcut(id, title, url))
+                onRequestEditShortcut = { shortcut ->
+                    onAction(
+                        BrowserAction.ShowEditShortcutDialog(
+                            id = shortcut.id,
+                            title = shortcut.title,
+                            url = shortcut.url,
+                        ),
+                    )
                 },
                 onDeleteShortcut = { id ->
                     onAction(BrowserAction.DeleteStartShortcut(id))
                 },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    // Opaque and touch-blocking: the page underneath must not
+                    // show through or receive touches meant for the Start Page.
+                    .background(MaterialTheme.colorScheme.background)
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent(PointerEventPass.Final)
+                                    .changes.forEach { it.consume() }
+                            }
+                        }
+                    },
             )
             return
         }
@@ -952,42 +1039,154 @@ private fun BrowserPageContent(
             return
         }
 
-        val session = state.activeSession
-        if (session != null) {
-            // One shared GeckoView stays attached while browsing. Tabs are
-            // switched with renderContentView(), matching GeckoView's
-            // intended session-swap model instead of swapping surfaces.
-            key(state.contentViewGeneration) {
-                AndroidView(
-                    factory = { ctx -> session.createContentView(ctx) },
-                    update = { view -> session.renderContentView(view) },
-                    onRelease = { view -> session.releaseContentView(view) },
-                    modifier = Modifier.fillMaxSize(),
+        // Pull-to-refresh indicator: driven entirely by progress the engine
+        // measured from Gecko's own touch result, so it appears exactly when
+        // the page is at its top and cannot scroll any further. Nothing here
+        // touches the gesture: the page keeps every event.
+        val pullProgress = state.pullRefreshProgress
+        if (pullProgress > 0.02f) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                shadowElevation = 2.dp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 12.dp)
+                    .size(40.dp),
+            ) {
+                CircularProgressIndicator(
+                    progress = { pullProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier.padding(10.dp),
+                    strokeWidth = 2.dp,
                 )
             }
         }
 
-        if (state.loadFailed && session != null && !state.isFullscreen) {
-            Card(
+        if (!state.isFullscreen &&
+            (state.loadFailed || state.savedLoginSuggestion != null)
+        ) {
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        text = stringResource(R.string.page_load_failed),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Button(onClick = { onAction(BrowserAction.Reload) }) {
-                        Text(stringResource(R.string.action_retry))
+                // Offered, never applied: the page gets the password only when
+                // the user taps Fill. The old behaviour filled it silently.
+                state.savedLoginSuggestion?.let { suggestion ->
+                    Card {
+                        Row(
+                            modifier = Modifier.padding(
+                                start = 16.dp,
+                                end = 8.dp,
+                                top = 6.dp,
+                                bottom = 6.dp,
+                            ),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f, fill = false),
+                            ) {
+                                Text(
+                                    text = stringResource(
+                                        R.string.saved_login_available,
+                                        suggestion.host,
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    text = suggestion.username,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Button(onClick = { onAction(BrowserAction.FillSavedLogin) }) {
+                                Text(stringResource(R.string.action_fill_login))
+                            }
+                            IconButton(
+                                onClick = {
+                                    onAction(BrowserAction.DismissSavedLoginSuggestion)
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = stringResource(R.string.action_dismiss),
+                                )
+                            }
+                        }
+                    }
+                }
+                if (state.loadFailed && session != null) {
+                    Card {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Column {
+                                Text(
+                                    text = loadFailureMessage(state),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                if (state.loadErrorCode != 0) {
+                                    // Numeric only: never the URL. Enough for a
+                                    // screenshot to identify the failure.
+                                    Text(
+                                        text = stringResource(
+                                            R.string.page_load_failed_code,
+                                            state.loadErrorCode,
+                                        ),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            Button(onClick = { onAction(BrowserAction.Reload) }) {
+                                Text(stringResource(R.string.action_retry))
+                            }
+                        }
                     }
                 }
             }
         }
+        // Floating zoom panel: last child, so it sits above the page, the
+        // pull indicator and the error cards while it is open.
+        if (state.zoomPanelVisible && !state.showStartPage) {
+            SiteZoomPanel(
+                percent = state.zoomPercent,
+                onPercentChange = { percent -> onAction(BrowserAction.SetSiteZoom(percent)) },
+                onReset = { onAction(BrowserAction.ResetSiteZoom) },
+                onDismiss = { onAction(BrowserAction.HideZoomPanel) },
+            )
+        }
+    }
+}
+
+/**
+ * Short, honest reason for a failed load. Gecko's numeric codes are stable
+ * API constants (`WebRequestError`); the category is used as a fallback so an
+ * unknown code still says something useful.
+ */
+@Composable
+private fun loadFailureMessage(state: BrowserUiState): String {
+    val code = state.loadErrorCode
+    val category = state.loadErrorCategory
+    return when {
+        code == 0 -> stringResource(R.string.page_load_failed)
+        code == 0x73 -> stringResource(R.string.page_load_failed_offline)
+        code == 0x22 || code == 0x32 || code == 0xB3 -> // SSL, bad cert, bad HSTS
+            stringResource(R.string.page_load_failed_security)
+        code == 0x63 -> stringResource(R.string.page_load_failed_redirect)
+        code == 0x44 -> stringResource(R.string.page_load_failed_renderer)
+        code == 0x23 || code == 0x33 || code == 0x43 || code == 0x93 || // net
+            code == 0x25 -> // unknown host
+            stringResource(R.string.page_load_failed_network)
+        category == 0x3 -> stringResource(R.string.page_load_failed_network)
+        category == 0x2 -> stringResource(R.string.page_load_failed_security)
+        else -> stringResource(R.string.page_load_failed)
     }
 }
 
@@ -1121,40 +1320,11 @@ private fun StartPage(
     state: BrowserUiState,
     onOpenUrl: (String) -> Unit,
     onNewTab: () -> Unit,
-    onAddShortcut: (String, String) -> Unit,
-    onEditShortcut: (Long, String, String) -> Unit,
+    onRequestAddShortcut: () -> Unit,
+    onRequestEditShortcut: (StartShortcut) -> Unit,
     onDeleteShortcut: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var addDialogVisible by remember { mutableStateOf(false) }
-    var shortcutPendingEdit by remember { mutableStateOf<StartShortcut?>(null) }
-
-    if (addDialogVisible) {
-        ShortcutDialog(
-            title = stringResource(R.string.start_shortcut_add_title),
-            initialName = "",
-            initialAddress = "",
-            onDismiss = { addDialogVisible = false },
-            onSave = { title, url ->
-                onAddShortcut(title, url)
-                addDialogVisible = false
-            },
-        )
-    }
-
-    shortcutPendingEdit?.let { shortcut ->
-        ShortcutDialog(
-            title = stringResource(R.string.start_shortcut_edit_title),
-            initialName = shortcut.title,
-            initialAddress = shortcut.url,
-            onDismiss = { shortcutPendingEdit = null },
-            onSave = { title, url ->
-                onEditShortcut(shortcut.id, title, url)
-                shortcutPendingEdit = null
-            },
-        )
-    }
-
     LazyColumn(
         modifier = modifier.padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -1286,7 +1456,7 @@ private fun StartPage(
                     rowShortcuts.forEach { shortcut ->
                         if (shortcut == null) {
                             AddShortcutTile(
-                                onClick = { addDialogVisible = true },
+                                onClick = onRequestAddShortcut,
                                 modifier = Modifier.weight(1f),
                             )
                         } else {
@@ -1294,7 +1464,7 @@ private fun StartPage(
                                 shortcut = shortcut,
                                 icon = state.startShortcutIcons[shortcut.id],
                                 onClick = { onOpenUrl(shortcut.url) },
-                                onEdit = { shortcutPendingEdit = shortcut },
+                                onEdit = { onRequestEditShortcut(shortcut) },
                                 onDelete = { onDeleteShortcut(shortcut.id) },
                                 modifier = Modifier.weight(1f),
                             )
@@ -1492,8 +1662,43 @@ private fun AddShortcutTile(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        onClick = onClick,
-        modifier = modifier.height(108.dp),
+        modifier = modifier
+            .height(108.dp)
+            .clip(RoundedCornerShape(26.dp))
+            // The tile completes the tap itself, on the Initial pass.
+            // Modifier.clickable alone never produced a click here: its tap
+            // only completes if nothing consumes the gesture on the way back
+            // up, and something above the tile does. This watcher never
+            // consumes anything, so scrolling still belongs to the list, and
+            // it decides a tap by itself: down, stay inside touch slop, up.
+            .pointerInput(Unit) {
+                val slop = viewConfiguration.touchSlop
+                awaitPointerEventScope {
+                    var downX = 0f
+                    var downY = 0f
+                    var tracking = false
+                    var movedFar = false
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull() ?: continue
+                        if (change.pressed && !change.previousPressed) {
+                            downX = change.position.x
+                            downY = change.position.y
+                            tracking = true
+                            movedFar = false
+                        } else if (tracking) {
+                            val dx = change.position.x - downX
+                            val dy = change.position.y - downY
+                            if (dx * dx + dy * dy > slop * slop) movedFar = true
+                            if (!change.pressed) {
+                                tracking = false
+                                if (!movedFar) onClick()
+                            }
+                        }
+                    }
+                }
+            }
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(26.dp),
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(
@@ -1818,24 +2023,17 @@ private fun BrowserBottomBar(
                     )
                     HorizontalDivider()
 
-                    // Text zoom (engine text scaling), 50%..200% like Chrome's menu.
-                    Column(
-                        modifier = Modifier
-                            .width(272.dp)
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.menu_zoom),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        ZoomSlider(
-                            percent = state.textZoomPercent,
-                            onPercentCommitted = { percent ->
-                                onAction(BrowserAction.SetTextZoom(percent))
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
+                    // Zoom lives in a floating panel, not in this menu: the
+                    // slider inside a popup is awkward to reach one-handed and
+                    // the panel keeps the page visible while it is dragged.
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.menu_zoom)) },
+                        leadingIcon = { Icon(Icons.Filled.ZoomIn, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onAction(BrowserAction.ShowZoomPanel)
+                        },
+                    )
                     HorizontalDivider()
 
                     DropdownMenuItem(
