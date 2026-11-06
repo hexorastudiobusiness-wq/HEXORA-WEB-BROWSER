@@ -4,14 +4,21 @@ name: Build signed release
 # keystore only ever exists as GitHub Actions secrets; it is decoded into
 # the runner's temp directory for the build and never touches the repo.
 
-# Manual dispatch only, and only from the default branch (see the job-level
-# `if` below). The old bootstrap trigger — "push any arena/** branch that
-# touches signing/build-release.request" — meant that anyone holding a write
-# token could get this job to run with the keystore decoded on the runner,
-# from code they wrote, on a branch nobody reviewed. That is one edit away
-# from leaking the key, so it is gone.
+# Two ways in, both of them `main`-only (see the job-level `if`):
+#   - manual dispatch;
+#   - pushing a change to signing/release-request.txt on main, which is how a
+#     release is cut when the workflow-dispatch permission is not available.
+# The old bootstrap trigger — "push any arena/** branch that touches a marker
+# file" — let a write token get this job to run with the keystore decoded on
+# the runner, on a branch nobody reviewed. That is one edit away from leaking
+# the key, and it stays gone.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - signing/release-request.txt
 
 permissions:
   contents: write
@@ -65,14 +72,18 @@ jobs:
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/hexora-release.p12"
           chmod 600 "$RUNNER_TEMP/hexora-release.p12"
 
-      - name: Build signed release APKs and AAB
+      # Only the arm64-v8a APK is built for now: the app's ABI splits are
+      # already restricted to that one architecture, and the AAB is only
+      # needed when a store upload is planned. Add bundleRelease back (and the
+      # .aab to the publish step) on that day.
+      - name: Build signed release APK
         env:
           HEXORA_RELEASE_STORE_FILE: ${{ runner.temp }}/hexora-release.p12
           HEXORA_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.HEXORA_WEB_BROWSER_RELEASE_KEYSTORE_PASSWORD }}
           HEXORA_RELEASE_STORE_TYPE: PKCS12
         run: |
           set -o pipefail
-          ./gradlew assembleRelease bundleRelease --stacktrace 2>&1 | tee gradle.log
+          ./gradlew assembleRelease --stacktrace 2>&1 | tee gradle.log
 
       - name: Verify APK signatures
         run: |
@@ -83,7 +94,15 @@ jobs:
             echo "--- $apk"
             "$APKSIGNER" verify --verbose --print-certs "$apk"
           done
-          jarsigner -verify app/build/outputs/bundle/release/app-release.aab
+          # An unsigned or debug-signed APK must never reach the release: with
+          # no signature at all apksigner fails here, and a debug certificate
+          # is caught by the DN check below.
+          DN=$("$APKSIGNER" verify --print-certs app/build/outputs/apk/release/*.apk \
+                 | grep -m1 "Signer #1 certificate DN")
+          echo "$DN"
+          case "$DN" in
+            *"CN=Android Debug"*) echo "::error::APK is debug-signed"; exit 1 ;;
+          esac
 
       - name: Remove temporary keystore
         if: always()
@@ -96,9 +115,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hexora-release-signed
-          path: |
-            app/build/outputs/apk/release/*.apk
-            app/build/outputs/bundle/release/*.aab
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       - name: Publish signed files to a GitHub Release
@@ -108,16 +125,22 @@ jobs:
           set -euo pipefail
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           TAG="v$VERSION"
-          NOTES="Signed release build of Hexora Browser $VERSION (commit $GITHUB_SHA). APKs: arm64-v8a (most modern phones), armeabi-v7a (old 32-bit phones), x86_64 (emulators); the AAB is for store upload. Release builds use the dedicated release key, so uninstall the debug build first — Android will not update across different signatures."
+          NOTES=$(cat <<'NOTES_EOF'
+          Hexora Browser 1.0.0 — the first official release.
+
+          Built from `main` and signed with Hexora's release key. The APK is for arm64-v8a devices (every 64-bit Android phone from the last several years).
+
+          Installing over an earlier build: if what you have was signed with a different key — any of the older debug builds — Android will refuse the update. Uninstall that one first; your bookmarks, history and saved logins are removed with it.
+          NOTES_EOF
+          )
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" \
               app/build/outputs/apk/release/*.apk \
-              app/build/outputs/bundle/release/*.aab \
               --clobber
+            gh release edit "$TAG" --notes "$NOTES"
           else
             gh release create "$TAG" \
               app/build/outputs/apk/release/*.apk \
-              app/build/outputs/bundle/release/*.aab \
               --target "$GITHUB_SHA" \
               --title "Hexora Browser $VERSION" \
               --notes "$NOTES"

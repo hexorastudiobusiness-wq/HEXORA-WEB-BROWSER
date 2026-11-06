@@ -13,18 +13,21 @@ val releaseStorePath = System.getenv("HEXORA_RELEASE_STORE_FILE")
 val hasReleaseSigning = !releaseStorePath.isNullOrBlank()
 
 android {
+    // The source tree still lives under com.example.browser; only the install
+    // identity is a real one. Play rejects com.example.*, and a placeholder id
+    // has no business on a 1.0.0 build.
     namespace = "com.example.browser"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.example.browser"
+        applicationId = "com.hexora.browser"
         // GeckoView ships its own native libraries and requires a modern
         // baseline; 26 (Android 8.0) keeps manifest merging safe across
         // current GeckoView releases.
         minSdk = 26
         targetSdk = 37
-        versionCode = 41
-        versionName = "0.6.4"
+        versionCode = 42
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
