@@ -169,13 +169,6 @@ class BrowserViewModel(
      */
     private val _shortcutDialog = MutableStateFlow<ShortcutDialogRequest?>(null)
 
-    /**
-     * Diagnostics: how many taps physically reached the "+" tile. It is a
-     * plain field on purpose — a `remember` inside the tile would reset with
-     * the same recomposition that (possibly) loses the tap.
-     */
-    private var shortcutTileTaps = 0
-
     /** Zoom shown by the panel: the active site's stored value, live-edited. */
     private val _zoomPercent = MutableStateFlow(SitePreferencesStore.DEFAULT_ZOOM)
 
@@ -187,7 +180,6 @@ class BrowserViewModel(
     private var siteZoom: Map<String, Int> = emptyMap()
     private var siteDesktop: Map<String, Boolean> = emptyMap()
     private var zoomPersistJob: Job? = null
-    private val _diagnosticsVisible = MutableStateFlow(false)
 
     // Counters for the in-app diagnostics dialog (no logs, no cable).
     private var sessionsCreated = 0
@@ -340,9 +332,8 @@ class BrowserViewModel(
     private val chromeSliceWithPull = combine(
         chromeSliceWithLogin,
         _pullProgress,
-        _diagnosticsVisible,
-    ) { chrome, pull, diagnostics ->
-        chrome.copy(pullRefreshProgress = pull, diagnosticsVisible = diagnostics)
+    ) { chrome, pull ->
+        chrome.copy(pullRefreshProgress = pull)
     }
 
     private val chromeSlice = combine(
@@ -479,8 +470,6 @@ class BrowserViewModel(
             zoomPercent = start.chrome.zoomPercent,
             shortcutMessage = start.chrome.shortcutMessage,
             shortcutDialog = start.chrome.shortcutDialog,
-            diagnosticsVisible = start.chrome.diagnosticsVisible,
-            diagnosticsText = buildDiagnostics(activeEntry, activeState),
             savedLoginSuggestion = start.chrome.savedLoginSuggestion
                 ?.takeIf { suggestion -> suggestion.tabId == activeEntry?.tabId },
             pageContextMenu = start.chrome.pageContextMenu,
@@ -1145,8 +1134,6 @@ class BrowserViewModel(
                 engine?.setTextZoomPercent(SitePreferencesStore.DEFAULT_ZOOM)
                 persistSiteZoom(SitePreferencesStore.DEFAULT_ZOOM)
             }
-            BrowserAction.ShowDiagnostics -> _diagnosticsVisible.value = true
-            BrowserAction.DismissDiagnostics -> _diagnosticsVisible.value = false
             BrowserAction.DismissPageContextMenu ->
                 _pageContextMenu.value = null
             BrowserAction.OpenContextMenuLink -> openContextMenuLink(newTab = false)
@@ -1194,7 +1181,6 @@ class BrowserViewModel(
                 }
             }
             BrowserAction.DismissShortcutMessage -> _shortcutMessage.value = null
-            BrowserAction.NoteShortcutTileTap -> shortcutTileTaps++
             BrowserAction.ShowAddShortcutDialog ->
                 _shortcutDialog.value = ShortcutDialogRequest()
             is BrowserAction.ShowEditShortcutDialog ->
@@ -1675,6 +1661,7 @@ class BrowserViewModel(
 
     /** Called by the Activity when the app leaves the foreground. */
     fun onAppBackgrounded() {
+        engine?.noteAppBackgrounded()
         appInForeground = false
     }
 
@@ -1707,7 +1694,16 @@ class BrowserViewModel(
         }
         _pullProgress.value = 0f
         engine?.finishPullToRefresh()
+        // Re-apply the overlay state as well: a container left INVISIBLE while
+        // the app was away repainted nothing, and nothing else changes the
+        // flag on return because the overlays are the same as before.
+        syncContentTouch()
         engine?.ensureContentDisplayed()
+        // Black tabs after a return: if Gecko dropped the painted content while
+        // we were away and never reports a new frame, the display is
+        // re-acquired — the same repair as re-selecting the tab, which is what
+        // had to be done by hand.
+        engine?.verifyPaintAfterResume()
     }
 
     /**
@@ -2662,6 +2658,16 @@ class BrowserViewModel(
     }
 
     /**
+     * The app-state section of a bug report prepared by the shake gesture:
+     * build, engine counters, tab/session counts. No URLs, no page titles.
+     */
+    fun appStateReport(): String {
+        val entry = activeEntry()
+        val pageState = entry?.let { _pageStates.value[it.tabId] } ?: SessionPageState()
+        return buildDiagnostics(entry, pageState)
+    }
+
+    /**
      * Plain-text diagnostics shown in the overflow menu. It exists because the
      * two remaining reports (a black pane and a tab that reloads) can only be
      * settled by knowing what the content surface actually did on that device.
@@ -2688,7 +2694,6 @@ class BrowserViewModel(
                 else -> "dead"
             },
         )
-        append(" shortcutTaps=").append(shortcutTileTaps)
         append(" loading=").append(pageState.isLoading)
         append(" failed=").append(pageState.loadFailed)
         append(" err=").append(pageState.loadErrorCode).append('/')
@@ -2711,7 +2716,6 @@ class BrowserViewModel(
         val pageContextMenu: PageContextMenu?,
         val savedLoginSuggestion: SavedLoginSuggestion? = null,
         val pullRefreshProgress: Float = 0f,
-        val diagnosticsVisible: Boolean = false,
         val zoomPanelVisible: Boolean = false,
         val zoomPercent: Int = SitePreferencesStore.DEFAULT_ZOOM,
         val shortcutMessage: Int? = null,

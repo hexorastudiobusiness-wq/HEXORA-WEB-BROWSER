@@ -23,8 +23,8 @@ android {
         // current GeckoView releases.
         minSdk = 26
         targetSdk = 37
-        versionCode = 34
-        versionName = "0.5.7"
+        versionCode = 35
+        versionName = "0.5.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

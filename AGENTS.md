@@ -316,3 +316,22 @@ The essentials, so nobody has to argue about this again:
 - [ ] Persian final report with limitations stated honestly
 
 Debug audit 0.4.5 (versionCode 21): see [AUDIT.md](AUDIT.md) for fixes and verification boundaries.
+
+## 0.5.8
+
+* `util/AppLog` is the app's own log (250-line ring buffer, last crash). Log
+  events worth reporting; never log URLs, titles or credentials.
+* `util/DeviceInfo` reads device/build/ROM identity (`getprop` for vendor
+  versions). `util/ShakeDetector` is the shake gesture; `util/BugReport` builds
+  the report and the mail/contact intents. `util/BrowserRole` owns
+  `RoleManager` and the default-browser flow.
+* `ui/components/ReportDialogs.kt` holds the bug-report and default-browser
+  dialogs. They are shown from `MainActivity`, because both need the Activity
+  (launchers, mail intent) and the ViewModel (app state).
+* No in-app diagnostics UI. Engine counters (`BrowserEngine.diagnostics()`) are
+  only consumed by the bug report now.
+* After a return from the background the engine re-asserts the display:
+  `noteAppBackgrounded()` snapshots the paint-reset counter,
+  `verifyPaintAfterResume()` re-binds a surface that never painted again, and
+  `setContentHidden()` always re-applies visibility. Never "fix" a black tab by
+  reloading it.

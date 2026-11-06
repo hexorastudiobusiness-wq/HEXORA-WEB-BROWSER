@@ -55,6 +55,18 @@ interface BrowserEngine {
      */
     fun ensureContentDisplayed() {}
 
+    /** Remembers the paint state at the moment the app went to the background. */
+    fun noteAppBackgrounded() {}
+
+    /**
+     * Called shortly after the app comes back to the foreground. If Gecko
+     * reported that the painted content was dropped (a paint-status reset)
+     * while the app was away and no frame has arrived since, the active tab's
+     * display is re-acquired — the same repair as re-selecting the tab, which
+     * is what the owner had to do by hand when tabs came back black.
+     */
+    fun verifyPaintAfterResume() {}
+
     /**
      * Enables or disables touch delivery to the web surfaces.
      *

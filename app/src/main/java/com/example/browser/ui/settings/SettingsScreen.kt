@@ -53,6 +53,8 @@ fun SettingsScreen(
     onClearBrowsingData: () -> Unit,
     onOpenPasswords: () -> Unit,
     onOpenSitePermissions: () -> Unit = {},
+    onSetDefaultBrowser: () -> Unit = {},
+    onReportBug: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val settings by viewModel.settings.collectAsState()
@@ -271,10 +273,74 @@ fun SettingsScreen(
                 Text(stringResource(R.string.menu_clear_data))
             }
             Spacer(Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+            SettingsSectionTitle(stringResource(R.string.about_title))
+            ListItem(
+                headlineContent = {
+                    Text(stringResource(R.string.about_developed_by))
+                },
+                supportingContent = {
+                    // The address is shown, not only linked: it must be
+                    // readable on a device with no mail app installed.
+                    Text(
+                        text = com.example.browser.util.BrowserRole.DEVELOPER_EMAIL,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+            )
+            OutlinedButton(
+                onClick = {
+                    // Explicit contact, no report payload: the address is
+                    // prefilled and the composer opened, so nothing is sent
+                    // without the owner writing and pressing send.
+                    val intent = com.example.browser.util.BugReport.contactIntent()
+                    try {
+                        context.startActivity(intent)
+                    } catch (error: android.content.ActivityNotFoundException) {
+                        Toast.makeText(
+                            context,
+                            com.example.browser.util.BrowserRole.DEVELOPER_EMAIL,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.about_contact))
+            }
+            OutlinedButton(
+                onClick = onReportBug,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.about_report_bug))
+            }
+            Text(
+                text = stringResource(R.string.about_report_bug_summary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedButton(
+                onClick = onSetDefaultBrowser,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.settings_default_browser))
+            }
+            Text(
+                text = stringResource(R.string.settings_default_browser_summary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Spacer(Modifier.height(24.dp))
             // Build identity, bottom of Settings: the answer to "is this the
             // build I just downloaded?".
             Text(
-                text = "Hexora ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                text = stringResource(
+                    R.string.about_version,
+                    BuildConfig.VERSION_NAME,
+                    BuildConfig.VERSION_CODE,
+                ),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth(),

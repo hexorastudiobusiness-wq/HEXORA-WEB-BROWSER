@@ -522,3 +522,101 @@ down also decides a tap (down → stay inside `touchSlop` → up) and calls the
 same `onClick`. It consumes nothing, so list scrolling is untouched, and
 `clickable` stays for ripple/semantics (calling the action twice is a no-op:
 the dialog request is a value that dedupes).
+
+_CI note: the 0.5.7 build itself was green; only the "publish APK to a prerelease" step failed, so the same commit is rebuilt here to publish it._
+
+## 0.5.8 — black tabs after a return, and the app around the browser
+
+### The regression: tabs came back black
+
+The owner's report, twice in one session: the app *minimised itself* with no
+input, and on return the tabs were still open and still un-refreshed — but
+black. Refresh did nothing, switching tabs did nothing; only opening the tab
+tray and selecting a tab brought the content back.
+
+What the code says, and what that means:
+
+* the tray repair works because selecting a tab calls `setSession()` /
+  `present()` again — it re-acquires the *display*, not the document;
+* `ensureContentDisplayed()` (0.5.2) only rebinds surfaces whose `session`
+  is `null`. A session that is alive but whose painted content was dropped is
+  never touched by it;
+* GeckoView reports exactly that case: `GeckoSession.ContentDelegate
+  .onPaintStatusReset`, and there is no `onFirstComposite` afterwards. On the
+  healthy device session `paintResets=0`, so the counter is meaningful.
+
+The 0.5.8 repair has three parts, all of them "re-acquire the display", never
+"reload the page":
+
+1. `noteAppBackgrounded()` snapshots the paint-reset counter in `onStop`.
+2. `verifyPaintAfterResume()` runs ~1.2 s after the window is back. If the
+   counter moved *and* no frame was composed in that window, the surface is
+   re-bound exactly the way re-selecting the tab did it (`setSession(null)` →
+   `setSession(session)`), counted as `recoveries=`.
+3. `setContentHidden()` now re-applies the container's visibility even when the
+   flag did not change. A container left `INVISIBLE` (hidden under an overlay
+   when the app went away) stayed invisible on return, because nothing about the
+   overlay state had changed to trigger a fresh call. That is a second, purely
+   mechanical way to come back to a black pane.
+
+Also on resume: `syncContentTouch()` is called again, so the overlay state that
+decides visibility and touch ownership is always re-asserted.
+
+### Diagnostics removed
+
+The window, the overflow entry, the action, both state fields, the tap counter
+and its plumbing in the Start Page are gone. The engine counters stay — they
+now feed the bug report instead of a dialog. The `+` tile keeps the
+self-completing watcher from 0.5.7: `Modifier.clickable` alone still does not
+complete a tap there.
+
+### Default browser, on first launch and in Settings
+
+* `BrowserRole` wraps `RoleManager` (`android.app.role.BROWSER`). The dialog is
+  only requested from a tap. A request that the system answers with "no" — or
+  auto-denies after two declines, which is what happens on `targetSdk` 36+ when
+  the prompt is never answered — lands on the settings route (app details,
+  then the system default-apps list) instead of a dead button.
+* Asked once per install (`hexora_default_browser` prefs), never in the
+  background, and never when the role is already held. Settings keeps a manual
+  entry.
+
+### Appearing in the "open with" list
+
+The launcher filter now carries `CATEGORY_APP_BROWSER`. That category is what
+the launcher and the vendor skins use to decide that an app *is* a browser:
+without it the app is not listed next to Chrome/Firefox in the chooser, and it
+cannot qualify for the browser role at all. A `WEB_SEARCH` filter was added as
+well, answered by the app's own search-engine setting.
+
+### Contact, About, and shake-to-report
+
+* Settings → About: `Developer & Designed By: HEXORA-STUDIO`, the address
+  `Hexora.Studio.Business@Gmail.com` shown as text **and** as a `mailto:` link
+  that opens the owner's composer pre-addressed (no report payload).
+* `ShakeDetector`: gravity high-pass, three peaks above 9 m/s² inside 1.2 s,
+  2.5 s debounce, registered only while resumed. A single hard jolt (putting the
+  phone down) does not qualify.
+* `BugReport` assembles: the owner's own description, the device block
+  (`DeviceInfo`: build, ROM properties read with `getprop`, display, refresh
+  rate, ABIs, locale), the app-state counters, the in-memory `AppLog` (250
+  entries, plus the last uncaught exception), and hands it to the mail app with
+  `ACTION_SEND`. Nothing is transmitted by the app itself, and there is a
+  "copy" button for owners without a mail client.
+
+### Compatibility pass (Android 12 → 16, vendor skins)
+
+Checked and already correct: `android:exported` on every component; immutable
+`PendingIntent`s; `FOREGROUND_SERVICE_DATA_SYNC` for the download service;
+`POST_NOTIFICATIONS` requested only when a download needs it; SAF-based file
+pickers (no storage permissions); `BackHandler` everywhere (predictive back is
+enabled and Android 16 forces it); edge-to-edge via `enableEdgeToEdge()`;
+`configChanges` covering size/orientation/uiMode for the foldable and
+split-screen cases; downloads on API 26–28 going through the app's own
+`getExternalFilesDir` (no `WRITE_EXTERNAL_STORAGE` needed); GeckoView 158, which
+is 16 KB-page-size clean for Android 15/16 devices.
+
+Skin-specific behaviour that is *not* code-fixable (documented, not "fixed"):
+One UI's sleeping apps, HyperOS autostart, ColorOS/OxygenOS background freezes
+all kill sessions while away. That is exactly the case the suspension/restore
+path and the new paint-resume repair exist for.

@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.SparseArray
 import android.view.MotionEvent
@@ -369,6 +371,17 @@ class GeckoBrowserEngine(
     private var paintStatusResets: Int = 0
     private var firstComposites: Int = 0
 
+    /** Frames seen, used to tell "nothing painted since resume" apart. */
+    @Volatile
+    private var compositeTicks = 0
+
+    private var paintResetsAtBackground = 0
+
+    /** Invalidates an older resume check when a new one starts. */
+    private var resumeCheckToken = 0
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     /**
      * The app's single content container for [context]. The container is not
      * re-created per tab; the surfaces inside it are.
@@ -447,7 +460,10 @@ class GeckoBrowserEngine(
     }
 
     override fun setContentHidden(hidden: Boolean) {
-        if (contentHidden == hidden) return
+        // Re-applied even when the flag does not change: coming back from the
+        // background can leave the container INVISIBLE (it was hidden under an
+        // overlay) with no state change to trigger a new call — black content
+        // that only re-selecting the tab repaired.
         contentHidden = hidden
         contentContainer?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
     }
@@ -482,6 +498,48 @@ class GeckoBrowserEngine(
     /** Gecko produced a frame: that surface is definitely alive. */
     internal fun notifyFirstComposite(session: GeckoSession) {
         firstComposites++
+        compositeTicks++
+    }
+
+    override fun noteAppBackgrounded() {
+        paintResetsAtBackground = paintStatusResets
+    }
+
+    /**
+     * The black-tab repair. Gecko drops the painted content when the app is
+     * away; if it never reports a new frame after we are back, the display is
+     * re-acquired without touching the document (no reload, no history loss).
+     */
+    override fun verifyPaintAfterResume() {
+        val session = activeSession ?: return
+        val host = contentContainer ?: return
+        val token = ++resumeCheckToken
+        val compositesBefore = compositeTicks
+        mainHandler.postDelayed({
+            if (token != resumeCheckToken) return@postDelayed
+            // Something painted: nothing to repair.
+            if (compositeTicks != compositesBefore) return@postDelayed
+            // Only when Gecko said the painted content was dropped.
+            if (paintStatusResets <= paintResetsAtBackground) return@postDelayed
+            forceRepaint(session, host)
+        }, PAINT_RESUME_GRACE_MS)
+    }
+
+    /** Re-acquires the display for [session]'s surface (a repaint, not a load). */
+    private fun forceRepaint(session: GeckoBrowserSession, host: FrameLayout) {
+        for (index in 0 until host.childCount) {
+            val tabHost = host.getChildAt(index) as? SwipeableHostLayout ?: continue
+            val view = tabHost.getChildAt(0) as? HexoraGeckoView ?: continue
+            val owner = synchronized(surfaceOwners) { surfaceOwners[view] } ?: continue
+            if (owner !== session) continue
+            view.releaseSession()
+            if (session.geckoSession.isOpen) {
+                view.setSession(session.geckoSession)
+                session.installAutofillDelegate()
+            }
+            paintRecoveries++
+            return
+        }
     }
 
     /**
@@ -570,6 +628,9 @@ class GeckoBrowserEngine(
     }
 
     private companion object {
+        /** How long a resumed surface may stay unpainted before we repair it. */
+        const val PAINT_RESUME_GRACE_MS = 1200L
+
         private val RUNTIME_LOCK = Any()
 
         @Volatile

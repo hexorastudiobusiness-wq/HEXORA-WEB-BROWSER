@@ -170,10 +170,6 @@ data class BrowserUiState(
     val shortcutDialog: ShortcutDialogRequest? = null,
     /** Zoom of the site in front of the user, in percent. */
     val zoomPercent: Int = 100,
-    /** Whether the diagnostics dialog is open (overflow menu). */
-    val diagnosticsVisible: Boolean = false,
-    /** Counters describing the content surface; no URLs, no titles. */
-    val diagnosticsText: String = "",
     /** Long-press menu for a link/image/video/audio on the page, if open. */
     val pageContextMenu: PageContextMenu? = null,
     /** History matches for the text currently typed in the address bar. */
@@ -252,8 +248,6 @@ sealed interface BrowserAction {
     data object ResetSiteZoom : BrowserAction
     data class SetSiteZoom(val percent: Int) : BrowserAction
     data object DismissShortcutMessage : BrowserAction
-    data object ShowDiagnostics : BrowserAction
-    data object DismissDiagnostics : BrowserAction
     data object DismissPendingCredential : BrowserAction
     data object DismissPageContextMenu : BrowserAction
     data object OpenContextMenuLink : BrowserAction
@@ -264,7 +258,6 @@ sealed interface BrowserAction {
     data object DownloadContextMenuLink : BrowserAction
     data object DownloadContextMenuMedia : BrowserAction
     /** Diagnostics only: a tap physically reached the "+" tile. */
-    data object NoteShortcutTileTap : BrowserAction
     data object ShowAddShortcutDialog : BrowserAction
     data class ShowEditShortcutDialog(
         val id: Long,

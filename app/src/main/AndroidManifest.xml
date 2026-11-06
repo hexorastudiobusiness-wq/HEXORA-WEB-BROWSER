@@ -37,9 +37,16 @@
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode">
+            <!-- MAIN/LAUNCHER plus APP_BROWSER: the second category is how the
+                 launcher and the vendor skins (One UI, HyperOS/MIUI, ColorOS,
+                 MagicOS, NothingOS, OxygenOS) identify an app as a *browser*.
+                 Without it the app is not offered in "open this link with"
+                 choosers next to the other browsers, and it cannot qualify for
+                 the system's default-browser role. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.APP_BROWSER" />
             </intent-filter>
 
             <!-- Open http(s) links from other apps -->
@@ -49,6 +56,14 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="http" />
                 <data android:scheme="https" />
+            </intent-filter>
+
+            <!-- The system search key / "search the web" action, answered by
+                 Hexora's own search engine setting. -->
+            <intent-filter>
+                <action android:name="android.intent.action.WEB_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
             </intent-filter>
         </activity>
 

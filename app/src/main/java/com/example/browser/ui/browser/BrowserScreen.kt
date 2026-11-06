@@ -374,24 +374,6 @@ fun BrowserScreen(
         )
     }
 
-    if (state.diagnosticsVisible) {
-        AlertDialog(
-            onDismissRequest = { viewModel.onAction(BrowserAction.DismissDiagnostics) },
-            title = { Text(stringResource(R.string.menu_diagnostics)) },
-            text = {
-                Text(
-                    text = state.diagnosticsText,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { viewModel.onAction(BrowserAction.DismissDiagnostics) }) {
-                    Text(stringResource(R.string.action_close))
-                }
-            },
-        )
-    }
-
     if (showClearDataConfirm) {
         // Same destructive-action guard as Settings: clearing browsing
         // data from the quick menu must never be a single accidental tap.
@@ -577,9 +559,6 @@ fun BrowserScreen(
                 onSiteDataCleared = {
                     Toast.makeText(context, R.string.site_data_cleared, Toast.LENGTH_SHORT)
                         .show()
-                },
-                onShowDiagnostics = {
-                    viewModel.onAction(BrowserAction.ShowDiagnostics)
                 },
             )
         }
@@ -1003,9 +982,6 @@ private fun BrowserPageContent(
                 onRequestAddShortcut = {
                     onAction(BrowserAction.ShowAddShortcutDialog)
                 },
-                onShortcutTapSignal = {
-                    onAction(BrowserAction.NoteShortcutTileTap)
-                },
                 onRequestEditShortcut = { shortcut ->
                     onAction(
                         BrowserAction.ShowEditShortcutDialog(
@@ -1345,7 +1321,6 @@ private fun StartPage(
     onOpenUrl: (String) -> Unit,
     onNewTab: () -> Unit,
     onRequestAddShortcut: () -> Unit,
-    onShortcutTapSignal: () -> Unit,
     onRequestEditShortcut: (StartShortcut) -> Unit,
     onDeleteShortcut: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -1482,7 +1457,6 @@ private fun StartPage(
                         if (shortcut == null) {
                             AddShortcutTile(
                                 onClick = onRequestAddShortcut,
-                                onTapSignal = onShortcutTapSignal,
                                 modifier = Modifier.weight(1f),
                             )
                         } else {
@@ -1685,7 +1659,6 @@ private fun StartShortcutTile(
 @Composable
 private fun AddShortcutTile(
     onClick: () -> Unit,
-    onTapSignal: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -1693,8 +1666,7 @@ private fun AddShortcutTile(
             .height(108.dp)
             .clip(RoundedCornerShape(26.dp))
             // The tile completes the tap itself, on the Initial pass.
-            // Diagnostics proved the gesture arrives here (39 taps counted)
-            // while the standard clickable never produced a click: its tap
+            // Modifier.clickable alone never produced a click here: its tap
             // only completes if nothing consumes the gesture on the way back
             // up, and something above the tile does. This watcher never
             // consumes anything, so scrolling still belongs to the list, and
@@ -1714,7 +1686,6 @@ private fun AddShortcutTile(
                             downY = change.position.y
                             tracking = true
                             movedFar = false
-                            onTapSignal()
                         } else if (tracking) {
                             val dx = change.position.x - downX
                             val dy = change.position.y - downY
@@ -1917,7 +1888,6 @@ private fun BrowserBottomBar(
     onClearBrowsingData: () -> Unit,
     onAddToHomeScreen: () -> Unit,
     onSiteDataCleared: () -> Unit,
-    onShowDiagnostics: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -2142,18 +2112,6 @@ private fun BrowserBottomBar(
                             onAction(BrowserAction.SavePageAsPdf)
                         },
                     )
-                    if (state.canAddStartShortcut) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.start_add_shortcut)) },
-                            leadingIcon = {
-                                Icon(Icons.Filled.Add, contentDescription = null)
-                            },
-                            onClick = {
-                                menuExpanded = false
-                                onAction(BrowserAction.ShowAddShortcutDialog)
-                            },
-                        )
-                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.menu_add_to_home)) },
                         leadingIcon = {
@@ -2205,14 +2163,6 @@ private fun BrowserBottomBar(
                             menuExpanded = false
                             onAction(BrowserAction.ClearSiteData)
                             onSiteDataCleared()
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.menu_diagnostics)) },
-                        leadingIcon = { Icon(Icons.Filled.Info, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onShowDiagnostics()
                         },
                     )
                     DropdownMenuItem(

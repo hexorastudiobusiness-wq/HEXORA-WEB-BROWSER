@@ -591,6 +591,37 @@ A change is done only when:
   both small and large screens; keep touch targets usable even when a
   control's visible glyph is deliberately compact (e.g. tab close).
 
+## 26a. Display Recovery, Reporting, and the Default-Browser Role (0.5.8)
+
+**Display recovery.** GeckoView drops a surface's painted content when the app
+is away and signals it with `onPaintStatusReset`. A surface that never reports a
+new frame afterwards stays black even though its document is alive — which is
+why re-selecting the tab from the tray (a `setSession`/`present`) repaired it.
+The engine therefore owns three hooks, all "re-acquire the display", never
+"reload the page": `noteAppBackgrounded()` snapshots the reset counter,
+`verifyPaintAfterResume()` re-binds the active surface after a grace period when
+the counter moved and nothing was composed, and `setContentHidden()` always
+re-applies the container's visibility (a container hidden under an overlay
+before backgrounding otherwise stayed hidden). The ViewModel re-asserts the
+overlay state in `onBrowserResumed()`.
+
+**No in-app diagnostics.** The window, its action, its state and the Start Page
+tap counter are gone. `BrowserEngine.diagnostics()` remains, consumed only by
+the bug report.
+
+**Bug reporting.** `util/AppLog` is an in-memory (250-entry) log plus the last
+uncaught exception; `util/DeviceInfo` describes the device, build and ROM
+(vendor properties via `getprop`); `util/ShakeDetector` turns three acceleration
+peaks inside 1.2 s into a request; `util/BugReport` composes the text and hands
+it to the owner's mail app (`ACTION_SEND`) or the clipboard. The app itself
+never transmits anything.
+
+**Default browser.** `util/BrowserRole` wraps `RoleManager`; the request is only
+started from a tap, and an unavailable/declined request falls back to the
+settings route. The manifest carries `CATEGORY_APP_BROWSER` on the launcher
+filter — without it the app is neither offered in link choosers nor eligible for
+the role — plus a `WEB_SEARCH` filter answered by the in-app search engine.
+
 ## 27. Documentation Maintenance
 
 - `README.md` — owner/user facing: features, install, warnings, builds.
@@ -602,4 +633,4 @@ A change is done only when:
 Docs that contradict the code are bugs. Fix them in the same commit as
 the behavior change.
 
-Debug audit 0.4.5 (versionCode 21): see [AUDIT.md](AUDIT.md) for fixes and verification boundaries.
+Debug audits: [AUDIT.md](AUDIT.md) (0.4.5 onward, latest 0.5.8) for fixes and verification boundaries.
