@@ -116,7 +116,7 @@ jobs:
       # reports from earlier commits. Without this, every transient compile
       # error leaves an open issue that is fixed ten minutes later and nobody
       # ever closes it.
-      - name: Close build-failure issues from earlier commits
+      - name: Close superseded failure issues
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -125,4 +125,15 @@ jobs:
             --limit 100 --json number --jq '.[].number' | while read -r number; do
               gh issue close "$number" \
                 --comment "Fixed: $GITHUB_SHA builds green (run $GITHUB_RUN_ID)."
+            done
+
+          # Smoke reports whose body is nothing but "logcat.txt missing" came
+          # from runs where the emulator never booted: there is no crash to
+          # read in them. Anything that did capture a trace is left alone.
+          gh issue list --state open --search 'Emulator smoke report in:title' \
+            --limit 100 --json number,body \
+            --jq '.[] | select(.body | test("logcat\\.txt missing")) | .number' |
+            while read -r number; do
+              gh issue close "$number" \
+                --comment "Closed: this run captured no logcat (the emulator never booted), so there is nothing to inspect here."
             done
