@@ -901,3 +901,57 @@ edge. On the Start Page the logo is drawn `ContentScale.Fit` at 148 dp — never
 carries the name; the "Fast, private, yours" line stays.
 
 `versionCode` 37 / `versionName` 0.6.0.
+
+## 0.6.1 — density in the settings pane, copy that reads like a person, and the sweep
+
+**The pane was sized for a tablet.** Next to a 104 dp sidebar a phone leaves
+~230 dp of content, and Material's defaults were written for something three
+times that wide: `ListItem` at 16 sp with 16 dp of padding top and bottom, a
+52×32 dp `Switch`, `OutlinedButton` at full `ButtonDefaults` height. Six rows
+filled a screen. The pane now uses one row type of its own (`SettingsRow`:
+14 sp label, 12 sp summary, 5 dp vertical padding), a switch scaled to 0.78
+inside a 44×28 dp box, radio buttons at 0.82, and 36 dp buttons with 14 dp
+horizontal padding. Section headings dropped from `titleMedium` to
+`titleSmall`. Same information, roughly two thirds of the height.
+
+This is deliberately local to the settings pane: dialogs, the browser chrome and
+the About screen were not touched, because they are not the crowded surface.
+
+**The About copy was written like a release note.** Every sentence was a
+spec-sheet clause with an em dash in the middle, which is exactly how a machine
+writes when nobody is talking. It is rewritten in a voice that could plausibly
+belong to the person who built the app: contractions, shorter sentences, one
+idea per bullet, and concrete detail instead of adjectives ("a key Android keeps
+in the Keystore and will not hand out" rather than "strong device-bound
+encryption"). No claim changed: each one still maps to code in this repository.
+
+**The icon had no breathing room at the bottom.** The lockup was padded by edge
+replication of the *cropped* square, and the last row of that crop carried a
+faint vignette line, which replication then repeated across the bottom of the
+tile — the "slightly cut off" the owner saw. The tile is now composed properly:
+the lockup is cropped with 60 px of its own background on every side, feathered
+over a canvas filled with that background's average colour, and placed with
+~13 % margin at the top and ~17 % at the bottom (a text lockup wants the extra
+room under the baseline). Content occupies ~71 % of the tile instead of 77 %.
+
+**The sweep.** What it actually checked, and what it found:
+
+- every `R.string.*` used from Kotlin exists in `strings.xml` (none missing),
+  and every `R.drawable.*`/`R.mipmap.*` resolves to a file (the two hits are
+  `android.R.drawable.stat_sys_download*`, platform resources — not a defect);
+- braces and parentheses balance in the four files this build touches, against
+  their `HEAD` baseline (unchanged);
+- copy versus behaviour, one string at a time. One lie found and fixed:
+  `settings_open_links_new_tab_summary` still said "Stored preference — not
+  applied yet", while `handleExternalUrl()` has honoured it for two releases
+  (`BrowserViewModel`, the `pendingExternalUrl` path and the direct one).
+- eleven strings are dead (no `R.string.` and no `@string/` reference anywhere):
+  `action_reset_zoom`, `action_tabs`, `action_undo`, `bug_report_shake_hint`,
+  `default_browser_already`, `file_picker_title`, `settings_cookies`,
+  `settings_cookies_summary`, `settings_text_zoom`, `settings_text_zoom_summary`,
+  `tabs_closed_message`. Left in place: removing them is safe but unrelated to
+  this build, and two of them (`settings_cookies*`, `settings_text_zoom*`) look
+  like settings that were designed and never wired — worth a decision, not a
+  silent deletion.
+
+`versionCode` 38 / `versionName` 0.6.1.

@@ -80,7 +80,7 @@
     <string name="settings_desktop_mode">Desktop site by default</string>
     <string name="settings_desktop_mode_summary">Applies to new tabs</string>
     <string name="settings_open_links_new_tab">Open links in a new tab</string>
-    <string name="settings_open_links_new_tab_summary">Stored preference — not applied yet</string>
+    <string name="settings_open_links_new_tab_summary">Links you tap in other apps open in their own tab instead of replacing the page you were reading.</string>
 
     <!-- Downloads -->
     <string name="download_started">Downloading %1$s</string>
@@ -269,9 +269,7 @@
 
     <!-- About, contact and bug reports -->
     <string name="about_title">About</string>
-    <string name="about_developed_by">Developer &amp; Designed By: HEXORA-STUDIO</string>
     <string name="about_contact">Contact us</string>
-    <string name="about_contact_summary">%1$s</string>
     <string name="about_report_bug">Report a bug</string>
     <string name="about_report_bug_summary">Shake the phone at any time, or open the report from here.</string>
     <string name="about_version">Hexora %1$s (%2$d)</string>
@@ -304,39 +302,39 @@
     <string name="settings_section_tabs">Tabs &amp; links</string>
     <string name="settings_section_data">Data</string>
     <string name="settings_section_app">App</string>
-    <string name="settings_appearance_intro">How the app itself looks. Pages keep their own styling; the theme covers the toolbars, menus and lists.</string>
-    <string name="settings_privacy_intro">What is blocked before you ask, and what is only ever kept on this phone.</string>
+    <string name="settings_appearance_intro">Pick how the app itself looks. Web pages keep their own styling.</string>
+    <string name="settings_privacy_intro">What gets blocked before you touch anything, and what never leaves the phone.</string>
     <string name="settings_per_site_title">Per-site permissions</string>
     <string name="settings_credentials_title">Saved logins</string>
-    <string name="settings_data_intro">Everything here is stored on this device only. Nothing is synced to an account, because there is no account.</string>
-    <string name="settings_clear_data_scope">Clears cookies, cache, site storage and the browsing history on this phone. Bookmarks, saved logins and downloads are kept.</string>
-    <string name="settings_app_intro">Default-browser role, bug reports, and what this build is.</string>
-    <string name="settings_about_row_summary">What Hexora is, what it protects, and who builds it</string>
+    <string name="settings_data_intro">Everything here sits on this phone. Nothing syncs anywhere, because there is nowhere to sync to.</string>
+    <string name="settings_clear_data_scope">Cookies, cache, site storage and history go. Bookmarks, saved logins and downloads stay.</string>
+    <string name="settings_app_intro">Default browser, bug reports, and what build you are running.</string>
+    <string name="settings_about_row_summary">What this app is, what it protects, who makes it</string>
 
     <!-- About screen -->
     <string name="about_screen_title">About Hexora</string>
     <string name="about_tagline">Fast, private, yours</string>
-    <string name="about_what_title">What Hexora is</string>
-    <string name="about_what_body">Hexora is a full Android browser built on Mozilla\'s GeckoView — the same rendering engine Firefox uses — with its defaults chosen for privacy rather than for advertising. Pages are rendered by the engine; browsing history, bookmarks, downloads and saved logins stay in this phone\'s storage. There is no account to create, no sync service, and no analytics SDK anywhere in the build.</string>
-    <string name="about_protection_title">Protection that is on before you ask</string>
-    <string name="about_protection_trackers">Enhanced Tracking Protection blocks known trackers on every tab, private ones included.</string>
-    <string name="about_protection_https">HTTPS-Only Mode upgrades a connection to HTTPS where the site supports it and warns you where it cannot, instead of quietly sending the page in clear text.</string>
-    <string name="about_protection_cookies">Total Cookie Protection is always on: third-party cookies are partitioned per site, so a tracker cannot follow you from one site to the next.</string>
-    <string name="about_protection_permissions">Camera, microphone, location and notifications are only ever requested when a site actually asks for them, and every decision can be revoked in Site permissions.</string>
-    <string name="about_protection_private">Private tabs write no history, no bookmarks and no tab preview, and are never restored into the tab strip.</string>
-    <string name="about_data_title">Where your data lives</string>
-    <string name="about_data_passwords">Saved logins are encrypted field by field with AES-GCM using a key generated inside the Android Keystore. The key cannot be exported, the ciphertext never leaves this phone, and nothing is synced.</string>
-    <string name="about_data_local">History, bookmarks, downloads and site preferences live in a local database on this device. Clear browsing data removes what it says it removes; uninstalling the app removes everything.</string>
-    <string name="about_data_reports">Bug and crash reports are assembled on the phone and handed to your own mail app — you read them and press send. Hexora sends nothing on its own and has no server of its own to send it to; the report is device details, app state and counters, never page URLs.</string>
-    <string name="about_browsing_title">Browsing</string>
-    <string name="about_browsing_tabs">Every tab keeps its own engine state, so a tab switch — or coming back after Android closed the app — restores the page instead of reloading it. Tabs nobody has touched for a while are suspended, not discarded.</string>
-    <string name="about_browsing_tray">Tab tray with previews, bookmarks, history, downloads with live progress, find in page, PDF export and printing.</string>
-    <string name="about_browsing_site">Desktop site and zoom are remembered per site, the theme has four modes including the dark Hexora theme, and links can be set to open in a new tab.</string>
-    <string name="about_browsing_default">Hexora can take over the default-browser role, so links tapped in other apps open here instead of in an app you did not choose.</string>
-    <string name="about_engine_title">Engine and licenses</string>
-    <string name="about_engine_body">Pages are rendered by GeckoView, Mozilla\'s browser engine, distributed under the Mozilla Public License 2.0. The app itself is built with AndroidX, Jetpack Compose, Room and DataStore, distributed under the Apache License 2.0.</string>
-    <string name="about_developer_title">Developer</string>
+    <string name="about_what_title">What this app is</string>
+    <string name="about_what_body">Hexora is a browser for Android, and under the hood it runs Mozilla's GeckoView. That is the engine Firefox runs, so pages behave the way they should instead of like a stripped-down webview. On top of it I picked the defaults I would want myself: nothing to sign in to, nothing syncing in the background, and no analytics library counting taps. Your history, bookmarks, downloads and saved logins sit in this phone's storage and go no further.</string>
+    <string name="about_protection_title">Already on, before you change anything</string>
+    <string name="about_protection_trackers">Tracker blocking is on for every tab, private ones included. There is no server of mine deciding what to block.</string>
+    <string name="about_protection_https">If a site can do HTTPS, Hexora connects over HTTPS. If it cannot, you get a warning instead of the page quietly loading in plain text.</string>
+    <string name="about_protection_cookies">Third-party cookies are kept apart per site, so the same tracker cannot recognise you from one website to the next.</string>
+    <string name="about_protection_permissions">Camera, microphone, location and notifications only come up when a site actually asks. Every answer can be changed later under Site permissions.</string>
+    <string name="about_protection_private">Private tabs leave no history, no bookmarks and no thumbnail behind, and they do not come back when you reopen the app.</string>
+    <string name="about_data_title">Where your stuff lives</string>
+    <string name="about_data_passwords">Saved logins are encrypted field by field with AES-GCM, using a key Android keeps in the Keystore and will not hand out. The scrambled text never leaves the phone, and since there is no sync, there is nothing to leak.</string>
+    <string name="about_data_local">History, bookmarks, downloads and per-site settings live in a database on this device. Clearing browsing data wipes exactly what it says it wipes. Uninstalling takes the rest with it.</string>
+    <string name="about_data_reports">When something breaks you can shake the phone and a report gets written. It opens in your own mail app, you read it first, and you decide whether to send. There is no server on my end collecting anything, and the report is counters and device details, not the pages you were on.</string>
+    <string name="about_browsing_title">The everyday part</string>
+    <string name="about_browsing_tabs">Each tab keeps its own engine state, which is why switching back to a tab puts you where you left off instead of reloading. Tabs you have not touched in a while get suspended to save memory, and they come back the same way when you tap them.</string>
+    <string name="about_browsing_tray">There is a tab tray with previews, plus bookmarks, history, downloads with live progress, find in page, PDF export and printing.</string>
+    <string name="about_browsing_site">Desktop site and zoom are remembered per site, so you set them once and forget about it. Four themes, including the dark one.</string>
+    <string name="about_browsing_default">You can make Hexora the default browser, and then links from other apps open here instead of somewhere you did not pick.</string>
+    <string name="about_engine_title">Engine and licences</string>
+    <string name="about_engine_body">Pages are drawn by GeckoView, Mozilla's engine, which ships under the Mozilla Public License 2.0. The rest of the app is AndroidX, Jetpack Compose, Room and DataStore, under Apache 2.0.</string>
+    <string name="about_developer_title">Who makes it</string>
     <string name="about_made_by">Designed and built by HEXORA-STUDIO</string>
-    <string name="about_report_hint">Shake the phone at any time to prepare a report, or use the button above. You see exactly what will be sent before the mail app opens, and nothing is sent unless you press send.</string>
+    <string name="about_report_hint">Shaking the phone anywhere in the app starts the same report, so you do not have to come back to this screen for it. You will see the whole text before your mail app opens, and nothing leaves until you hit send.</string>
     <string name="about_build_footer">Hexora %1$s (build %2$d) · GeckoView engine</string>
 </resources>

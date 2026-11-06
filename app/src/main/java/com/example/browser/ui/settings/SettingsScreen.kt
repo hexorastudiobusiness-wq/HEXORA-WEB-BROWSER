@@ -5,6 +5,7 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,7 +35,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -55,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -365,6 +366,7 @@ private fun SearchPane(settings: BrowserSettingsState, viewModel: SettingsViewMo
                 .padding(top = 8.dp),
         )
         OutlinedButton(
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
             onClick = {
                 // Same rule the URL resolver applies: an absolute http(s)
                 // template containing %s. Invalid input is rejected here with
@@ -382,9 +384,13 @@ private fun SearchPane(settings: BrowserSettingsState, viewModel: SettingsViewMo
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
+                .padding(top = 8.dp)
+                .height(36.dp),
         ) {
-            Text(stringResource(R.string.action_save))
+            Text(
+                text = stringResource(R.string.action_save),
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
     }
 }
@@ -415,13 +421,9 @@ private fun PrivacyPane(
         checked = settings.httpsOnlyMode,
         onCheckedChange = { viewModel.setHttpsOnlyMode(it) },
     )
-    ListItem(
-        headlineContent = {
-            Text(stringResource(R.string.settings_total_cookie_protection))
-        },
-        supportingContent = {
-            Text(stringResource(R.string.settings_total_cookie_protection_summary))
-        },
+    SettingsRow(
+        label = stringResource(R.string.settings_total_cookie_protection),
+        summary = stringResource(R.string.settings_total_cookie_protection_summary),
     )
     SwitchRow(
         label = stringResource(R.string.settings_javascript),
@@ -431,12 +433,10 @@ private fun PrivacyPane(
     )
 
     SettingsSectionTitle(stringResource(R.string.settings_per_site_title))
-    OutlinedButton(
+    CompactButton(
+        text = stringResource(R.string.site_permissions_title),
         onClick = onOpenSitePermissions,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(stringResource(R.string.site_permissions_title))
-    }
+    )
 
     SettingsSectionTitle(stringResource(R.string.settings_credentials_title))
     SwitchRow(
@@ -445,12 +445,10 @@ private fun PrivacyPane(
         checked = settings.passwordManagerEnabled,
         onCheckedChange = { viewModel.setPasswordManagerEnabled(it) },
     )
-    OutlinedButton(
+    CompactButton(
+        text = stringResource(R.string.passwords_manage),
         onClick = onOpenPasswords,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(stringResource(R.string.passwords_manage))
-    }
+    )
 }
 
 @Composable
@@ -492,12 +490,10 @@ private fun DataPane(onRequestClear: () -> Unit) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(bottom = 12.dp),
     )
-    OutlinedButton(
+    CompactButton(
+        text = stringResource(R.string.menu_clear_data),
         onClick = onRequestClear,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(stringResource(R.string.menu_clear_data))
-    }
+    )
     Text(
         text = stringResource(R.string.settings_clear_data_scope),
         style = MaterialTheme.typography.bodySmall,
@@ -523,29 +519,24 @@ private fun AppPane(
     // About is a screen of its own now, not a heading at the bottom of this
     // page: one row that navigates, exactly like every other settings entry
     // that opens something.
-    ListItem(
-        headlineContent = { Text(stringResource(R.string.about_title)) },
-        supportingContent = {
-            Text(stringResource(R.string.settings_about_row_summary))
-        },
-        trailingContent = {
+    SettingsRow(
+        label = stringResource(R.string.about_title),
+        summary = stringResource(R.string.settings_about_row_summary),
+        onClick = onOpenAbout,
+        trailing = {
             Icon(
                 imageVector = Icons.Filled.ChevronRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
             )
         },
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onOpenAbout),
     )
 
-    OutlinedButton(
+    CompactButton(
+        text = stringResource(R.string.settings_default_browser),
         onClick = onSetDefaultBrowser,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(stringResource(R.string.settings_default_browser))
-    }
+    )
     Text(
         text = stringResource(R.string.settings_default_browser_summary),
         style = MaterialTheme.typography.bodySmall,
@@ -557,12 +548,10 @@ private fun AppPane(
     HorizontalDivider()
     Spacer(Modifier.height(16.dp))
 
-    OutlinedButton(
+    CompactButton(
+        text = stringResource(R.string.about_report_bug),
         onClick = onReportBug,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text(stringResource(R.string.about_report_bug))
-    }
+    )
     Text(
         text = stringResource(R.string.about_report_bug_summary),
         style = MaterialTheme.typography.bodySmall,
@@ -590,10 +579,92 @@ private fun AppPane(
 private fun SettingsSectionTitle(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.titleMedium,
+        style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(vertical = 8.dp),
+        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp),
     )
+}
+
+/**
+ * One settings row, compact on purpose.
+ *
+ * Material's `ListItem` and a stock `Switch` are sized for a full-width list
+ * on a tablet; in a phone pane that is ~230 dp wide next to the sidebar they
+ * were oversized — 16 sp labels, 52×32 dp switches and 16 dp of padding per
+ * row. These helpers keep the same information at 14 sp / 12 sp with a switch
+ * scaled to ~40×25 dp, so a section fits on one screen instead of scrolling
+ * for three rows.
+ */
+@Composable
+private fun SettingsRow(
+    label: String,
+    summary: String? = null,
+    onClick: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                },
+            )
+            .padding(vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier
+            .weight(1f)
+            .padding(end = 8.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (summary != null) {
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 1.dp),
+                )
+            }
+        }
+        trailing?.invoke()
+    }
+}
+
+/** The stock switch, one visual notch smaller, inside a box that reserves room for it. */
+@Composable
+private fun CompactSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Box(
+        modifier = Modifier.size(width = 44.dp, height = 28.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.scale(0.78f),
+        )
+    }
+}
+
+@Composable
+private fun CompactButton(text: String, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(36.dp),
+    ) {
+        Text(text = text, style = MaterialTheme.typography.labelLarge)
+    }
 }
 
 @Composable
@@ -606,14 +677,23 @@ private fun RadioRow(
         modifier = Modifier
             .fillMaxWidth()
             .selectable(selected = selected, onClick = onClick)
-            .padding(vertical = 6.dp),
+            .padding(vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = onClick)
+        Box(
+            modifier = Modifier.size(width = 34.dp, height = 28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            RadioButton(
+                selected = selected,
+                onClick = onClick,
+                modifier = Modifier.scale(0.82f),
+            )
+        }
         Text(
             text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(start = 8.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.padding(start = 6.dp),
         )
     }
 }
@@ -625,11 +705,11 @@ private fun SwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
-    ListItem(
-        headlineContent = { Text(label) },
-        supportingContent = summary?.let { { Text(it) } },
-        trailingContent = {
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+    SettingsRow(
+        label = label,
+        summary = summary,
+        trailing = {
+            CompactSwitch(checked = checked, onCheckedChange = onCheckedChange)
         },
     )
 }
