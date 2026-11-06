@@ -89,11 +89,16 @@ jobs:
 
       - name: Run upgrade smoke test
         run: |
+          : > verdicts.txt
           echo "=== fresh install of CURRENT build ==="
           adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
           adb shell am start -W -n com.example.browser/.MainActivity || true
           sleep 20
-          adb shell pidof com.example.browser && echo FRESH_CURRENT_RUNNING || echo FRESH_CURRENT_DEAD
+          if adb shell pidof com.example.browser; then
+            echo "FRESH_CURRENT_RUNNING" | tee -a verdicts.txt
+          else
+            echo "FRESH_CURRENT_DEAD" | tee -a verdicts.txt
+          fi
           adb logcat -d > fresh-logcat.txt
           adb uninstall com.example.browser || true
           adb logcat -c || true
@@ -107,11 +112,38 @@ jobs:
           adb install -r app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
           adb shell am start -W -n com.example.browser/.MainActivity || true
           sleep 20
-          adb shell pidof com.example.browser && echo UPGRADED_RUNNING || echo UPGRADED_DEAD
+          if adb shell pidof com.example.browser; then
+            echo "UPGRADED_RUNNING" | tee -a verdicts.txt
+          else
+            echo "UPGRADED_DEAD" | tee -a verdicts.txt
+          fi
           adb logcat -d > upgrade-logcat.txt
 
-      - name: Report crash traces in an issue
+      # This step used to run on every push (if: always()), so each run filed a
+      # report whether or not anything had gone wrong — and, because nothing
+      # closed them, the issue list filled with reports whose whole content was
+      # "logcat missing" while the emulator had never booted. An issue is only
+      # worth creating when there is a crash or a dead process to look at.
+      - name: Decide whether there is anything to report
+        id: verdict
         if: always()
+        run: |
+          # cat, not grep -l: grep exits non-zero when *any* named file is
+          # missing, so a run that captured one log and not the other would
+          # have been read as "no crash" even when the log it did capture holds
+          # a FATAL EXCEPTION.
+          found="false"
+          if cat fresh-logcat.txt upgrade-logcat.txt 2>/dev/null | grep -q "FATAL EXCEPTION"; then
+            found="true"
+          fi
+          if cat verdicts.txt 2>/dev/null | grep -qE "FRESH_CURRENT_DEAD|UPGRADED_DEAD"; then
+            found="true"
+          fi
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+          echo "crash-or-dead-app: $found"
+
+      - name: Report crash traces in an issue
+        if: always() && steps.verdict.outputs.found == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
