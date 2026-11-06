@@ -53,13 +53,10 @@ planned. The key therefore lives only in:
    `app/build.gradle.kts`. Update version references in `README.md` and
    `AGENTS.md`.
 2. Commit and push; wait for the **Build debug APK** CI to go green.
-3. Start the signed build:
-   - **Preferred (once the workflow is on the default branch):**
-     Actions → **Build signed release** → Run workflow.
-   - **On a non-default working branch:** append a line to the marker
-     file `signing/build-release.request` and push. That triggers exactly
-     one signed build (manual dispatch is not listed for workflows that
-     only exist on a side branch).
+3. Start the signed build: Actions → **Build signed release** → Run
+   workflow, with `main` selected. The job refuses to run on any other ref
+   (`if: github.ref == 'refs/heads/main'`), because the keystore is decoded
+   on the runner: it only ever signs code that is genuinely on `main`.
 4. In `.github/workflows/build-release-apk.yml`, CI will:
    - fail fast if either secret is missing,
    - decode the keystore into `$RUNNER_TEMP` (deleted with the runner),
@@ -107,21 +104,45 @@ Expected, and **not** a signing problem:
 | Release workflow fails at "Check release signing secrets" | A secret is missing or its **name** differs. Secret names must match the table above exactly. Values are never shown by GitHub — if unsure, delete and recreate the secret from the owner's offline backup. |
 | Signing fails / keystore cannot be opened | The Base64 secret is corrupted (extra whitespace is usually tolerated by the decoder, but a truncated paste is not). Recreate `..._KEYSTORE_BASE64` from `keystore-base64.txt` in the backup. |
 | "App not installed" / package conflict on the phone | The other build flavor (debug vs release) is installed. Uninstall it first. |
-| The **Build signed release** workflow is not listed in Actions | Manual dispatch requires the workflow file on the **default branch**. Merge it there, or use the `signing/build-release.request` marker on the working branch. |
+| The **Build signed release** workflow is not listed in Actions | Manual dispatch requires the workflow file on the **default branch**. Merge it there first; releases are deliberately not buildable from an unmerged branch any more. |
 | Owner lost the secrets | Re-add them from the offline backup ZIP (`keystore-base64.txt` + `password.txt`). |
 | Owner lost the backup **and** the secrets | The signing identity is gone. A new key can be generated (below), but existing installs can **never** be updated — every user must uninstall/reinstall, and a published Play app cannot switch upload keys outside Play's own reset process. State this consequence and get explicit owner confirmation before doing anything. |
 
 ## Generating a key — only if there is no usable key anymore
 
-`.github/workflows/generate-release-key.yml` creates a fresh keystore on
-a runner and offers it as a 1-day workflow artifact together with
-ready-to-paste secret values. It was used **once** to create the current
-key.
+The generator workflow that created this key has been **removed from the
+repository**. It created a keystore on a runner and published it as a workflow
+artifact, which was acceptable while the repository was private and became a
+liability the moment it was public: anyone able to open the run could download
+the key. The owner already holds the key and its offline backup, so the workflow
+had no remaining job.
 
-**Never rerun it while the current key is in use.** It always creates a
-*different* key; swapping keys breaks updates for every installed
-device. Only use it when the owner has explicitly accepted abandoning
-the current signing identity (e.g. key irrecoverably lost, or before
-any public distribution). Afterwards: replace both secrets with the new
-values, replace the offline backup, and delete the generator workflow
-run so the key does not linger on GitHub's artifact storage.
+If a new key is ever genuinely needed, generate it **outside** GitHub and never
+publish the file:
+
+```bash
+keytool -genkeypair -v -keystore hexora-release.p12 -storetype PKCS12 \
+  -alias hexora-release -keyalg RSA -keysize 2048 -validity 36500
+```
+
+Then, with the owner's explicit confirmation that the old identity is being
+abandoned (existing installs can never be updated afterwards): replace both
+secrets with the new values, replace the offline backup, and state the
+consequence in writing.
+
+## Forks, copies and other people's builds
+
+GitHub secrets are **per repository**. They are not copied by a fork, not
+inherited by a clone, and not passed to a workflow run triggered by a pull
+request from a fork. A fork of this repository therefore:
+
+- cannot read, use or reproduce the release key — its own Actions run with its
+  own (empty) secret store, and `Build signed release` fails fast at
+  "Check release signing secrets";
+- can still build **debug** APKs freely (they are signed with a throwaway debug
+  key), which is enough to run a rebranded version on a phone;
+- can publish its own release build only after adding **its own** keystore as
+  secrets in **its own** repository.
+
+The one thing a fork cannot do is produce an APK that Android will accept as an
+update to this app, because that requires this key (or Play App Signing).
