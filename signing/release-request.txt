@@ -7,3 +7,5 @@ the touch itself is the trigger, so bump this line each time a new release is
 cut.
 
 Second release attempt: 1.0.0 (the first run reached the signature check and stopped there).
+
+Third cut of 1.0.0: the release notes now carry the signing certificate.

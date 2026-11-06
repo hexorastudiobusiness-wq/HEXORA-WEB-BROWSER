@@ -1212,3 +1212,50 @@ secrets, clones do not carry them, and no workflow here runs on
 `pull_request` (let alone `pull_request_target`), so a pull request from a fork
 cannot reach them. A fork's own release build fails at "Check release signing
 secrets" until its owner adds **their own** key.
+
+## 32. 1.0.0 — the first release that is actually shipped as one
+
+Three things stood between `0.6.4` and a build that can be called official:
+a version number that still read like a work in progress, an `applicationId`
+of `com.example.browser`, and a release pipeline that could not prove what it
+had signed.
+
+- Version is **1.0.0**, `versionCode 42`.
+- `applicationId` is now **`com.hexora.browser`**. `com.example.*` is a
+  placeholder that Google Play rejects outright, and an official build has no
+  business carrying one. The source tree keeps the `com.example.browser`
+  namespace: moving a few hundred files would gain nothing a release can see.
+  Consequence the owner needs to know: the install identity changes, so 1.0.0
+  installs beside an older build rather than over it — which, given the
+  signature change, is what would have happened anyway.
+- `about_limits_body` no longer names a version in prose ("This is 0.6.x…").
+  The footer already prints the real one, and prose that names a version goes
+  stale silently.
+- The About/limits text stays honest: no claim of syncing, no claim that
+  nothing leaks, and the note that a site you are signed in to still sees you.
+
+Publishing:
+
+- `build-release-apk.yml` runs on `main` only, either by dispatch or by a push
+  that touches `signing/release-request.txt` (dispatch is not always available;
+  the marker exists so a release is still one reviewed commit on `main`).
+- APK only. `bundleRelease` is out until a store upload is on the table, and
+  the ABI split is already limited to arm64-v8a, so there is nothing to trim.
+- The signature is verified on the runner *after* the build and before
+  publishing: `apksigner verify --print-certs` must succeed, and a certificate
+  whose DN contains `CN=Android Debug` fails the job. The certificate is then
+  written into the release notes so anyone can compare it with the offline
+  backup before installing.
+- Two bugs of my own were caught by that check. The first 1.0.0 run built and
+  signed the APK correctly and then failed in the verify step, because a
+  recursive `find` sorted `lib/apksigner.jar` after the `apksigner` script and
+  the step tried to execute a jar. The same step also piped through
+  `grep -m1`, which exits at the first match, kills `apksigner` with SIGPIPE,
+  and — under `pipefail` — turns a passing check into a failed step. Both are
+  fixed; the fix is depth-limited `find` and `sed`.
+- Debug builds no longer publish from `main` pushes, so a merge cannot leave a
+  `debug-<sha>` prerelease behind. Debug builds are for `arena/**` branches.
+
+Verified for `v1.0.0`: asset `app-arm64-v8a-release.apk`, 107,163,973 bytes,
+marked Latest, not a prerelease; the run's signature step passed, which means a
+real signer was found and it was not the debug certificate.

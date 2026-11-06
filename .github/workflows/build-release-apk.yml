@@ -109,6 +109,19 @@ jobs:
           case "$DN" in
             *"CN=Android Debug"*) echo "::error::APK is debug-signed"; exit 1 ;;
           esac
+          # The certificate goes into the release notes, so anyone can compare
+          # it with the fingerprint kept in the offline key backup before
+          # trusting an install.
+          {
+            echo
+            echo "Signing certificate of the attached APK, read back from the file:"
+            echo
+            echo '```'
+            "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/*.apk \
+              | sed -n '/certificate DN/p;/SHA-256 digest/p'
+            echo '```'
+          } > cert-info.md
+          cat cert-info.md
 
       - name: Remove temporary keystore
         if: always()
@@ -131,25 +144,28 @@ jobs:
           set -euo pipefail
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           TAG="v$VERSION"
-          NOTES=$(cat <<'NOTES_EOF'
+          cat > notes.md <<'NOTES_EOF'
           Hexora Browser 1.0.0 — the first official release.
 
-          Built from `main` and signed with Hexora's release key. The APK is for arm64-v8a devices (every 64-bit Android phone from the last several years).
+          Built from `main` and signed with Hexora's release key. The APK is for arm64-v8a devices, meaning every 64-bit Android phone from the last several years.
 
-          Installing over an earlier build: if what you have was signed with a different key — any of the older debug builds — Android will refuse the update. Uninstall that one first; your bookmarks, history and saved logins are removed with it.
+          Installing over an earlier build: if what you have was signed with a different key — any of the older debug builds — Android refuses the update. Uninstall that one first; its bookmarks, history and saved logins are removed with it.
           NOTES_EOF
-          )
+          if [ -f cert-info.md ]; then
+            cat cert-info.md >> notes.md
+          fi
+          cat notes.md
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" \
               app/build/outputs/apk/release/*.apk \
               --clobber
-            gh release edit "$TAG" --notes "$NOTES"
+            gh release edit "$TAG" --notes-file notes.md
           else
             gh release create "$TAG" \
               app/build/outputs/apk/release/*.apk \
               --target "$GITHUB_SHA" \
               --title "Hexora Browser $VERSION" \
-              --notes "$NOTES"
+              --notes-file notes.md
           fi
 
       - name: Report failure log in an issue
