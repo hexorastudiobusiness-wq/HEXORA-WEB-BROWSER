@@ -801,13 +801,6 @@ class GeckoBrowserEngine(
         /** Grace after a paint reset on the visible tab before the display is re-acquired. */
         const val PAINT_RESET_REPAIR_MS = 350L
 
-        /**
-         * A load error that arrives this soon after a *successful* page stop,
-         * for a different URI than the one on screen, belongs to a redirect
-         * that already lost the race (Google sign-in is a chain of them).
-         */
-        const val STALE_ERROR_WINDOW_MS = 1500L
-
         private val RUNTIME_LOCK = Any()
 
         @Volatile
@@ -2633,6 +2626,16 @@ internal class GeckoBrowserSession(
     private companion object {
         const val TAG = "GeckoBrowserSession"
         const val MAX_THUMBNAIL_WIDTH = 480
+
+        /**
+         * A load error that arrives this soon after a *successful* page stop,
+         * for a different URI than the one on screen, belongs to a redirect
+         * that already lost the race (Google sign-in is a chain of them).
+         * It lives in this class's companion because that is where the
+         * `onLoadError` that reads it lives — the previous placement in the
+         * engine's companion is what made 0.5.8 fail to compile.
+         */
+        const val STALE_ERROR_WINDOW_MS = 1500L
 
         /** HTTP header names are case-insensitive. */
         fun Map<String, String>.headerValue(name: String): String? =
