@@ -1181,3 +1181,34 @@ other would have been read as "no crash" while the log it did capture held the
 trace. It now pipes both files through `cat`, and the six cases that matter
 (nothing captured, both launches alive, dead process, crash in either log,
 clean logs) were checked by hand.
+
+---
+
+## 31. Release signing — closing the two doors that did not need to be open
+
+The repository is public and the release key lives in its Actions secrets. Two
+workflow triggers could nonetheless get that key onto a runner from code that
+nobody had reviewed:
+
+- `build-release-apk.yml` ran on **any `arena/**` push that touched
+  `signing/build-release.request`**. Anyone holding a write token could push
+  such a branch — with whatever change they liked in `app/build.gradle.kts` —
+  and the job would decode the keystore and build. That is one modified Gradle
+  task away from the key ending up in a log or a published APK.
+- `generate-release-key.yml` generated a keystore and published it as a
+  **workflow artifact**, which was fine while the repository was private and is
+  not fine now: on a public repository, anyone who can open the run can
+  download the artifact.
+
+Both are gone. The release workflow is dispatch-only, refuses any ref other
+than `refs/heads/main`, and the generator has been deleted from the repository
+(generate a replacement offline if the identity is ever abandoned; the file must
+never be published). `signing/README.md`, `AGENTS.md` §8 and
+`ARCHITECTURE.md` were updated to match, and the two `.request` marker files,
+which no longer trigger anything, were removed.
+
+What the secrets are not exposed to, for the record: forks do not inherit
+secrets, clones do not carry them, and no workflow here runs on
+`pull_request` (let alone `pull_request_target`), so a pull request from a fork
+cannot reach them. A fork's own release build fails at "Check release signing
+secrets" until its owner adds **their own** key.

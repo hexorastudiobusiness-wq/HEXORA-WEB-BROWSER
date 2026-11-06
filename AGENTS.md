@@ -255,21 +255,18 @@ The essentials, so nobody has to argue about this again:
   means a new identity and existing installs cannot upgrade. Treat any
   request to "just make a new key" as a last-resort, owner-confirmed
   decision with that consequence stated plainly.
-- `.github/workflows/generate-release-key.yml` was the one-time bootstrap
-  that created this key on a runner. **Never rerun it** while the current
-  key is in use: it generates a *different* key. It may only be used again
-  if the owner deliberately abandons the current signing identity (e.g.
-  before any public distribution) and then replaces the secrets and the
-  backup with the new ones.
+- The key-generator workflow has been **deleted from the repository**. It
+  produced a keystore and published it as a workflow artifact, which is
+  unacceptable on a public repo. Generate a replacement offline, if the owner
+  ever abandons the current identity, and never publish the file.
 - Shipping a signed release:
   1. Bump `versionName` and **`versionCode`** (must increase) in
      `app/build.gradle.kts`; update the docs' version references.
   2. Commit and push; wait for the debug CI to go green.
   3. Run the release build: **Actions → Build signed release → Run
-     workflow**. (Manual dispatch is only listed once the workflow exists
-     on the default branch. On a non-default working branch, instead
-     append a line to the marker file `signing/build-release.request` and
-     push — that triggers one signed build.)
+     workflow**, on `main`. The job refuses any other ref, so a release can
+     only be built from merged code — the keystore is decoded on that
+     runner.
   4. Confirm in the run: "Verify APK signatures" passed (it runs
      `apksigner verify` on every APK and `jarsigner -verify` on the AAB),
      and the GitHub Release `v<versionName>` contains all three APKs plus

@@ -574,9 +574,8 @@ A change is done only when:
   keystore from GitHub Actions secrets into the runner temp directory,
   signs, verifies every APK with `apksigner` (and the AAB with
   `jarsigner`), and publishes GitHub Release `v<versionName>` with all
-  APKs and the AAB. Manual dispatch requires the workflow on the default
-  branch; on a working branch, pushing a change to the marker file
-  `signing/build-release.request` triggers one signed build.
+  APKs and the AAB. It is dispatch-only and refuses to run on anything but
+  `main`, so the keystore can only ever sign code that has been merged.
 - **The release key never enters this repository.** Full rules, the exact
   secret names, backup/loss consequences, and troubleshooting are
   canonical in `signing/README.md` and summarized in `AGENTS.md` §8. Any
