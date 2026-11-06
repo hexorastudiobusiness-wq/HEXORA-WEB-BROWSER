@@ -381,6 +381,15 @@ class GeckoBrowserEngine(
     /** Invalidates an older resume check when a new one starts. */
     private var resumeCheckToken = 0
 
+    /** Invalidates an older tab-switch paint check when a new switch happens. */
+    private var displayCheckToken = 0
+
+    /** How many times a tab's display had to be re-acquired after a switch. */
+    internal var activationRepairs: Int = 0
+
+    /** How many times a tab switch re-bound its session (every switched-to tab). */
+    internal var switchRebinds: Int = 0
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /**
@@ -436,6 +445,7 @@ class GeckoBrowserEngine(
             contentBinds++
             session.applyOwnZoom()
             forceShow(host, surface)
+            onSurfaceShown(session)
             return
         }
         // `present` runs on every UI state emission (scroll, title, progress),
@@ -445,7 +455,103 @@ class GeckoBrowserEngine(
         if (becameActive) {
             session.applyOwnZoom()
             forceShow(host, surface)
+            onSurfaceShown(session)
         }
+    }
+
+    /**
+     * Called every time a tab's surface is shown again, i.e. on every tab
+     * switch.
+     *
+     * A hidden tab is `INVISIBLE`, and the platform destroys the drawing
+     * surface of an invisible view. On the way back GeckoView does not always
+     * rebuild its compositor against the new surface, and the pane stays black
+     * while the document, the session and the load are all perfectly fine —
+     * which is why reload, refresh and tab switching never helped and only a
+     * trip through the tab tray did (the tray detaches and re-attaches the
+     * whole content hierarchy).
+     *
+     * So the repair the tray performed by hand is performed here, in the same
+     * frame as the switch:
+     *  1. the session is released and re-bound to this tab's own surface;
+     *  2. if Gecko still reports no painted content at +700 ms and +2200 ms
+     *     (`painted` is cleared by `onPaintStatusReset`, set by
+     *     `onFirstComposite`), the surface is detached and re-attached outright;
+     *  3. both paths are counted (`switchRebinds`, `switchRepairs`) and written
+     *     to `AppLog`, so a bug report says whether the repair ran.
+     *
+     * All of it is a repaint of the live session: no reload, no new session,
+     * no history or scroll change.
+     */
+    private fun onSurfaceShown(session: GeckoBrowserSession) {
+        val token = ++displayCheckToken
+        // Re-bind the session to this tab's own surface every time the tab comes
+        // to the front. A hidden tab is INVISIBLE, the platform destroys its
+        // drawing surface, and GeckoView does not always rebuild the compositor
+        // for the new one: the pane stays black while the document is perfectly
+        // alive. Releasing and re-binding the session is the same operation the
+        // tab tray performed by hand, minus the trip to the tray.
+        if (session.lostDisplay) {
+            AppLog.event("tab switch: paint was lost while hidden, re-binding")
+        }
+        // A tab that has never composed is left alone: its surface was just
+        // created for it and its first load will paint.
+        if (session.hasPainted && session.reacquireDisplay()) switchRebinds++
+        // "Painted" is Gecko's own answer: a frame exists for this tab, or it
+        // said the painted content is gone (onPaintStatusReset). If it still
+        // says the latter shortly after the switch, the surface is dead and is
+        // re-attached outright.
+        mainHandler.postDelayed(
+            { verifyShown(token, session, lastChance = false) },
+            PAINT_ACTIVATION_GRACE_MS,
+        )
+        mainHandler.postDelayed(
+            { verifyShown(token, session, lastChance = true) },
+            PAINT_ACTIVATION_LATE_MS,
+        )
+    }
+
+    /** No painted content after a switch: escalate from re-bind to re-attach. */
+    private fun verifyShown(
+        token: Int,
+        session: GeckoBrowserSession,
+        lastChance: Boolean,
+    ) {
+        if (token != displayCheckToken) return
+        if (activeSession !== session) return
+        // A tab that never composed yet is still loading; leave it alone.
+        if (!session.hasPainted) return
+        if (session.painted) return
+        val host = contentContainer ?: return
+        if (lastChance) {
+            // The re-bind and the first re-attach both left the tab unpainted.
+            // This is the state that used to need a manual trip to the tray.
+            AppLog.event("tab switch: pane still unpainted after re-attach")
+        }
+        fullReattach(session, host)
+    }
+
+    /**
+     * Removes and re-adds the tab's host inside the content container: the
+     * surface is detached and attached again, the session is released and
+     * re-bound by the view's attach callback. This is literally what opening
+     * the tab tray and selecting the tab did by hand.
+     */
+    private fun fullReattach(session: GeckoBrowserSession, host: FrameLayout) {
+        val tabHost = session.ownHost() as? SwipeableHostLayout ?: return
+        if (tabHost.parent !== host) return
+        host.removeView(tabHost)
+        host.addView(
+            tabHost,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        forceShow(host, tabHost)
+        contentBinds++
+        activationRepairs++
+        AppLog.event("tab switch: surface re-attached (still no frame)")
     }
 
     /** Makes [surface] the only visible child of [host]. */
@@ -601,6 +707,8 @@ class GeckoBrowserEngine(
         append(" paintResets=").append(paintStatusResets)
         append(" firstPaint=").append(firstComposites)
         append(" recoveries=").append(paintRecoveries)
+        append(" switchRebinds=").append(switchRebinds)
+        append(" switchRepairs=").append(activationRepairs)
         // Text zoom is process-wide; this is the value actually pushed to the
         // runtime, plus how many tab surfaces exist right now.
         append(" zoom=").append(
@@ -662,6 +770,12 @@ class GeckoBrowserEngine(
 
         /** A load that produced no frame in this window is re-acquired. */
         const val PAINT_RELOAD_GRACE_MS = 1500L
+
+        /** After a tab switch, how long a lost paint has to recover by itself. */
+        const val PAINT_ACTIVATION_GRACE_MS = 700L
+
+        /** Second, later check: some devices report the reset only at first composite. */
+        const val PAINT_ACTIVATION_LATE_MS = 2200L
 
         private val RUNTIME_LOCK = Any()
 
@@ -963,6 +1077,57 @@ internal class GeckoBrowserSession(
     /** This tab's own GeckoView and its swipe host (created on demand). */
     private var contentHost: SwipeableHostLayout? = null
     private var contentSurface: HexoraGeckoView? = null
+
+    /**
+     * Paint bookkeeping for this tab alone.
+     *
+     * A tab that is hidden is set INVISIBLE, which is what makes the platform
+     * destroy its drawing surface; when the tab is shown again the compositor
+     * has to be attached to the new surface. Gecko says whether that happened
+     * with `onPaintStatusReset` (the painted content is gone) and
+     * `onFirstComposite` (a frame exists). Nothing else in the app can tell a
+     * repainted tab from a black one, so these three numbers are the signal the
+     * activation repair below is driven by — per session, never global.
+     */
+    @Volatile
+    internal var hasPainted = false
+
+    /** A frame arrived after the last paint-status reset. */
+    @Volatile
+    internal var painted = false
+
+    /** Frames composed for this tab (monotonic, for the repair check). */
+    @Volatile
+    internal var frameCount = 0
+
+    /** Paint-status resets reported for this tab (monotonic). */
+    @Volatile
+    internal var resetCount = 0
+
+    /** True when Gecko itself said the displayed content is gone and nothing replaced it. */
+    internal val lostDisplay: Boolean
+        get() = hasPainted && !painted
+
+    internal fun ownHost(): View? = contentHost
+
+    /**
+     * Re-acquires this tab's display: `releaseSession()` then `setSession()`
+     * on this tab's own surface. This is exactly the repair the owner performed
+     * by hand every time — the tab tray disposed and re-attached the content
+     * view, which re-binds the session and rebuilds the compositor. It is a
+     * repaint of the live document: no load, no history, no scroll change.
+     */
+    internal fun reacquireDisplay(): Boolean {
+        val view = contentSurface ?: return false
+        if (closed || !geckoSession.isOpen) return false
+        runCatching { view.releaseSession() }
+        val rebound = runCatching { view.setSession(geckoSession) }.isSuccess
+        if (rebound) {
+            installAutofillDelegate()
+            painted = false
+        }
+        return rebound
+    }
 
     /**
      * Creates this tab's own surface once and returns it.
@@ -2241,10 +2406,18 @@ internal class GeckoBrowserSession(
 
     private val contentDelegate = object : GeckoSession.ContentDelegate {
         override fun onFirstComposite(session: GeckoSession) {
+            hasPainted = true
+            painted = true
+            frameCount++
             engine.notifyFirstComposite(session)
         }
 
         override fun onPaintStatusReset(session: GeckoSession) {
+            // Gecko's own words: the painted content of this tab is no longer
+            // displayed. The next frame decides whether the compositor
+            // recovered by itself.
+            resetCount++
+            painted = false
             engine.notifyPaintStatusReset(session)
         }
 

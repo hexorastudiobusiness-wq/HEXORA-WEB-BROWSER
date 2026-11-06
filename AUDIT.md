@@ -654,3 +654,51 @@ frame and re-acquires the display (`setSession` on the tab's surface, or
 in that path reloads a healthy page.
 
 `onBrowserResumed()` also treats a referenced-but-closed session as dead now.
+
+## 0.5.8 (cont.) — black tabs on a plain tab switch, no minimise involved
+
+Owner's report: switching quickly between three tabs left tabs 2 and 3 black.
+Not minimised, not suspended, not refreshed — and, exactly like the earlier
+reports, **nothing in the browser fixed it; only selecting the tab from the tab
+tray did.**
+
+That last sentence is the whole diagnosis. The tray is not magic: leaving the
+browser route disposes the `AndroidView`, which detaches the content container,
+which detaches every tab surface (`HexoraGeckoView.onDetachedFromWindow` →
+`releaseSession()`), and returning re-attaches them (`onViewAttached` →
+`setSession()`). In other words the cure has always been *"detach the surface
+and re-bind the session"*. Everything else — reload, tab switch, the error
+card's Retry — never touches the surface/session binding, so it cannot help.
+
+Why a plain switch leaves the pane black: `forceShow()` hides every non-active
+tab with `View.INVISIBLE`. A hidden surface is destroyed by the platform. When
+the tab is shown again it gets a *new* platform surface, and GeckoView does not
+re-create its compositor for it in every case — the document is alive, the
+session is alive, nothing is loading, and the pane shows nothing. Gecko says so
+itself: `onPaintStatusReset` (the painted content is no longer displayed) with
+no `onFirstComposite` behind it. No previous release had any code that listened
+to that per tab, which is why six releases of "fixes" never touched the real
+thing.
+
+0.5.8 now does three things on every tab activation, in this order:
+
+1. **Re-bind, always.** `present()` → `onSurfaceShown()` → `reacquireDisplay()`
+   (`releaseSession()` + `setSession()` on that tab's own surface). This is the
+   tray cure applied silently at the moment of the switch. It is a repaint of
+   the live session: no load, no new session, no scroll/history change.
+2. **Escalate if Gecko still says the pane is empty.** At 700 ms and 2200 ms
+   the tab's own paint state is read (`painted` = a frame exists;
+   `onPaintStatusReset` clears it). If it is still empty, the tab's host is
+   removed from the container and added again — the literal tray round-trip.
+3. **Say it out loud.** Two new counters in the diagnostics line, read from a
+   bug report: `switchRebinds=` (how many switches re-bound their session) and
+   `switchRepairs=` (how many needed the re-attach). Events are written to
+   `AppLog` as well.
+
+The truthful limit: step 1 assumes GeckoView starts compositing against the new
+surface once the session is re-bound. If it does not, step 2 does the full
+re-attach within a second. What is *not* claimed: that every black pane is gone
+on every device — the verification has to come from the device, and the counters
+above are what will say whether the repair ran at all (`switchRebinds` growing
+while tabs stay visible) or whether the pane is still empty (`switchRepairs`
+growing, or the "still unpainted" log line).
