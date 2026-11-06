@@ -8,6 +8,8 @@ name: Probe builds
 #            signed with the debug key so it installs over an existing debug app
 #            and keeps its data
 #   probe-B  debug build type, new applicationId (com.hexora.browser)
+#   probe-C  debug build type, a third applicationId (com.hexora.probe), so it
+#            installs next to the 1.0.0 build without uninstalling anything
 #
 # Neither is signed with the release key: these are for a phone, not for a
 # release page.
@@ -59,12 +61,19 @@ jobs:
             -PhexoraApplicationId=com.hexora.browser --stacktrace 2>&1 | tee gradle-b.log
           cp app/build/outputs/apk/debug/app-arm64-v8a-debug.apk probe-B-debug-newid.apk
 
+      - name: Build probe C — debug build type, installs alongside 1.0.0
+        run: |
+          set -o pipefail
+          ./gradlew assembleDebug \
+            -PhexoraApplicationId=com.hexora.probe --stacktrace 2>&1 | tee gradle-c.log
+          cp app/build/outputs/apk/debug/app-arm64-v8a-debug.apk probe-C-debug-sidebyside.apk
+
       - name: Read back what was actually built
         run: |
           set -euo pipefail
           AAPT=$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt2 | sort -V | tail -1)
           {
-            for apk in probe-A-release-oldid.apk probe-B-debug-newid.apk; do
+            for apk in probe-A-release-oldid.apk probe-B-debug-newid.apk probe-C-debug-sidebyside.apk; do
               echo "### $apk"
               ls -l "$apk"
               "$AAPT" dump badging "$apk" | sed -n '1p;/^package:/p'
@@ -88,6 +97,8 @@ jobs:
           - `probe-B-debug-newid.apk` — debug build type, applicationId
             `com.hexora.browser`. Needs the 1.0.0 build uninstalled first,
             because the signing key differs.
+          - `probe-C-debug-sidebyside.apk` — debug build type, applicationId
+            `com.hexora.probe`. Installs next to 1.0.0, nothing to uninstall.
 
           Neither build is signed with the release key.
           NOTES_EOF
@@ -114,7 +125,7 @@ jobs:
             echo "Probe build failed for commit $GITHUB_SHA (run $GITHUB_RUN_ID)."
             echo
             echo '```text'
-            cat setup.log gradle-a.log gradle-b.log 2>/dev/null | tail -n 250
+            cat setup.log gradle-a.log gradle-b.log gradle-c.log 2>/dev/null | tail -n 250
             echo '```'
           } > failure-report.md
           gh issue create --title "$TITLE" --body-file failure-report.md
