@@ -29,7 +29,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.example.browser.R
 import com.example.browser.data.settings.SitePreferencesStore
 import kotlin.math.roundToInt
 
@@ -170,9 +174,15 @@ fun SiteZoomPanel(
                             },
                     )
                 }
+                // The button resets the site's zoom; its visible text is the
+                // value it resets to, which tells a screen reader "100%" and
+                // nothing about what tapping it does.
+                val resetLabel = stringResource(R.string.action_reset_zoom)
                 TextButton(
                     onClick = onReset,
-                    modifier = Modifier.height(32.dp),
+                    modifier = Modifier
+                        .height(32.dp)
+                        .semantics { contentDescription = resetLabel },
                 ) {
                     Text(
                         text = "100%",

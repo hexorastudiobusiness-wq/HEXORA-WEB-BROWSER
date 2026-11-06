@@ -116,6 +116,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -131,6 +133,7 @@ import com.example.browser.browser.PageMediaKind
 import com.example.browser.browser.SitePermissionKind
 import com.example.browser.browser.WebPromptKind
 import com.example.browser.ui.components.AddressBar
+import com.example.browser.ui.theme.logoColorFilter
 import com.example.browser.util.HomeScreenShortcut
 import kotlinx.coroutines.delay
 
@@ -1336,16 +1339,22 @@ private fun StartPage(
                     .padding(top = 36.dp, bottom = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Box(modifier = Modifier.size(72.dp)) {
+                // The logo is the owner's own lockup — mark *and* the name —
+                // so it is drawn whole (Fit, never Crop) and the duplicate
+                // "Hexora" heading below it is gone.
+                Box(modifier = Modifier.size(148.dp)) {
                     Image(
                         painter = painterResource(R.drawable.hexora_logo),
                         contentDescription = stringResource(
                             R.string.start_logo_content_description,
                         ),
-                        contentScale = ContentScale.Crop,
+                        contentScale = ContentScale.Fit,
+                        // Paper is ink on stock: a blue-and-amber tile on it
+                        // is the one graphic the theme is supposed to remove.
+                        colorFilter = logoColorFilter(),
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(18.dp)),
+                            .clip(RoundedCornerShape(30.dp)),
                     )
                     if (state.isPrivate) {
                         Surface(
@@ -1367,14 +1376,10 @@ private fun StartPage(
                     }
                 }
                 Text(
-                    text = stringResource(R.string.start_title),
-                    style = MaterialTheme.typography.headlineMedium,
-                    modifier = Modifier.padding(top = 14.dp),
-                )
-                Text(
                     text = stringResource(R.string.start_subtitle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 14.dp),
                 )
                 if (state.tabs.isEmpty()) {
                     // Every tab is closed and there is no address bar on
@@ -1955,8 +1960,20 @@ private fun BrowserBottomBar(
                 )
             }
 
-            // Tabs button with a Firefox-style tab counter.
-            IconButton(modifier = Modifier.size(buttonSize), onClick = onOpenTabs) {
+            // Tabs button with a Firefox-style tab counter. The count is
+            // drawn as text inside a clickable container, and clickable
+            // merges its children's semantics — so without an explicit label
+            // TalkBack announces a bare digit and never says what the button
+            // opens. The label carries the count for the same reason.
+            val tabsLabel = stringResource(R.string.action_tabs)
+            IconButton(
+                modifier = Modifier
+                    .size(buttonSize)
+                    .semantics {
+                        contentDescription = "$tabsLabel, ${state.tabs.size}"
+                    },
+                onClick = onOpenTabs,
+            ) {
                 Box(
                     modifier = Modifier
                         .size(26.dp)

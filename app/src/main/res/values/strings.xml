@@ -73,14 +73,14 @@
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_hexora">Hexora Mode</string>
+    <string name="theme_paper">Paper</string>
+    <string name="theme_aurora">Aurora</string>
     <string name="settings_javascript">JavaScript</string>
-    <string name="settings_javascript_summary">Applies to new browsing sessions after restart</string>
-    <string name="settings_cookies">Cookies</string>
-    <string name="settings_cookies_summary">Stored preference — per-site cookie controls are planned</string>
+    <string name="settings_javascript_summary">Takes effect on the next page load; a page that is already open keeps its current setting until it reloads.</string>
     <string name="settings_desktop_mode">Desktop site by default</string>
     <string name="settings_desktop_mode_summary">Applies to new tabs</string>
     <string name="settings_open_links_new_tab">Open links in a new tab</string>
-    <string name="settings_open_links_new_tab_summary">Stored preference — not applied yet</string>
+    <string name="settings_open_links_new_tab_summary">Links you tap in other apps open in their own tab instead of replacing the page you were reading.</string>
 
     <!-- Downloads -->
     <string name="download_started">Downloading %1$s</string>
@@ -118,7 +118,6 @@
     <string name="download_status_failed">Failed</string>
     <string name="download_status_cancelled">Cancelled</string>
     <string name="download_status_unknown">Unknown</string>
-    <string name="file_picker_title">Choose an app</string>
     <string name="file_source_title">Choose source</string>
     <string name="file_source_gallery">Gallery / Photos</string>
     <string name="file_source_files">Files</string>
@@ -136,8 +135,6 @@
     <string name="context_open_media_new_tab">Open media in new tab</string>
     <string name="context_copy_media_address">Copy media address</string>
     <string name="context_share_media_address">Share media address</string>
-    <string name="settings_text_zoom">Text size</string>
-    <string name="settings_text_zoom_summary">Scales text on pages; applied on next page load</string>
     <string name="settings_zoom_info_title">Zoom</string>
     <string name="settings_zoom_info_summary">Zoom is saved per site. Open a page and use Menu (⋮) → Zoom to change it; 100% resets. Desktop site is remembered per site too.</string>
     <string name="settings_password_manager">Save and autofill passwords</string>
@@ -159,7 +156,6 @@
     <string name="action_not_now">Not now</string>
     <string name="action_cancel">Cancel</string>
     <string name="action_reset_zoom">Reset text size to 100%</string>
-    <string name="start_title">Hexora</string>
     <string name="start_subtitle">Fast, private, yours</string>
     <string name="start_logo_content_description">Hexora logo</string>
     <string name="start_shortcuts">Shortcuts</string>
@@ -238,9 +234,7 @@
     <string name="settings_tracking_protection">Enhanced Tracking Protection</string>
     <string name="settings_tracking_protection_summary">Blocks known trackers on every tab</string>
     <string name="settings_https_only">HTTPS-Only Mode</string>
-    <string name="settings_https_only_summary">Upgrades or blocks plain HTTP connections</string>
-    <string name="settings_total_cookie_protection">Total Cookie Protection</string>
-    <string name="settings_total_cookie_protection_summary">Always on: third-party cookies are partitioned by site</string>
+    <string name="settings_https_only_summary">Blocks pages that can\'t be loaded over HTTPS instead of showing them in the clear.</string>
 
     <!-- Page actions and printing -->
     <string name="menu_share_page">Share page</string>
@@ -270,11 +264,9 @@
 
     <!-- About, contact and bug reports -->
     <string name="about_title">About</string>
-    <string name="about_developed_by">Developer &amp; Designed By: HEXORA-STUDIO</string>
     <string name="about_contact">Contact us</string>
-    <string name="about_contact_summary">%1$s</string>
     <string name="about_report_bug">Report a bug</string>
-    <string name="about_report_bug_summary">Shake the phone at any time, or open the report from here.</string>
+    <string name="about_report_bug_summary">Shake the phone any time, or start the report from here.</string>
     <string name="about_version">Hexora %1$s (%2$d)</string>
 
     <!-- Default browser -->
@@ -296,5 +288,62 @@
     <string name="bug_report_copy">Copy report</string>
     <string name="bug_report_copied">Report copied</string>
     <string name="bug_report_no_mail_app">No email app found on this device</string>
-    <string name="bug_report_shake_hint">Shake the phone to report a bug</string>
+
+    <!-- 0.6.0: Settings is a sidebar of sections, About is its own screen. -->
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_section_search">Search</string>
+    <string name="settings_section_privacy">Privacy &amp; security</string>
+    <string name="settings_section_tabs">Tabs &amp; links</string>
+    <string name="settings_section_data">Data</string>
+    <string name="settings_section_app">App</string>
+    <string name="settings_appearance_intro">Pick how the app itself looks. Web pages keep their own styling.</string>
+    <string name="settings_privacy_intro">What gets blocked before you touch anything, and what never leaves the phone.</string>
+    <string name="settings_per_site_title">Per-site permissions</string>
+    <string name="settings_credentials_title">Saved logins</string>
+    <string name="settings_data_intro">Everything here sits on this phone. There is no account and no server of ours for it to sync to.</string>
+    <string name="settings_clear_data_scope">Cookies, cache, site storage and history go. Bookmarks, saved logins and downloads stay.</string>
+    <string name="settings_app_intro">Default browser, bug reports, and what build you are running.</string>
+    <string name="settings_about_row_summary">What this is, what it protects, and where it stops</string>
+
+    <!-- About screen -->
+    <string name="about_screen_title">About Hexora</string>
+    <string name="about_tagline">Fast, private, yours</string>
+    <string name="about_what_title">What this is</string>
+    <string name="about_what_body">Hexora is a browser for Android built on GeckoView, the engine Firefox runs, so a page renders the way it was written rather than like a stripped-down webview. We built it for ourselves first: a browser with no account, no sync and nothing counting what we tap, that still behaves like a normal browser.\n\nNothing of yours is uploaded anywhere. There is no Hexora account and no Hexora server, so there is nowhere for your history, bookmarks or logins to go. The engine does keep some background traffic alive, none of it about you: tracker lists are refreshed from Mozilla, the Safe Browsing list from Google, and certificates are checked for revocation. Roughly once a day, and what crosses the wire is lists and hashes, not a record of what you read.</string>
+    <string name="about_protection_title">Protection, in plain terms</string>
+    <string name="about_protection_trackers">Tracker blocking is on by default and covers private tabs too, using Mozilla\'s standard list. Scripts that identify you by the shape of the browser rather than by a cookie are a separate protection, and that one isn\'t switched on yet.</string>
+    <string name="about_protection_https">HTTPS-only mode lives in Settings and is off until you turn it on. With it on, a site that can\'t do HTTPS gets a warning page instead of quietly loading in the clear. It stays off by default because the warning shows up on ordinary sites often enough to be tiring.</string>
+    <string name="about_protection_cookies">Cookies stay with the site that set them, and sign-in flows that cross between sites keep working. Full partitioning of third-party cookies isn\'t on in this build; that\'s in What isn\'t here yet.</string>
+    <string name="about_protection_permissions">Camera, microphone, location and notifications are only asked for when a site actually wants them, and any answer can be changed later under Site permissions.</string>
+    <string name="about_protection_private">Private tabs leave no history, can\'t be bookmarked, and don\'t come back when you reopen the app. They aren\'t a VPN: your network provider and the site you\'re on still see the connection, and a file downloaded in a private tab is saved like any other.</string>
+    <string name="about_data_title">Where your stuff lives</string>
+    <string name="about_data_passwords">Saved logins are encrypted field by field with AES-GCM, under a key that stays in the Android Keystore. What reaches the database is ciphertext, and it isn\'t sent to a server.</string>
+    <string name="about_data_local">History, bookmarks, downloads and per-site settings sit in one database inside the app, and Android\'s automatic backup is switched off for Hexora, so that database isn\'t copied to Google Drive either. Uninstalling takes the database with it. Files you downloaded are in Downloads and stay there.</string>
+    <string name="about_data_reports">The report is assembled on the phone and handed to your mail app. Nothing is sent until you press send, and if you do send it, it lands in our inbox with your email address attached. Inside: the device model, the ROM, some counters from the session and a short app log. No page addresses, no page text.</string>
+    <string name="about_browsing_title">The everyday part</string>
+    <string name="about_browsing_tabs">Every tab keeps its own session, so coming back to one continues where you left it, and tabs left alone for a while get suspended to save memory and return the same way.</string>
+    <string name="about_browsing_tray">A tab tray with previews, plus bookmarks, history, downloads with live progress, find in page, PDF export and printing.</string>
+    <string name="about_browsing_site">Desktop site and zoom are remembered per site, so you set them once and they stick. Six themes, from a sheet of paper to a night sky.</string>
+    <string name="about_browsing_default">You can make Hexora the default browser, and then a link from another app opens here.</string>
+    <string name="about_engine_title">Engine and licences</string>
+    <string name="about_engine_body">Pages are drawn by GeckoView, Mozilla\'s engine, under the Mozilla Public License 2.0 — that licence is why its source stays public, and the version we build against is listed on the Licences screen. Hexora\'s own code belongs to HEXORA-STUDIO and carries no open-source licence of ours. The Android libraries underneath — AndroidX, Jetpack Compose, Room, DataStore — are Apache 2.0. The full list is one tap away.</string>
+    <string name="about_developer_title">Who makes it</string>
+    <string name="about_made_by">Designed and built by HEXORA-STUDIO</string>
+    <string name="about_report_hint">Shaking the phone anywhere in the app starts the same report, so you don\'t have to come back to this screen for it. You see the whole text before your mail app opens, and nothing leaves until you hit send.</string>
+    <string name="about_build_footer">Hexora %1$s (build %2$d) · GeckoView engine</string>
+
+    <string name="about_limits_title">What isn\'t here yet</string>
+    <string name="about_limits_body">This is 0.6.x, and there are gaps worth naming instead of letting the page above read as if there were none.\n\nThird-party cookie partitioning isn\'t on. We turned it on once, Google sign-in went into a retry loop, and doing it properly means handling the Storage Access API first. Fingerprinting protection isn\'t on either. There is no sync, no extensions, and no way to hand open tabs to another device.\n\nOne thing worth saying plainly: Hexora can stop other companies following you between sites, but it can\'t stop a site you\'re signed in to from seeing what you do on it. Google still knows what you search on Google, and no setting here pretends otherwise.</string>
+    <string name="about_licences_button">Licences and source</string>
+    <string name="licences_title">Licences</string>
+    <string name="licences_intro">What Hexora is built from, and the terms each part comes under. Nothing here is a summary we made up: every entry names the licence its component actually ships with.</string>
+    <string name="licences_engine_title">GeckoView — Mozilla Public License 2.0</string>
+    <string name="licences_engine_body">GeckoView is Gecko, the engine Firefox uses, packaged for Android. It\'s under the MPL 2.0, a file-level copyleft: it can be read, changed and redistributed, as long as changes to Mozilla\'s own files are published under the same licence. Hexora ships it unmodified — version 158.0.20261007201254, taken from Mozilla\'s Maven repository.</string>
+    <string name="licences_source_button">Open the source on GitHub</string>
+    <string name="licences_mpl_button">Read the MPL 2.0</string>
+    <string name="licences_libs_title">Android libraries — Apache License 2.0</string>
+    <string name="licences_libs_body">AndroidX core and activity, Jetpack Compose with Material 3, Lifecycle, Navigation, Room, DataStore and Kotlin coroutines. Each ships under Apache 2.0, which allows reuse as long as the copyright and licence notices stay intact.</string>
+    <string name="licences_apache_button">Read the Apache 2.0 licence</string>
+    <string name="licences_app_title">Hexora\'s own code</string>
+    <string name="licences_app_body">The interface, the tab model, the download manager, the encrypted password store and this screen are © HEXORA-STUDIO. The repository is public to read, which isn\'t the same as being licensed: our own code carries no open-source licence, so ask us before lifting a piece of it.</string>
 </resources>

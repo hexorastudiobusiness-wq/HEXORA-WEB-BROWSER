@@ -39,6 +39,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +69,7 @@ import com.example.browser.ui.browser.BrowserViewModel
 import com.example.browser.ui.browser.TabUiItem
 import com.example.browser.util.TabThumbnailStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -82,6 +88,10 @@ fun TabsScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val recentlyClosedTabs by viewModel.recentlyClosedTabs.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    val closedAllMessage = stringResource(R.string.tabs_closed_message)
+    val undoLabel = stringResource(R.string.action_undo)
     // Re-evaluate inactivity when this screen is entered; the underlying
     // tab state may not have emitted since the four-hour boundary passed.
     val nowMs = remember { System.currentTimeMillis() }
@@ -96,6 +106,7 @@ fun TabsScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.tabs_title)) },
@@ -110,7 +121,25 @@ fun TabsScreen(
                 actions = {
                     if (state.tabs.isNotEmpty()) {
                         TextButton(
-                            onClick = { viewModel.onAction(BrowserAction.CloseAllTabs) },
+                            onClick = {
+                                viewModel.onAction(BrowserAction.CloseAllTabs)
+                                // UndoCloseAllTabs and the batch it restores
+                                // have existed in the ViewModel for several
+                                // releases with nothing calling them; the
+                                // close-all is the moment that batch is the
+                                // only copy of those tabs, so say so here.
+                                scope.launch {
+                                    val result = snackbarHostState.showSnackbar(
+                                        message = closedAllMessage,
+                                        actionLabel = undoLabel,
+                                        duration = SnackbarDuration.Long,
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        viewModel.onAction(BrowserAction.UndoCloseAllTabs)
+                                        onNavigateToBrowser()
+                                    }
+                                }
+                            },
                         ) {
                             Text(stringResource(R.string.tabs_close_all))
                         }

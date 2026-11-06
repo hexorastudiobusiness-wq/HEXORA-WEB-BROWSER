@@ -313,14 +313,16 @@ class BrowserViewModel(
         TabsSlice(tabs, activeId, states, thumbs, revision)
     }
 
+    // Recently closed tabs are not part of this slice: the tray collects
+    // `recentlyClosedTabs` directly, so carrying a count here only produced a
+    // field that was never written and always read as zero.
     private val chromeBaseSlice = combine(
         _findVisible,
         _userFullscreen,
-        _recentlyClosed,
         _pendingCredentialPrompt,
         _pageContextMenu,
-    ) { find, fs, closed, prompt, contextMenu ->
-        ChromeSlice(find, fs, closed.size, prompt, contextMenu)
+    ) { find, fs, prompt, contextMenu ->
+        ChromeSlice(find, fs, prompt, contextMenu)
     }
 
     private val chromeSliceWithLogin = combine(
@@ -445,7 +447,6 @@ class BrowserViewModel(
             ),
             findVisible = start.chrome.findVisible,
             findResult = activeState.findResult,
-            recentlyClosedCount = start.chrome.recentlyClosedCount,
             thumbnailVersions = slice.thumbnails,
             errorMessage = error,
             activeSession = activeEntry?.session,
@@ -2641,7 +2642,11 @@ class BrowserViewModel(
     private fun ThemeMode.toWebColorScheme(): WebColorScheme = when (this) {
         ThemeMode.SYSTEM -> WebColorScheme.SYSTEM
         ThemeMode.LIGHT -> WebColorScheme.LIGHT
-        ThemeMode.DARK, ThemeMode.HEXORA -> WebColorScheme.DARK
+        ThemeMode.DARK, ThemeMode.HEXORA, ThemeMode.AURORA -> WebColorScheme.DARK
+        // Paper is a light theme: pages that honour prefers-color-scheme
+        // should render their light variant, or the sheet of paper would sit
+        // on top of a black page.
+        ThemeMode.PAPER -> WebColorScheme.LIGHT
     }
 
     /**
@@ -2793,7 +2798,6 @@ class BrowserViewModel(
     private data class ChromeSlice(
         val findVisible: Boolean,
         val userFullscreen: Boolean,
-        val recentlyClosedCount: Int,
         val pendingCredentialSave: CredentialSavePrompt?,
         val pageContextMenu: PageContextMenu?,
         val savedLoginSuggestion: SavedLoginSuggestion? = null,

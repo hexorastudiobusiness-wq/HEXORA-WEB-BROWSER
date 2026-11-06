@@ -71,6 +71,8 @@ import com.example.browser.ui.history.HistoryScreen
 import com.example.browser.ui.history.HistoryViewModel
 import com.example.browser.ui.passwords.PasswordsScreen
 import com.example.browser.ui.passwords.PasswordsViewModel
+import com.example.browser.ui.settings.AboutScreen
+import com.example.browser.ui.settings.LicencesScreen
 import com.example.browser.ui.settings.SettingsScreen
 import com.example.browser.ui.settings.SettingsViewModel
 import com.example.browser.ui.settings.SitePermissionsScreen
@@ -103,6 +105,8 @@ private object Routes {
     const val SETTINGS = "settings"
     const val SITE_PERMISSIONS = "site_permissions"
     const val PASSWORDS = "passwords"
+    const val ABOUT = "about"
+    const val LICENCES = "licences"
 }
 
 class MainActivity : ComponentActivity() {
@@ -558,6 +562,16 @@ class MainActivity : ComponentActivity() {
      * no button.
      */
     private fun startDefaultBrowserRequest() {
+        // Already the default: the role request is a no-op the system may not
+        // even answer, so a tap would look broken. Say what is true instead.
+        if (BrowserRole.isDefault(this)) {
+            Toast.makeText(
+                this,
+                R.string.default_browser_already,
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
         val intent = pendingRoleIntent ?: BrowserRole.requestIntent(this)
         if (intent == null) {
             openDefaultBrowserSettings()
@@ -1371,8 +1385,24 @@ private fun HexoraNavHost(
                 onOpenSitePermissions = {
                     navController.navigate(Routes.SITE_PERMISSIONS)
                 },
+                onOpenAbout = { navController.navigate(Routes.ABOUT) },
                 onReportBug = onReportBug,
                 onSetDefaultBrowser = onSetDefaultBrowser,
+            )
+        }
+        composable(Routes.ABOUT) {
+            AboutScreen(
+                onBack = { navController.popBackStack() },
+                onReportBug = onReportBug,
+                onOpenLicences = { navController.navigate(Routes.LICENCES) },
+            )
+        }
+        composable(Routes.LICENCES) {
+            LicencesScreen(
+                onBack = { navController.popBackStack() },
+                // Licence texts and the engine source are ordinary pages, so
+                // they open in Hexora itself rather than in an external app.
+                onOpenUrl = { url -> openInBrowser(url) },
             )
         }
         composable(Routes.SITE_PERMISSIONS) {

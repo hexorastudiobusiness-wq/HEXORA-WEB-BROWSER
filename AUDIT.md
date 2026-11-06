@@ -841,3 +841,304 @@ How the artwork is used, and why:
 
 `versionCode` 36 / `versionName` 0.5.9, so the new debug APK installs over the
 0.5.8 build on the phone instead of being refused.
+
+## 0.6.0 — Settings as a sidebar, About as a screen, and the real logo
+
+**Settings was one page.** Search engine, theme, four protection switches, the
+password vault, desktop mode, link handling, clear-data, default browser, bug
+reports, the developer address and the version number were stacked in a single
+`verticalScroll`. Finding one of them meant scrolling past the rest, and the
+page had no map of itself.
+
+It is now a sidebar of sections, the way Chrome splits Settings: a rail on the
+left (`Appearance`, `Search`, `Privacy & security`, `Tabs & links`, `Data`,
+`App`) and one pane on the right. Tapping a section switches the pane and the
+pane starts at its own top — `key(pane)` gives every section a fresh
+`rememberScrollState`, so nothing inherits the previous section's offset. The
+selected item is `secondaryContainer` with `onSecondaryContainer` content, and
+labels wrap to two short lines instead of ellipsising: a section name that
+cannot be read is a section that cannot be found. The selection survives
+rotation (`rememberSaveable`).
+
+What moved where:
+
+| Section | Contents |
+|---|---|
+| Appearance | the four themes |
+| Search | engine list, custom engine name + template |
+| Privacy & security | ETP, HTTPS-Only, Total Cookie Protection, JavaScript, Site permissions, saved-login switch + Manage |
+| Tabs & links | open links in a new tab, desktop site by default, the per-site zoom note |
+| Data | clear browsing data (confirm dialog) and exactly what it clears |
+| App | default browser, report a bug, About |
+
+**About is a destination, not a heading.** It has its own route
+(`Routes.ABOUT`), its own `TopAppBar` with a back arrow, and is reached from the
+`App` section as a row with a chevron. The old inline block is gone.
+
+The screen now says something: what Hexora is (GeckoView engine, no account, no
+sync, no analytics SDK), the protections that are on before the user touches
+anything (ETP, HTTPS-Only, Total Cookie Protection, per-site permissions,
+private tabs), where each kind of data lives (AES-GCM logins keyed in the
+Android Keystore, local database, bug reports handed to the owner's mail app),
+what the browser does (per-tab engine state restored instead of reloaded,
+suspension instead of discarding, tab tray, downloads, find in page, PDF and
+print), the engine and its licenses (GeckoView/MPL 2.0, AndroidX/Compose/Room/
+DataStore/Apache 2.0), and the developer block with the address shown as text
+as well as a button. Every claim maps to code in this repository — no
+"fast and secure" filler. `about_clear_data_scope` matches what
+`clearBrowsingData()` actually does (`StorageController.ClearFlags.ALL` plus the
+history table; bookmarks, logins and downloads are untouched).
+
+**The icon kept only half the artwork.** The owner's file is a lockup: the "K"
+mark *with* the name "Hexora BROWSER" beneath it. 0.5.9 cropped to the mark,
+because a wordmark at 48 dp is unreadable — a defensible call, but not what was
+asked for, and the same crop was used for the in-app logo where the name has
+room. All launcher assets, the adaptive foreground, the splash foreground and
+`hexora_logo.png` are now generated from a square that contains the whole
+lockup (mark + name), padded by edge replication so nothing touches the tile
+edge. On the Start Page the logo is drawn `ContentScale.Fit` at 148 dp — never
+`Crop` — and the separate "Hexora" heading is gone, since the artwork already
+carries the name; the "Fast, private, yours" line stays.
+
+`versionCode` 37 / `versionName` 0.6.0.
+
+## 0.6.1 — density in the settings pane, copy that reads like a person, and the sweep
+
+**The pane was sized for a tablet.** Next to a 104 dp sidebar a phone leaves
+~230 dp of content, and Material's defaults were written for something three
+times that wide: `ListItem` at 16 sp with 16 dp of padding top and bottom, a
+52×32 dp `Switch`, `OutlinedButton` at full `ButtonDefaults` height. Six rows
+filled a screen. The pane now uses one row type of its own (`SettingsRow`:
+14 sp label, 12 sp summary, 5 dp vertical padding), a switch scaled to 0.78
+inside a 44×28 dp box, radio buttons at 0.82, and 36 dp buttons with 14 dp
+horizontal padding. Section headings dropped from `titleMedium` to
+`titleSmall`. Same information, roughly two thirds of the height.
+
+This is deliberately local to the settings pane: dialogs, the browser chrome and
+the About screen were not touched, because they are not the crowded surface.
+
+**The About copy was written like a release note.** Every sentence was a
+spec-sheet clause with an em dash in the middle, which is exactly how a machine
+writes when nobody is talking. It is rewritten in a voice that could plausibly
+belong to the person who built the app: contractions, shorter sentences, one
+idea per bullet, and concrete detail instead of adjectives ("a key Android keeps
+in the Keystore and will not hand out" rather than "strong device-bound
+encryption"). No claim changed: each one still maps to code in this repository.
+
+**The icon had no breathing room at the bottom.** The lockup was padded by edge
+replication of the *cropped* square, and the last row of that crop carried a
+faint vignette line, which replication then repeated across the bottom of the
+tile — the "slightly cut off" the owner saw. The tile is now composed properly:
+the lockup is cropped with 60 px of its own background on every side, feathered
+over a canvas filled with that background's average colour, and placed with
+~13 % margin at the top and ~17 % at the bottom (a text lockup wants the extra
+room under the baseline). Content occupies ~71 % of the tile instead of 77 %.
+
+**The sweep.** What it actually checked, and what it found:
+
+- every `R.string.*` used from Kotlin exists in `strings.xml` (none missing),
+  and every `R.drawable.*`/`R.mipmap.*` resolves to a file (the two hits are
+  `android.R.drawable.stat_sys_download*`, platform resources — not a defect);
+- braces and parentheses balance in the four files this build touches, against
+  their `HEAD` baseline (unchanged);
+- copy versus behaviour, one string at a time. One lie found and fixed:
+  `settings_open_links_new_tab_summary` still said "Stored preference — not
+  applied yet", while `handleExternalUrl()` has honoured it for two releases
+  (`BrowserViewModel`, the `pendingExternalUrl` path and the direct one).
+- eleven strings are dead (no `R.string.` and no `@string/` reference anywhere):
+  `action_reset_zoom`, `action_tabs`, `action_undo`, `bug_report_shake_hint`,
+  `default_browser_already`, `file_picker_title`, `settings_cookies`,
+  `settings_cookies_summary`, `settings_text_zoom`, `settings_text_zoom_summary`,
+  `tabs_closed_message`. Left in place: removing them is safe but unrelated to
+  this build, and two of them (`settings_cookies*`, `settings_text_zoom*`) look
+  like settings that were designed and never wired — worth a decision, not a
+  silent deletion.
+
+`versionCode` 38 / `versionName` 0.6.1.
+
+---
+
+## 27. 0.6.2 — the About page, corrected against the code
+
+The About copy written for 0.6.1 was reviewed twice: once for accuracy and
+once for whether it reads like a person. Both reviews came back with the same
+kind of finding, so this build fixes content and voice in one pass rather than
+two.
+
+### Claims that did not survive the audit
+
+- **"Nothing syncing in the background" was false.** GeckoView keeps its own
+  traffic alive whatever the app does: tracking-protection lists and CRLite
+  filters come from Mozilla Remote Settings
+  (`services.settings.poll_interval` = 24 h), and Google Safe Browsing lists
+  come from `safebrowsing.googleapis.com`
+  (`browser.safebrowsing.features.malware/phishing.update = true` in
+  `geckoview-prefs.js`; there is no GeckoView API that turns it off).
+  The paragraph now says what the traffic is and that it is lists and hashes,
+  not a browsing record.
+- **"Third-party cookies are kept apart per site" was false.** Partitioning is
+  deliberately off — `GeckoBrowserEngine.kt` explains why: without the Storage
+  Access API, Google sign-in loops. The bullet now says cookies stay with the
+  site that set them and points at the limitations section.
+- **"If a site can do HTTPS, Hexora connects over HTTPS" implied always-on.**
+  `httpsOnlyMode` defaults to `false` (`SettingsRepository.kt:66`). Rewritten as
+  a switch that is off until the user turns it on.
+- **"Nothing to leak" / "Uninstalling takes the rest with it."** Data on the
+  phone can still be read by anything that gets at the phone, and files written
+  to Downloads outlive an uninstall (`download/` has no private-mode branch, and
+  saved files go to the shared folder). Both sentences rewritten.
+- **"No server on my end collecting anything"** hid the obvious: a report that
+  the user sends arrives in the maintainer's inbox, with their address on it.
+  Now said in those words. The part that *was* true is kept: the payload is
+  device details, counters and an app log — `AppLog` and `buildDiagnostics`
+  write no URLs, titles or page text.
+- **Licence paragraph read as if Hexora's own code were Apache 2.0.** It is
+  not: no LICENSE file exists, so the app's own code is unlicensed. The
+  paragraph now separates GeckoView (MPL 2.0), the Android libraries (Apache
+  2.0) and Hexora's own code (© HEXORA-STUDIO, no open-source licence).
+
+### Voice
+
+No first person anywhere. The page speaks as the studio ("we", "our"), which
+also fixes the mismatch with "Contact us" and the HEXORA-STUDIO credit in the
+same screen. Rhythm was evened out as well: bullets are no longer
+claim-plus-because in every line, the one triadic list that repeated was cut
+back, and the slogan sentences that closed three paragraphs are gone.
+
+### New screen
+
+`LicencesScreen.kt` (`Routes.LICENCES`, reached from the engine card on About):
+GeckoView with the exact source tree and the MPL 2.0 text, the Apache 2.0
+library list with a link to the licence, and the note about Hexora's own code.
+This is also what MPL 2.0 §3.2 asks for in practice — recipients are told where
+the covered source is.
+
+### New section on About
+
+"What isn't here yet": no third-party cookie partitioning, no fingerprinting
+protection, no sync, no extensions, no tab hand-off between devices, and the
+plain statement that a site you are signed in to still sees what you do there.
+
+`versionCode` 39 / `versionName` 0.6.2.
+
+---
+
+## 28. 0.6.3 — the dead strings, and what the sweep found around them
+
+### Wired, not invented
+
+- `action_tabs` — the tab counter in the bottom bar draws its number as text
+  inside a `clickable` container, and `clickable` merges descendant semantics.
+  TalkBack read a bare digit and never said what the button opens. The button
+  now carries `contentDescription = "<label>, <count>"`.
+- `action_reset_zoom` — the reset button already existed and already worked;
+  the string is now its spoken label, because the button's visible text is the
+  value it resets to ("100%"), which reads as a value, not as an action.
+- `default_browser_already` — `startDefaultBrowserRequest()` used to launch a
+  role request the system answers with nothing when the role is already held.
+  It now says so before doing anything.
+- `action_undo`, `tabs_closed_message` — `UndoCloseAllTabs`, `undoCloseAllTabs()`
+  and the `lastCloseAllIds` batch had existed in the ViewModel with no caller.
+  The tray's "Close all" now shows a snackbar with Undo; the action restores the
+  batch in its original order and returns to the browser. No ViewModel change
+  was needed, which is the point: the feature was already built, only unwired.
+
+### Deleted
+
+`bug_report_shake_hint`, `file_picker_title`, `settings_cookies`,
+`settings_cookies_summary`, `settings_text_zoom`, `settings_text_zoom_summary`.
+The shake detector (`ShakeDetector`, started in `MainActivity`) and the file
+pickers (`OpenDocument`, `OpenMultipleDocuments`, `PickVisualMedia`,
+`PickMultipleVisualMedia`, `OpenDocumentTree`) are untouched: those two strings
+had no reference, so the gallery/file-manager chooser behaves exactly as before.
+
+Per-site cookie control exists already, as "Clear site data" in the overflow
+menu (`ClearSiteData` → `engine.clearSiteData(host)`), which is why the planned
+settings row was redundant rather than missing.
+
+### Found by the sweep and fixed
+
+- **Settings carried the same false claim About just lost**: a static row
+  "Total Cookie Protection — Always on: third-party cookies are partitioned by
+  site". Partitioning is off. Row and both strings removed.
+- `settings_javascript_summary` said "Applies to new browsing sessions after
+  restart"; `applyContentControls()` pushes `setJavaScriptEnabled` to the live
+  runtime as soon as the switch moves. Rewritten.
+- `settings_https_only_summary` said "Upgrades or blocks"; the mode this app
+  sets is `HTTPS_ONLY`, i.e. it blocks. Rewritten.
+- `settings_data_intro` said "Nothing syncs anywhere, because there is nowhere
+  to sync to" — the same overclaim corrected on the About page. Rewritten.
+- `BrowserUiState.recentlyClosedCount` was declared, copied through the slice
+  pipeline and never written: always zero. The field and its slice plumbing are
+  gone.
+
+### Sweep results on this tree
+
+305 strings, 0 unreferenced, 0 referenced-but-missing; every `R.drawable`,
+`R.mipmap`, `R.xml` reference resolves to a file; every XML parses; 0 `TODO`;
+0 private members with no second mention; 0 `IconButton` blocks without a
+spoken label; all 63 `BrowserAction` cases declared and handled in `onAction`;
+braces and parentheses balanced in every touched file.
+
+`versionCode` 40 / `versionName` 0.6.3.
+
+---
+
+## 29. 0.6.4 — the theme set, rebuilt around the current logo
+
+### Hexora Mode was drawn for the previous logo
+
+The scheme was orange-on-plum (`#E77E3D` accent, `#100B0F` ink). Those are
+colours from the logo this app no longer uses, so the theme sat next to the new
+icon like a different product. Sampled from
+`drawable-nodpi/hexora_logo.png`, the current mark is:
+
+| Element | Sampled |
+|---|---|
+| mark, blue | `#0F7BF0` |
+| mark, amber | `#FFA614` |
+| wordmark navy | `#04132E` |
+| lockup background | `#F1F3FA` |
+
+`HexoraColors` is now built from those: near-black navy background, light blue
+primary (`#7FB8FF` on dark surfaces, `#0A3E82` container), amber as the single
+accent, and surfaces in the same navy family instead of plum. Blue carries the
+interface and amber is used sparingly, which is the proportion the logo itself
+uses.
+
+### Paper
+
+`ThemeMode.PAPER`: a light scheme with no accent colour at all — warm stock
+(`#F2E9D8`) behind sheets of the same paper (`#FAF3E4`), ink `#33291D`, muted
+ink `#6B5B45`, and every container a shade between them. Errors are a muted
+brick (`#8C3B2E`) so the one colour that has to survive still reads as
+"something went wrong".
+
+Two things make it read as paper rather than as a beige theme:
+
+- **Serif typography.** `PaperTypography` maps every display, headline, title
+  and body style to `FontFamily.Serif`. Labels stay sans: they are chrome
+  (counters, buttons, bars) and a serif label at 11 sp only loses legibility.
+- **The logo is printed in ink.** `LocalPaperTheme` + `logoColorFilter()` draw
+  the start-page and About logos through a zero-saturation `ColorMatrix`. A
+  blue-and-amber tile on a sheet of paper would be the one graphic the theme
+  exists to remove.
+
+`toWebColorScheme()` maps PAPER to `LIGHT`, so pages that honour
+`prefers-color-scheme` do not render their dark variant on a paper background.
+
+### Aurora
+
+`ThemeMode.AURORA`: deep pine (`#06110F`) rather than another blue-black, mint
+(`#6FE3C4`) as the leading colour, violet (`#B49BFF`) as the second. Chosen so
+it is distinguishable from both Dark and Hexora Mode at a glance, and so the
+palette still has somewhere to go for accents without becoming a rainbow.
+
+### Wiring
+
+Two enum entries, two settings rows after "Hexora Mode", two scheme entries in
+`HexoraBrowserTheme`, one exhaustive `when` updated in the engine colour-scheme
+mapping. No hardcoded colours existed outside `ui/theme`, so every screen
+follows the new schemes without changes.
+
+`versionCode` 41 / `versionName` 0.6.4.
