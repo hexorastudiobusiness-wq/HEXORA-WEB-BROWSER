@@ -53,10 +53,14 @@ planned. The key therefore lives only in:
    `app/build.gradle.kts`. Update version references in `README.md` and
    `AGENTS.md`.
 2. Commit and push; wait for the **Build debug APK** CI to go green.
-3. Start the signed build: Actions → **Build signed release** → Run
-   workflow, with `main` selected. The job refuses to run on any other ref
-   (`if: github.ref == 'refs/heads/main'`), because the keystore is decoded
-   on the runner: it only ever signs code that is genuinely on `main`.
+3. Start the signed build, one of two ways, both `main`-only (the job
+   refuses any other ref, `if: github.ref == 'refs/heads/main'`):
+   - Actions → **Build signed release** → Run workflow, with `main`
+     selected; or
+   - push a change to `signing/release-request.txt` on `main` — the touch
+     is the trigger, and it exists because workflow dispatch is not always
+     available. Bump the line in that file each time, so the next release
+     is a new commit rather than an empty one.
 4. In `.github/workflows/build-release-apk.yml`, CI will:
    - fail fast if either secret is missing,
    - decode the keystore into `$RUNNER_TEMP` (deleted with the runner),

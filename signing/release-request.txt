@@ -1,0 +1,7 @@
+Hexora Browser 1.0.0 — first official release.
+
+Pushing a change to this file on `main` runs the signed release build once:
+it is the second, main-only way into `build-release-apk.yml` for the times
+when workflow dispatch is not available. Leaving the text unchanged is enough;
+the touch itself is the trigger, so bump this line each time a new release is
+cut.

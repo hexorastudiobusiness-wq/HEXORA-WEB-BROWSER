@@ -28,18 +28,16 @@ Hard technical identity:
 - **Mozilla GeckoView** behind a `BrowserEngine` abstraction — never Android
   WebView
 - Room, DataStore, Coroutines, StateFlow, Jetpack Navigation Compose
-- Package / applicationId: `com.example.browser`
+- Package / namespace: `com.example.browser`; applicationId: `com.hexora.browser`
 - App label: **Hexora Browser**
 - Repository: `hexorastudiobusiness-wq/HEXORA-WEB-BROWSER`
 
 Current shipped state (update this section on every release):
 
-- Working-tree version **0.4.5**, `versionCode` **21** (not yet built or
-  device-verified; do not describe it as shipped until CI and the owner
-  confirm it)
-- Last owner-tested debug line: **0.4.2** (`debug-799c44b`); signed
-  release: GitHub Release **`v0.3.3`**
-- Debug builds: GitHub prereleases named `debug-<short-sha>`
+- Released version **1.0.0**, `versionCode` **42** — signed with the release
+  key and published as GitHub Release **`v1.0.0`** (arm64-v8a APK only)
+- Development builds: GitHub prereleases named `debug-<short-sha>`
+- Previous signed release before the rewrite: `v0.3.3`
 - Room database version **5** (direct migrations 1→5, 2→5, 3→5 and 4→5
   exist in `DatabaseMigrations.kt`)
 - `minSdk` 26, `targetSdk`/`compileSdk` 37 — the supported/tested focus is

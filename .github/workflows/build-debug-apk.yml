@@ -3,10 +3,11 @@ name: Build debug APK
 # The development sandbox has no JDK/Android SDK and restricted network,
 # so builds run here on GitHub-hosted runners instead.
 
+# Debug builds are for development branches only. `main` publishes nothing
+# but signed releases, so a merge cannot leave a debug build behind.
 on:
   push:
     branches:
-      - main
       - 'arena/**'
   workflow_dispatch:
 
