@@ -32,6 +32,7 @@ import com.example.browser.data.settings.SitePreferencesStore
 import com.example.browser.data.settings.TabSessionStore
 import com.example.browser.data.settings.ThemeMode
 import com.example.browser.download.DownloadFileName
+import com.example.browser.util.AppLog
 import com.example.browser.util.CredentialOrigin
 import com.example.browser.util.ShortcutIconStore
 import com.example.browser.util.TabThumbnailStore
@@ -1008,20 +1009,7 @@ class BrowserViewModel(
                     entry.session?.loadUrl(target)
                 }
             }
-            BrowserAction.Reload -> {
-                val entry = activeEntry()
-                val session = entry?.session
-                if (entry != null && session != null && !session.isUsable()) {
-                    // Nothing to reload: the content process is gone. Restoring
-                    // the tab is what the user expects from Retry, and it is
-                    // what used to surface as a "tab crashed" card.
-                    _savedLoginSuggestion.value = null
-                    handleDeadSession(entry, session)
-                    if (entry.session == null) restoreTab(entry)
-                } else {
-                    session?.reload()
-                }
-            }
+            BrowserAction.Reload -> recoverActivePage()
             BrowserAction.StopLoading -> activeSession()?.stopLoading()
             BrowserAction.GoBack -> activeSession()?.goBack()
             BrowserAction.GoForward -> activeSession()?.goForward()
@@ -1689,8 +1677,20 @@ class BrowserViewModel(
         // Only a tab that genuinely has no session (suspended, or restored
         // after a reported death) is rebuilt here; a live session is never
         // touched, because rebuilding it would reload the page.
-        if (!active.showStartPage && !active.crashed && active.session == null) {
-            restoreTab(active)
+        if (!active.showStartPage && !active.crashed) {
+            val session = active.session
+            if (session == null) {
+                restoreTab(active)
+            } else if (!session.isUsable()) {
+                // A session that is still referenced but already closed is
+                // what an error card with a dead Retry was made of: nothing
+                // reloads it and the tray round-trip was the only cure.
+                handleDeadSession(active, session, witnessed = false)
+                if (active.session == null) {
+                    active.crashed = false
+                    restoreTab(active)
+                }
+            }
         }
         _pullProgress.value = 0f
         engine?.finishPullToRefresh()
@@ -1714,11 +1714,57 @@ class BrowserViewModel(
      */
     private fun handlePullToRefresh() {
         val entry = activeEntry() ?: return
-        val session = entry.session ?: return
         if (_pageStates.value[entry.tabId]?.isPageFullscreen == true) {
             _userFullscreen.value = true
         }
-        session.reload()
+        recoverActivePage()
+    }
+
+    /**
+     * Retry / refresh, made to work in the state the owner actually found:
+     * an error card up, and every recovery button doing nothing while selecting
+     * the tab from the tray fixed it.
+     *
+     * Three reasons that could be true, all handled here:
+     *  - the tab has **no session at all** (its content process died while the
+     *    app was away, or the session was dropped): the old code called
+     *    `session?.reload()` on `null`, i.e. nothing at all. Restoring the tab
+     *    is exactly what the tray does through `switchTab`.
+     *  - the session is there but closed: it is suspended and rebuilt.
+     *  - the session is alive but the load it shows was **halted**: the load
+     *    error handler returns `null` to stop Gecko's own error page, and
+     *    `reload()` of a halted load is a no-op. The page is navigated to again
+     *    instead of reloaded.
+     *
+     * Finally the engine is asked to verify that the surface actually painted;
+     * if it did not, the display is re-acquired from the live session.
+     */
+    private fun recoverActivePage() {
+        val entry = activeEntry() ?: return
+        if (entry.showStartPage) return
+        val session = entry.session
+        if (session == null || !session.isUsable()) {
+            _savedLoginSuggestion.value = null
+            if (session != null) handleDeadSession(entry, session, witnessed = false)
+            // An explicit retry is the user's restore decision, exactly like
+            // selecting the tab or the crash card's own button.
+            entry.crashed = false
+            if (entry.session == null) {
+                AppLog.event("retry: tab had no usable session, restoring")
+                restoreTab(entry)
+            }
+            engine?.verifyDisplayAfterReload()
+            return
+        }
+        val pageState = _pageStates.value[entry.tabId]
+        val target = pageState?.url?.ifBlank { entry.lastUrl }.orEmpty()
+        if (pageState?.loadFailed == true && UrlUtils.isHttpUrl(target)) {
+            AppLog.event("retry: re-navigating after a halted load")
+            entry.session?.loadUrl(target)
+        } else {
+            entry.session?.reload()
+        }
+        engine?.verifyDisplayAfterReload()
     }
 
     /** Fullscreen tab swipes are detected by the engine's content view. */
@@ -2277,6 +2323,7 @@ class BrowserViewModel(
         sessionsClosedByApp++
         session.close()
         entry.session = null
+        clearFailureState(entry.tabId)
         // The captured engine state is the tab's only remaining page state;
         // nothing else emits for a suspension, so ask for a write explicitly.
         requestPersistTabs()
@@ -2302,6 +2349,11 @@ class BrowserViewModel(
     ) {
         if (entry.session !== deadSession) return
         clearPendingForTab(entry.tabId)
+        // The failure state is deliberately NOT cleared here. For a quiet
+        // death (no crash card) the error card is the only recovery the user
+        // can see; Retry now restores the tab, so the card must stay up until
+        // a session exists again. It is replaced by the new session's state in
+        // attachSession().
         entry.savedState = deadSession.latestSavedState() ?: entry.savedState
         sessionJobs.remove(entry.tabId)?.cancel()
         deadSession.close()
@@ -2316,6 +2368,22 @@ class BrowserViewModel(
             // Nothing worth showing a crash state for (e.g. a start-page
             // tab): recreate it right away.
             restoreTab(entry)
+        }
+    }
+
+    /** Drops a stale load failure for a tab that no longer has a session. */
+    private fun clearFailureState(tabId: String) {
+        _pageStates.update { states ->
+            val state = states[tabId] ?: return@update states
+            if (!state.loadFailed && !state.isLoading) return@update states
+            states + (
+                tabId to state.copy(
+                    isLoading = false,
+                    loadFailed = false,
+                    loadErrorCode = 0,
+                    loadErrorCategory = 0,
+                )
+            )
         }
     }
 

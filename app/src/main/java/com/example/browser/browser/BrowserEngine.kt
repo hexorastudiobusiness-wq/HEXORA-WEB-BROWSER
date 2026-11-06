@@ -68,6 +68,14 @@ interface BrowserEngine {
     fun verifyPaintAfterResume() {}
 
     /**
+     * Same verification for an explicit (re)load — Retry, the toolbar refresh,
+     * pull-to-refresh. If the surface produces no frame at all shortly after a
+     * load was asked for, it is re-acquired from the live session (a repaint,
+     * never a reload).
+     */
+    fun verifyDisplayAfterReload() {}
+
+    /**
      * Enables or disables touch delivery to the web surfaces.
      *
      * While an overlay (Start Page, crash card, load-error card) covers the

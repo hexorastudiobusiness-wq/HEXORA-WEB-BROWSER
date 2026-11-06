@@ -42,6 +42,7 @@ import com.example.browser.data.settings.SitePreferencesStore
 import org.mozilla.geckoview.WebRequestError
 import org.mozilla.geckoview.WebResponse
 import com.example.browser.download.DownloadFileName
+import com.example.browser.util.AppLog
 import com.example.browser.util.CredentialOrigin
 
 /** Gecko's NS_BINDING_ABORTED: the request was superseded, it did not fail. */
@@ -511,7 +512,6 @@ class GeckoBrowserEngine(
      * re-acquired without touching the document (no reload, no history loss).
      */
     override fun verifyPaintAfterResume() {
-        val session = activeSession ?: return
         val host = contentContainer ?: return
         val token = ++resumeCheckToken
         val compositesBefore = compositeTicks
@@ -521,8 +521,32 @@ class GeckoBrowserEngine(
             if (compositeTicks != compositesBefore) return@postDelayed
             // Only when Gecko said the painted content was dropped.
             if (paintStatusResets <= paintResetsAtBackground) return@postDelayed
+            // Resolved late: a tab restored during the grace period is the
+            // session that must be re-acquired, not the dead one we saw first.
+            val session = activeSession ?: return@postDelayed
+            if (!session.geckoSession.isOpen) return@postDelayed
             forceRepaint(session, host)
         }, PAINT_RESUME_GRACE_MS)
+    }
+
+    /**
+     * Post-load display verification. Used after Retry / refresh: a load that
+     * started but never painted leaves exactly the state the owner described —
+     * an error card over a pane that ignores every recovery button — and the
+     * tray round-trip was the only thing that fixed it, because it re-binds the
+     * session to a surface.
+     */
+    override fun verifyDisplayAfterReload() {
+        val host = contentContainer ?: return
+        val token = ++resumeCheckToken
+        val compositesBefore = compositeTicks
+        mainHandler.postDelayed({
+            if (token != resumeCheckToken) return@postDelayed
+            if (compositeTicks != compositesBefore) return@postDelayed
+            val session = activeSession ?: return@postDelayed
+            if (!session.geckoSession.isOpen) return@postDelayed
+            forceRepaint(session, host)
+        }, PAINT_RELOAD_GRACE_MS)
     }
 
     /** Re-acquires the display for [session]'s surface (a repaint, not a load). */
@@ -540,6 +564,11 @@ class GeckoBrowserEngine(
             paintRecoveries++
             return
         }
+        // No surface for this session inside the container at all: re-attach
+        // it the way a tab switch does (which is the repair the owner could
+        // perform by hand from the tab tray).
+        present(session, host)
+        paintRecoveries++
     }
 
     /**
@@ -630,6 +659,9 @@ class GeckoBrowserEngine(
     private companion object {
         /** How long a resumed surface may stay unpainted before we repair it. */
         const val PAINT_RESUME_GRACE_MS = 1200L
+
+        /** A load that produced no frame in this window is re-acquired. */
+        const val PAINT_RELOAD_GRACE_MS = 1500L
 
         private val RUNTIME_LOCK = Any()
 
@@ -2073,11 +2105,19 @@ internal class GeckoBrowserSession(
             // error card with Retry for it is what made Google's sign-in look
             // broken over and over.
             if (error.code == NS_BINDING_ABORTED) return null
+            // Counters only (code/category, never the URL): the bug report the
+            // shake gesture prepares must be able to say what failed.
+            AppLog.event("load error code=${error.code} category=${error.category}")
             // Recorded WITHOUT the URI (never log or surface full URLs); the
             // numeric code/category is what makes a failure diagnosable from
             // a screenshot alone.
             _state.update {
                 it.copy(
+                    // The load was halted below, so it is no longer loading.
+                    // Leaving isLoading true left the toolbar showing "stop":
+                    // the only refresh control on screen did nothing, which is
+                    // half of the "refresh does not work" report.
+                    isLoading = false,
                     loadFailed = true,
                     loadErrorCode = error.code,
                     loadErrorCategory = error.category,

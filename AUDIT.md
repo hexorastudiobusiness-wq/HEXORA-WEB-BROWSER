@@ -620,3 +620,37 @@ Skin-specific behaviour that is *not* code-fixable (documented, not "fixed"):
 One UI's sleeping apps, HyperOS autostart, ColorOS/OxygenOS background freezes
 all kill sessions while away. That is exactly the case the suspension/restore
 path and the new paint-resume repair exist for.
+
+## 0.5.8 (cont.) — the error card whose Retry did nothing
+
+Owner's report: once, a page showed the load-failed card. Retry did nothing,
+the toolbar refresh did nothing, and selecting the tab from the tab tray fixed
+it — the same "the tray is the only cure" signature as the black tabs.
+
+Reading the code, three separate defects line up with that signature:
+
+1. **Retry had no path for a tab without a session.** `BrowserAction.Reload`
+   read `entry?.session` and, when it was `null`, fell through to
+   `session?.reload()` — a no-op. A tab whose content process died while the
+   app was away (`handleDeadSession` with `witnessed = false`) keeps
+   `loadFailed = true` from `onSessionDied` while `entry.session` becomes
+   `null`, so the card stayed up and its only button did nothing.
+   The tab tray healed it because `switchTab()` restores a session-less tab.
+2. **`reload()` is a no-op for a load Gecko halted.** The load-error handler
+   returns `null` on purpose (so Gecko's English error page never shows), which
+   halts that navigation. Retrying it with `reload()` asks Gecko to reload a
+   navigation that no longer exists. Retry now navigates to the failed URL
+   again instead.
+3. **A session that is referenced but already closed** was treated as healthy by
+   the resume path (`active.session == null` was the only check), so coming back
+   left the card up with nothing able to clear it.
+
+`recoverActivePage()` now serves Retry, the toolbar refresh and pull-to-refresh:
+no session → restore (the same thing the tray does); unusable session → the dead
+session is suspended and the tab restored; live session with a halted failure →
+re-navigate to the page's own URL; then `verifyDisplayAfterReload()` waits for a
+frame and re-acquires the display (`setSession` on the tab's surface, or
+`present()` when that surface is not in the container) if none arrives. Nothing
+in that path reloads a healthy page.
+
+`onBrowserResumed()` also treats a referenced-but-closed session as dead now.
