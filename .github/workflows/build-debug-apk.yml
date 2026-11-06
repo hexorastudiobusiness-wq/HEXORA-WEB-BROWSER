@@ -94,6 +94,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          TITLE="CI build failure ${GITHUB_SHA::7}"
+          # A re-run of the same commit must not file a second issue.
+          if gh issue list --state open --search "$TITLE in:title" --json title \
+               --jq '.[].title' | grep -Fxq "$TITLE"; then
+            echo "An open issue for $TITLE already exists; not filing another."
+            exit 0
+          fi
           {
             echo "Build failed for commit $GITHUB_SHA (run $GITHUB_RUN_ID)."
             echo
@@ -102,5 +109,20 @@ jobs:
             echo '```'
           } > failure-report.md
           gh issue create \
-            --title "CI build failure ${GITHUB_SHA::7}" \
+            --title "$TITLE" \
             --body-file failure-report.md
+
+      # The counterpart of the step above: a green build closes the failure
+      # reports from earlier commits. Without this, every transient compile
+      # error leaves an open issue that is fixed ten minutes later and nobody
+      # ever closes it.
+      - name: Close build-failure issues from earlier commits
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue list --state open --search 'CI build failure in:title' \
+            --limit 100 --json number --jq '.[].number' | while read -r number; do
+              gh issue close "$number" \
+                --comment "Fixed: $GITHUB_SHA builds green (run $GITHUB_RUN_ID)."
+            done

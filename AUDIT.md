@@ -1142,3 +1142,34 @@ mapping. No hardcoded colours existed outside `ui/theme`, so every screen
 follows the new schemes without changes.
 
 `versionCode` 41 / `versionName` 0.6.4.
+
+---
+
+## 30. The 29 open issues — what they were, and why they will not come back
+
+Every open issue in the repository was filed by `app/github-actions`. None was
+a report from a person, and none described a defect that is still in the app:
+
+| Group | Count | What it actually was | State |
+|---|---|---|---|
+| `CI build failure <sha>` | 23 | compile errors from development commits between 2026-10-15 and 2026-11-06 — a broken `settings.gradle.kts`, AGP/Gradle/Kotlin version mismatches, missing imports, unresolved references, and the 0.6.1 aapt apostrophe failure | each fixed by the commit after it; `main` builds green |
+| `CI release build failure <sha>` | 1 | the same class of failure on the signed-release path, plus an `sdkmanager` licence prompt that was never answered | the setup step now runs `yes \| sdkmanager --licenses` |
+| `Emulator smoke report <sha>` | 5 | the emulator never booted (`HVF error: HV_UNSUPPORTED`, `failed to initialize HVF`), so there was no logcat: the whole body was "fresh-logcat.txt missing" | not app crashes at all |
+
+The real defect was in the workflows, in three places:
+
+1. **Nothing ever closed a failure issue.** A build failed, the next commit fixed
+   it, and the report stayed open forever. Both build workflows now close their
+   own failure reports on the next green run, and a re-run of the same commit no
+   longer files a duplicate.
+2. **The smoke workflow filed an issue unconditionally** (`if: always()`). It
+   now first decides whether there is anything to report — a `FATAL EXCEPTION`
+   in either logcat, or a process that was not running after the launch — and
+   only then files. A run where the emulator never booted stays in the Actions
+   tab where it belongs.
+3. **The smoke workflow did not record its own verdicts.** `FRESH_CURRENT_DEAD`
+   and `UPGRADED_DEAD` were printed to the run log and lost; they are written to
+   `verdicts.txt` now, which is also what the new gate reads.
+
+The 29 existing issues were closed with a comment naming the build that
+superseded them.
