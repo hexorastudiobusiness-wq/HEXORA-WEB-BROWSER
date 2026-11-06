@@ -128,11 +128,15 @@ jobs:
         id: verdict
         if: always()
         run: |
+          # cat, not grep -l: grep exits non-zero when *any* named file is
+          # missing, so a run that captured one log and not the other would
+          # have been read as "no crash" even when the log it did capture holds
+          # a FATAL EXCEPTION.
           found="false"
-          if grep -l "FATAL EXCEPTION" fresh-logcat.txt upgrade-logcat.txt 2>/dev/null; then
+          if cat fresh-logcat.txt upgrade-logcat.txt 2>/dev/null | grep -q "FATAL EXCEPTION"; then
             found="true"
           fi
-          if grep -E "FRESH_CURRENT_DEAD|UPGRADED_DEAD" verdicts.txt 2>/dev/null; then
+          if cat verdicts.txt 2>/dev/null | grep -qE "FRESH_CURRENT_DEAD|UPGRADED_DEAD"; then
             found="true"
           fi
           echo "found=$found" >> "$GITHUB_OUTPUT"

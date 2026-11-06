@@ -1173,3 +1173,11 @@ The real defect was in the workflows, in three places:
 
 The 29 existing issues were closed with a comment naming the build that
 superseded them.
+
+The gate was tested before it shipped, and the first version of it was wrong:
+`grep -l "FATAL EXCEPTION" fresh-logcat.txt upgrade-logcat.txt` exits non-zero
+when *any* named file is missing, so a run that captured one log and not the
+other would have been read as "no crash" while the log it did capture held the
+trace. It now pipes both files through `cat`, and the six cases that matter
+(nothing captured, both launches alive, dead process, crash in either log,
+clean logs) were checked by hand.
