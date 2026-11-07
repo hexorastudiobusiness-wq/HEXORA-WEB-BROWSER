@@ -34,13 +34,13 @@ Hard technical identity:
 
 Current shipped state (update this section on every release):
 
-- Released version **1.0.1**, `versionCode` **43** — signed with the release
-  key and published as GitHub Release **`v1.0.1`** (arm64-v8a APK only)
+- Released version **1.0.2**, `versionCode` **44** — signed with the release
+  key and published as GitHub Release **`v1.0.2`** (arm64-v8a APK only)
 - 1.0.0 is the build the owner reported on; every defect it surfaced is
   fixed in §33 of `AUDIT.md`, and fixes now wait for a phone check
-- Work after 1.0.1 — the launcher icon restored to 1.0.0's files, a
-  full-bleed designed splash, and the pan/zoom touch-stream fix — is in
-  §34 of `AUDIT.md`. None of it is built or published
+- 1.0.2 is the launcher icon restored to 1.0.0's files, a full-bleed
+  designed splash, and the pan/zoom touch-stream fix — §34 of `AUDIT.md`.
+  Its fixes wait for the same phone check
 - Development builds: GitHub prereleases named `debug-<short-sha>`
 - Previous signed release before the rewrite: `v0.3.3`
 - Room database version **5** (direct migrations 1→5, 2→5, 3→5 and 4→5

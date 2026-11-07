@@ -3,7 +3,7 @@
 A fast, simple, and secure personal Android web browser built with
 **Kotlin**, **Jetpack Compose**, and **Mozilla GeckoView**.
 
-Current version: **1.0.1** (`versionCode` 43) — see
+Current version: **1.0.2** (`versionCode` 44) — see
 [Releases](https://github.com/hexorastudiobusiness-wq/HEXORA-WEB-BROWSER/releases).
 
 ## Guiding principles
