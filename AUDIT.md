@@ -1400,9 +1400,15 @@ GeckoView has no public API to set or reset the page's own pinch zoom, so a page
 already stuck in that state can only be reloaded — which is why the fix is about
 never entering it.
 
-Not built, not published, nothing pushed: the owner asked for no output this
-round, and a push to `arena/**` starts a debug build and the emulator smoke run
-by itself. None of this has been on a phone.
+**Released as 1.0.2.** The owner asked for an official cut of this round so the
+update could be installed over his history. Debug CI on the branch compiled it
+(run 42357336174), PR #43 was merged to `main` (`b6eb21e`), and the release
+workflow (run 42357781428) built, verified and published it: tag `v1.0.2`, asset
+`app-arm64-v8a-release.apk` at 107,014,893 bytes, `versionCode` 44, certificate
+digest `ad6184c8…52a2c6` — byte for byte the one 1.0.1 was signed with, so it
+installs in place and keeps bookmarks, history, logins and the tab strip.
+
+Compiled is not run. None of this has been on a phone yet.
 
 **A note on what "it has not happened again" means here.** The owner reports
 that the zoom defect appeared once and has not recurred since. That is a fact
