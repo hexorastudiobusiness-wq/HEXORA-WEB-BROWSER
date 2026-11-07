@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Launcher icon background. -->
     <color name="ic_launcher_background">#0A141F</color>
+    <!-- The top edge of the full-screen splash artwork, repeated here so the
+         frames before Compose draws are the same colour as the splash. -->
+    <color name="splash_background">#FDFEFF</color>
 </resources>

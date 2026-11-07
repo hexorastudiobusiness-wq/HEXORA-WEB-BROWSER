@@ -65,6 +65,7 @@ import com.example.browser.ui.bookmarks.BookmarksScreen
 import com.example.browser.ui.bookmarks.BookmarksViewModel
 import com.example.browser.ui.browser.BrowserScreen
 import com.example.browser.ui.browser.BrowserViewModel
+import com.example.browser.ui.components.SplashOverlay
 import com.example.browser.ui.downloads.DownloadsScreen
 import com.example.browser.ui.downloads.DownloadsViewModel
 import com.example.browser.ui.history.HistoryScreen
@@ -505,6 +506,9 @@ class MainActivity : ComponentActivity() {
                             onDismiss = { cancelPendingFilePicker() },
                         )
                     }
+                    // Last child of the surface, so it covers the window for its
+                    // first frames and then fades away on its own.
+                    SplashOverlay()
                 }
             }
         }
