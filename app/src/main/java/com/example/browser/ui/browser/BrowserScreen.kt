@@ -1134,18 +1134,11 @@ private fun BrowserPageContent(
                                     text = loadFailureMessage(state),
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
-                                if (state.loadErrorCode != 0) {
-                                    // Numeric only: never the URL. Enough for a
-                                    // screenshot to identify the failure.
-                                    Text(
-                                        text = stringResource(
-                                            R.string.page_load_failed_code,
-                                            state.loadErrorCode,
-                                        ),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
+                                // The numeric code used to be printed here. It
+                                // told the owner nothing they could act on, and
+                                // "code 37" under a wrong address is exactly the
+                                // kind of thing that reads as a broken app. The
+                                // number still reaches the diagnostics screen.
                             }
                             Button(onClick = { onAction(BrowserAction.Reload) }) {
                                 Text(stringResource(R.string.action_retry))
@@ -1184,8 +1177,12 @@ private fun loadFailureMessage(state: BrowserUiState): String {
             stringResource(R.string.page_load_failed_security)
         code == 0x63 -> stringResource(R.string.page_load_failed_redirect)
         code == 0x44 -> stringResource(R.string.page_load_failed_renderer)
-        code == 0x23 || code == 0x33 || code == 0x43 || code == 0x93 || // net
-            code == 0x25 -> // unknown host
+        // A host that does not resolve is a typo far more often than it is a
+        // connection problem — `github.con` is the example that produced this.
+        // Telling the owner to check their connection sent them looking in the
+        // wrong place.
+        code == 0x25 -> stringResource(R.string.page_load_failed_unknown_host)
+        code == 0x23 || code == 0x33 || code == 0x43 || code == 0x93 ->
             stringResource(R.string.page_load_failed_network)
         category == 0x3 -> stringResource(R.string.page_load_failed_network)
         category == 0x2 -> stringResource(R.string.page_load_failed_security)

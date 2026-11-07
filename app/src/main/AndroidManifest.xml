@@ -13,6 +13,13 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The saved-login vault is gated by the system's own authentication
+         prompt. BiometricPrompt refuses to run without USE_BIOMETRIC (it
+         throws SecurityException), and USE_FINGERPRINT is the same capability
+         under its pre-API-28 name. Both are declared, neither is asked for at
+         runtime: they are normal permissions. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 

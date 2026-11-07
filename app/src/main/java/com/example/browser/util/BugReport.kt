@@ -1,6 +1,9 @@
 package com.example.browser.util
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 
@@ -23,14 +26,18 @@ object BugReport {
         appendLine("— What happened —")
         appendLine(description.trim().ifBlank { "(not described)" })
         appendLine()
-        appendLine(DeviceInfo.summary(context))
+        // Each block is optional: a report that loses the display list is
+        // worth more than a dialog that throws and kills the app.
+        appendLine(runCatching { DeviceInfo.summary(context) }.getOrElse {
+            "— Device —\n(unavailable: ${it.javaClass.simpleName})\n"
+        })
         appendLine()
         appendLine("— App state —")
         appendLine(appState.trim().ifBlank { "(unavailable)" })
         appendLine()
         appendLine("— App log —")
-        appendLine(AppLog.dump())
-        AppLog.crashDump()?.let { crash ->
+        appendLine(runCatching { AppLog.dump() }.getOrDefault("(unavailable)"))
+        runCatching { AppLog.crashDump() }.getOrNull()?.let { crash ->
             appendLine()
             appendLine("— Last crash —")
             appendLine(crash)
@@ -38,6 +45,26 @@ object BugReport {
         appendLine()
         appendLine("(Prepared by Hexora ${com.example.browser.BuildConfig.VERSION_NAME},")
         appendLine(" embedded browser engine: GeckoView)")
+    }
+
+    /**
+     * The last-resort body: what the app can guarantee to produce when the full
+     * report cannot be assembled. Small on purpose, and built from parts that
+     * cannot throw (the log dump is already tolerant).
+     */
+    fun minimal(description: String): String = buildString {
+        appendLine("— What happened —")
+        appendLine(description.trim().ifBlank { "(not described)" })
+        appendLine()
+        appendLine("(the full report could not be assembled)")
+        appendLine()
+        appendLine("— App log —")
+        appendLine(runCatching { AppLog.dump() }.getOrDefault("(unavailable)"))
+        runCatching { AppLog.crashDump() }.getOrNull()?.let { crash ->
+            appendLine()
+            appendLine("— Last crash —")
+            appendLine(crash)
+        }
     }
 
     fun subject(description: String): String {
@@ -61,6 +88,41 @@ object BugReport {
         putExtra(Intent.EXTRA_EMAIL, arrayOf(BrowserRole.DEVELOPER_EMAIL))
         putExtra(Intent.EXTRA_SUBJECT, subject(text))
         putExtra(Intent.EXTRA_TEXT, text)
+    }
+
+    /**
+     * Starts [intent] without letting the launch kill the process.
+     *
+     * Two things go wrong here on real devices: an OEM context that is not an
+     * Activity (which needs `FLAG_ACTIVITY_NEW_TASK` and otherwise throws
+     * `AndroidRuntimeException`), and a system with no app that answers the
+     * intent at all (`ActivityNotFoundException`). Both used to be one
+     * unguarded `startActivity` away from a crash in the report dialog.
+     *
+     * @return false when nothing handled the intent.
+     */
+    fun launch(context: Context, intent: Intent): Boolean {
+        val host = context.findActivity()
+        val safeIntent = if (host == null) {
+            Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        } else {
+            intent
+        }
+        return try {
+            (host ?: context).startActivity(safeIntent)
+            true
+        } catch (error: ActivityNotFoundException) {
+            false
+        } catch (error: RuntimeException) {
+            AppLog.event("report launch failed: ${error.javaClass.simpleName}")
+            false
+        }
+    }
+
+    private tailrec fun Context.findActivity(): Activity? = when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
     }
 
     /** Plain "write to the developer" link: no report, just their address. */

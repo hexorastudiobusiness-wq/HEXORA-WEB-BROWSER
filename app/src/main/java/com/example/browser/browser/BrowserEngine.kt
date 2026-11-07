@@ -68,6 +68,14 @@ interface BrowserEngine {
     fun verifyPaintAfterResume() {}
 
     /**
+     * The window changed size: rotation, split screen, or a frozen-app restore
+     * that hands the app back at a different geometry. Everything that owns a
+     * surface has to take the new bounds; the view tree alone does not, because
+     * the Gecko surfaces keep the rectangle they were last measured with.
+     */
+    fun onWindowGeometryChanged() {}
+
+    /**
      * Same verification for an explicit (re)load — Retry, the toolbar refresh,
      * pull-to-refresh. If the surface produces no frame at all shortly after a
      * load was asked for, it is re-acquired from the live session (a repaint,

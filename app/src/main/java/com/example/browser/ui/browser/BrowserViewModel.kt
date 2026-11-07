@@ -179,6 +179,14 @@ class BrowserViewModel(
      * async and a page must not lay out at the wrong zoom first).
      */
     private var siteZoom: Map<String, Int> = emptyMap()
+
+    /**
+     * The host the zoom panel was opened for. Kept because the page can
+     * navigate while the panel is open, and the value the user picked must be
+     * stored against the site they were looking at, not against whatever
+     * loaded underneath in the meantime.
+     */
+    private var zoomTargetHost: String? = null
     private var siteDesktop: Map<String, Boolean> = emptyMap()
     private var zoomPersistJob: Job? = null
 
@@ -1099,14 +1107,25 @@ class BrowserViewModel(
                 _savedLoginSuggestion.value = null
             }
             BrowserAction.ShowZoomPanel -> {
-                _zoomPercent.value = siteZoom[
-                    SitePreferencesStore.hostOf(currentPageUrl()).orEmpty()
-                ] ?: SitePreferencesStore.DEFAULT_ZOOM
+                val host = SitePreferencesStore.hostOf(currentPageUrl()).orEmpty()
+                val stored = siteZoom[host] ?: SitePreferencesStore.DEFAULT_ZOOM
+                // Text zoom is one factor for the whole engine, not one per
+                // site, and the store is per site. A page that started before
+                // this site's value was known — a login that redirects through
+                // another host is the usual way — leaves the engine at 100%
+                // while the store still says 70%. Pushing the stored value here
+                // makes the page and the panel agree before the user touches
+                // anything, instead of only after they drag the slider to the
+                // number it was already showing.
+                engine?.setTextZoomPercent(stored)
+                _zoomPercent.value = stored
+                zoomTargetHost = host.ifBlank { null }
                 _zoomPanelVisible.value = true
             }
             BrowserAction.HideZoomPanel -> {
                 _zoomPanelVisible.value = false
-                persistSiteZoom(_zoomPercent.value, immediate = true)
+                persistSiteZoom(_zoomPercent.value, immediate = true, host = zoomTargetHost)
+                zoomTargetHost = null
             }
             is BrowserAction.SetSiteZoom -> {
                 val percent = action.percent.coerceIn(
@@ -1116,12 +1135,18 @@ class BrowserViewModel(
                 _zoomPercent.value = percent
                 // Applied live so the page reflows under the user's finger.
                 engine?.setTextZoomPercent(percent)
-                persistSiteZoom(percent)
+                // Written straight away: the 350 ms coalescing window was long
+                // enough for a page that finished loading in between to start
+                // with the old factor and leave the two out of step again.
+                persistSiteZoom(percent, immediate = true, host = zoomTargetHost)
             }
             BrowserAction.ResetSiteZoom -> {
                 _zoomPercent.value = SitePreferencesStore.DEFAULT_ZOOM
                 engine?.setTextZoomPercent(SitePreferencesStore.DEFAULT_ZOOM)
-                persistSiteZoom(SitePreferencesStore.DEFAULT_ZOOM)
+                persistSiteZoom(
+                    SitePreferencesStore.DEFAULT_ZOOM,
+                    host = zoomTargetHost,
+                )
             }
             BrowserAction.DismissPageContextMenu ->
                 _pageContextMenu.value = null
@@ -1640,14 +1665,13 @@ class BrowserViewModel(
         // recreate sessions on every return to the app: recreating a session
         // reloads the page, which is what made returning look like a refresh.
         appInForeground = true
-        // Returning to the app is the explicit "this tab is needed again"
-        // moment: a tab whose process died quietly in the background is
-        // restored now. A tab that crashed in front of the user stays
-        // crashed until they restore it (see handleDeadSession).
-        val active = activeEntry()
-        if (active != null && active.session == null && !active.crashed) {
-            restoreTab(active)
-        }
+        // Deliberately nothing else. Restoring a tab here meant creating a
+        // GeckoSession, opening it and binding a new surface *inside onStart*,
+        // before the window had a frame. On a device whose content process was
+        // frozen or reclaimed while the app was away, that ran for several
+        // seconds on the main thread and the system answered with "Android
+        // System isn't responding" — the Xiaomi report. The restore now
+        // happens once the window is real; see onBrowserResumed().
     }
 
     /** Called by the Activity when the app leaves the foreground. */
@@ -1673,6 +1697,17 @@ class BrowserViewModel(
         ) {
             suspendTabsOutsideWarmSet()
         }
+    }
+
+    /**
+     * The window changed size under the app (rotation, split screen, or a
+     * frozen-app restore). The content layer owns the surfaces, so it is asked
+     * to take the new bounds; the UI state itself needs nothing.
+     */
+    fun onWindowGeometryChanged() {
+        _pullProgress.value = 0f
+        engine?.onWindowGeometryChanged()
+        syncContentTouch()
     }
 
     /**
@@ -2063,12 +2098,16 @@ class BrowserViewModel(
     }
 
     /** Saves the active site's zoom; debounced while the slider is dragged. */
-    private fun persistSiteZoom(percent: Int, immediate: Boolean = false) {
-        val host = SitePreferencesStore.hostOf(currentPageUrl()) ?: return
+    private fun persistSiteZoom(
+        percent: Int,
+        immediate: Boolean = false,
+        host: String? = null,
+    ) {
+        val target = host ?: SitePreferencesStore.hostOf(currentPageUrl()) ?: return
         zoomPersistJob?.cancel()
         zoomPersistJob = viewModelScope.launch {
             if (!immediate) delay(350)
-            sitePreferencesStore.setZoom(host, percent)
+            sitePreferencesStore.setZoom(target, percent)
         }
     }
 

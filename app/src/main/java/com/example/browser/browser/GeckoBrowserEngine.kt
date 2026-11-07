@@ -655,6 +655,34 @@ class GeckoBrowserEngine(
         // snapshot here. Kept as the hook the Activity posts on stop.
     }
 
+    override fun onWindowGeometryChanged() {
+        val host = contentContainer ?: return
+        // Measure everything again from the window down. On HyperOS 2 a frozen
+        // app comes back to a window that grew while its surfaces did not: the
+        // result is a page pane stuck at the old height (black) with the app's
+        // background filling the rest.
+        host.requestLayout()
+        for (index in 0 until host.childCount) {
+            val tabHost = host.getChildAt(index) as? SwipeableHostLayout ?: continue
+            tabHost.requestLayout()
+            for (child in 0 until tabHost.childCount) {
+                tabHost.getChildAt(child)?.requestLayout()
+            }
+        }
+        val session = activeSession ?: return
+        if (!session.geckoSession.isOpen) return
+        // A surface that was resized while nothing was painting can come back
+        // with an empty buffer. Re-binding is the repair that already exists
+        // for that, and it repeats no load.
+        val token = ++resumeCheckToken
+        mainHandler.postDelayed({
+            if (token != resumeCheckToken) return@postDelayed
+            if (contentHidden) return@postDelayed
+            if (!session.geckoSession.isOpen) return@postDelayed
+            if (session.hasPainted && !session.painted) fullReattach(session, host)
+        }, PAINT_RESUME_GRACE_MS)
+    }
+
     /**
      * The black-tab repair. Gecko drops the painted content when the app is
      * away; if it never reports a new frame after we are back, the display is

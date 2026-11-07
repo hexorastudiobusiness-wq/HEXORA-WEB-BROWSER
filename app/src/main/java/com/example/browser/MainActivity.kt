@@ -546,7 +546,30 @@ class MainActivity : ComponentActivity() {
         // surface actually exists again.
         window.decorView.post {
             browserViewModel.onBrowserResumed()
+            // The window may have come back at a different size than the one
+            // the surfaces were measured against (frozen-app restore, split
+            // screen). Asking for one layout pass here costs nothing and
+            // prevents the page pane from staying at the old rectangle.
+            window.decorView.requestLayout()
         }
+    }
+
+    /**
+     * The manifest tells the system this Activity handles size changes itself
+     * (`configChanges` lists `screenSize`, `smallestScreenSize`, `screenLayout`
+     * and `orientation`), which keeps the browser from reloading every page on
+     * rotation. It said so without overriding this method, so a real change
+     * reached nobody: the window resized, the content stayed where it was, and
+     * the app came back drawn in part of the screen — the HyperOS 2 report.
+     */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        window.decorView.requestLayout()
+        browserViewModel.onWindowGeometryChanged()
+        AppLog.event(
+            "config changed: ${newConfig.screenWidthDp}x${newConfig.screenHeightDp}dp " +
+                "orientation=${newConfig.orientation}",
+        )
     }
 
     override fun onPause() {
@@ -614,29 +637,40 @@ class MainActivity : ComponentActivity() {
         handleWebSearchIntent(intent)
     }
 
-    /** Device-credential/biometric gate for the saved-login manager. */
+    /**
+     * Device-credential/biometric gate for the saved-login manager.
+     *
+     * Neither route is trusted blindly. The framework prompt throws
+     * `SecurityException` without `USE_BIOMETRIC` in the manifest, and OEM
+     * implementations (One UI, HyperOS) throw from `authenticate()` as well
+     * when no biometric is enrolled or the prompt is asked for at a bad
+     * moment. A gate that cannot open must say so and leave the vault locked;
+     * it must never take the process down, which is exactly what it did
+     * before: the manifest had no biometric permission at all.
+     */
     private fun authenticateForPasswords(onSuccess: () -> Unit) {
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
-            // Framework BiometricPrompt cannot combine biometric + device
-            // credential before API 30; use the system credential prompt
-            // instead of leaving the offline vault ungated on API 26..29.
-            val keyguard = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
-            val intent = keyguard.createConfirmDeviceCredentialIntent(
-                getString(R.string.passwords_unlock_title),
-                getString(R.string.passwords_unlock_subtitle),
-            )
-            if (intent == null) {
-                Toast.makeText(
-                    this,
-                    R.string.passwords_unlock_failed,
-                    Toast.LENGTH_SHORT,
-                ).show()
-            } else {
-                pendingPasswordUnlockCallback = onSuccess
-                passwordUnlockLauncher.launch(intent)
-            }
-            return
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val started = runCatching { showBiometricPrompt(onSuccess) }
+                .onFailure { AppLog.event("passwords: biometric prompt failed (${it.javaClass.simpleName})") }
+                .isSuccess
+            if (started) return
         }
+        // API < 30 cannot combine biometric and device credential in one
+        // framework prompt, and on API 30+ this is the way back when the
+        // prompt itself is unusable.
+        val opened = runCatching { showDeviceCredentialPrompt(onSuccess) }
+            .onFailure { AppLog.event("passwords: credential prompt failed (${it.javaClass.simpleName})") }
+            .getOrDefault(false)
+        if (!opened) {
+            Toast.makeText(
+                this,
+                R.string.passwords_unlock_failed,
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    private fun showBiometricPrompt(onSuccess: () -> Unit) {
         val prompt = BiometricPrompt.Builder(this)
             .setTitle(getString(R.string.passwords_unlock_title))
             .setSubtitle(getString(R.string.passwords_unlock_subtitle))
@@ -674,6 +708,22 @@ class MainActivity : ComponentActivity() {
                 }
             },
         )
+    }
+
+    /** @return true when the system prompt was actually opened. */
+    private fun showDeviceCredentialPrompt(onSuccess: () -> Unit): Boolean {
+        val keyguard = getSystemService(KEYGUARD_SERVICE) as? KeyguardManager ?: return false
+        // With no PIN/pattern/password set there is nothing to confirm, and
+        // the intent builder returns null.
+        if (!keyguard.isDeviceSecure) return false
+        @Suppress("DEPRECATION")
+        val intent = keyguard.createConfirmDeviceCredentialIntent(
+            getString(R.string.passwords_unlock_title),
+            getString(R.string.passwords_unlock_subtitle),
+        ) ?: return false
+        pendingPasswordUnlockCallback = onSuccess
+        passwordUnlockLauncher.launch(intent)
+        return true
     }
 
     /** Opens http(s) links handed to us by other apps in a fresh tab. */

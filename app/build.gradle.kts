@@ -12,10 +12,6 @@ plugins {
 val releaseStorePath = System.getenv("HEXORA_RELEASE_STORE_FILE")
 val hasReleaseSigning = !releaseStorePath.isNullOrBlank()
 
-// Diagnostic overrides used by .github/workflows/probe-builds.yml only. Both
-// are absent in a normal build, so the published APK is untouched by them.
-val probeApplicationId = providers.gradleProperty("hexoraApplicationId").orNull
-val probeDebugSigning = providers.gradleProperty("hexoraProbeDebugSigning").isPresent
 
 android {
     // The source tree still lives under com.example.browser; only the install
@@ -25,14 +21,14 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = probeApplicationId ?: "com.hexora.browser"
+        applicationId = "com.hexora.browser"
         // GeckoView ships its own native libraries and requires a modern
         // baseline; 26 (Android 8.0) keeps manifest merging safe across
         // current GeckoView releases.
         minSdk = 26
         targetSdk = 37
-        versionCode = 42
-        versionName = "1.0.0"
+        versionCode = 43
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -67,10 +63,6 @@ android {
         release {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
-            } else if (probeDebugSigning) {
-                // Probe builds are installed by hand on the owner's phone; they
-                // need to be installable, not shippable.
-                signingConfig = signingConfigs.getByName("debug")
             }
             isMinifyEnabled = false
             proguardFiles(

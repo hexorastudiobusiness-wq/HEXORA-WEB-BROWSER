@@ -1,6 +1,8 @@
 package com.example.browser.util
 
+import android.content.Context
 import android.util.Log
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
 import java.util.Date
@@ -34,16 +36,25 @@ object AppLog {
     @Volatile
     private var lastCrash: String? = null
 
-    fun install() {
+    /** Where that trace is persisted, so it outlives the dead process. */
+    private var crashFile: File? = null
+
+    fun install(context: Context) {
         if (installed) return
         installed = true
+        crashFile = File(context.filesDir, CRASH_FILE)
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching {
-                lastCrash = buildString {
+                val text = buildString {
                     append("thread=").append(thread.name).append('\n')
+                    append("when=").append(stamp.format(Date())).append('\n')
                     append(Log.getStackTraceString(error))
-                }
+                }.take(CRASH_MAX_CHARS)
+                lastCrash = text
+                // Written, not just remembered: the reader of this file runs in
+                // the *next* process, because this one is about to end.
+                crashFile?.writeText(text)
                 // Log first, then let the platform do what it always does.
                 event("CRASH ${error.javaClass.name}: ${error.message}")
             }
@@ -65,7 +76,13 @@ object AppLog {
         entries.joinToString("\n")
     }
 
-    fun crashDump(): String? = lastCrash
+    /** The last crash: from this process if it happened here, else from disk. */
+    fun crashDump(): String? = lastCrash ?: runCatching {
+        crashFile?.takeIf { it.isFile && it.length() > 0 }?.readText()
+    }.getOrNull()
 
     fun clear() = synchronized(lock) { entries.clear() }
+
+    private const val CRASH_FILE = "last-crash.txt"
+    private const val CRASH_MAX_CHARS = 20_000
 }

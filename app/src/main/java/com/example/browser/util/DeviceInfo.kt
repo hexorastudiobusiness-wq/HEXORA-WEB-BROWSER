@@ -40,18 +40,32 @@ object DeviceInfo {
     private val propCache = mutableMapOf<String, String>()
     private val lock = Any()
 
-    /** `getprop <name>` — the only portable way to read these on modern Android. */
+    /**
+     * `getprop <name>` — the only portable way to read these on modern Android.
+     *
+     * Bounded on purpose. A property read is a `fork`/`exec` of another
+     * process: on a loaded device it can take a second, and an unbounded wait
+     * here once left the report builder hanging with the dialog frozen. A
+     * property that does not answer within [PROP_TIMEOUT_MS] is treated as
+     * absent — the report says less, but it arrives.
+     */
     fun property(name: String): String = synchronized(lock) {
         propCache[name]?.let { return it }
         val value = runCatching {
             val process = ProcessBuilder("getprop", name).redirectErrorStream(true).start()
-            val text = process.inputStream.bufferedReader().use { it.readText() }.trim()
-            process.waitFor()
-            text
+            val finished = process.waitFor(PROP_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                ""
+            } else {
+                process.inputStream.bufferedReader().use { it.readText() }.trim()
+            }
         }.getOrDefault("")
         propCache[name] = value
         value
     }
+
+    private const val PROP_TIMEOUT_MS = 600L
 
     /** e.g. "HyperOS 2.0.201" / "One UI 7.0" — empty when nothing is exposed. */
     fun romLabel(): String {
@@ -66,7 +80,14 @@ object DeviceInfo {
      * The block a report starts with: hardware, OS, ROM, display, app build.
      * Multi-line plain text, no user data.
      */
-    fun summary(context: Context): String = buildString {
+    fun summary(context: Context): String = runCatching { summaryOrThrow(context) }
+        .getOrElse { error ->
+            // A report without device details is still a report; a crash here
+            // took the whole app down from the bug-report dialog.
+            "— Device —\n(unavailable: ${error.javaClass.simpleName})\n"
+        }
+
+    private fun summaryOrThrow(context: Context): String = buildString {
         appendLine("— Device —")
         appendLine("Manufacturer : ${Build.MANUFACTURER}")
         appendLine("Brand        : ${Build.BRAND}")
@@ -99,7 +120,10 @@ object DeviceInfo {
         appendLine("Package      : ${context.packageName}")
         appendLine("Version      : ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         appendLine("Debug build  : ${BuildConfig.DEBUG}")
-        appendLine("Locale       : ${configuration.locales.get(0)}")
+        // `getLocales()` is empty when a configuration was built without one.
+        val locale = runCatching { configuration.locales.get(0) }
+            .getOrNull() ?: java.util.Locale.getDefault()
+        appendLine("Locale       : $locale")
         appendLine("Time zone    : ${java.util.TimeZone.getDefault().id}")
         appendLine("Uptime (app) : since launch")
     }
