@@ -1335,3 +1335,71 @@ Verified: `assembleDebug` on the branch, then `v1.0.1` signed and published
 (`versionCode` 43, same key and applicationId as 1.0.0, so it installs in place).
 What is *not* verified: none of it has been run on a phone yet. That is the
 owner's next step, and the wording here says so rather than implying otherwise.
+
+## 34. After 1.0.1 — the icon back, a designed splash, and the zoom that stuck
+
+**1. The launcher icon is 1.0.0's again, file for file.** Redrawing it was a
+change nobody asked for. The adaptive icon, its foreground at all five
+densities and the plate colour are back out of commit `c50d30d`, and a byte
+comparison against that commit is empty. The monochrome layer and the `v33`
+override that came with the redraw are gone with it. A themed icon would have
+been fine on a launcher that supports one; it was not worth replacing the mark
+the owner had approved.
+
+**2. The splash is one image, not a logo in a box.** The old one was a white
+plate with sharp corners on a black field, and on HyperOS that is exactly what
+it looked like. It is now a designed 1080×2400 artwork — cool white grading into
+a blue-grey, a soft light behind the mark, the mark, and the wordmark set with
+open tracking — painted full-screen by the app and faded out after the first
+frame. Nothing in the chain has a black field or a corner to show: the window
+background is the artwork's own top colour, and the Android 12+ system splash
+draws that same colour with an empty icon, so the hand-over is invisible
+instead of a flash of one screen and then another.
+
+**3. A pinch could leave the page scrolled off its own top, for good.** The
+report: zoom worked, then it got confused; part of the top of the site stayed
+outside the screen, it was reachable only by panning with two fingers, no zoom
+percentage brought it back, and only closing the tab cleared it.
+
+The cause was in our touch path, not in Gecko. `HexoraGeckoView.onTouchEvent`
+sent `ACTION_DOWN` twice — once through `onTouchEventForDetailResult(event)`,
+which GeckoView's own documentation describes as "the same as
+`onTouchEvent(MotionEvent)`, but instead returns a result", and then again
+through `super.onTouchEvent(event)`. One finger therefore opened two touch
+streams. Gecko's pan/zoom controller counts pointers per stream; with the
+counts off by one, the pinch ends with a pointer that was never lifted, and
+while that is true the visual viewport is never re-clamped. Zoom back to 100%
+and the offset stays where the pinch left it: the page's layout scroll is
+already at zero, so no one-finger scroll can reach the part above the screen,
+two-finger panning moves the visual viewport and does reveal it, and nothing in
+the app can change it because the app never talks to the pan/zoom controller.
+A new tab is a new session, which is why closing the tab was the only cure.
+
+Three more things in the same path had the same shape:
+
+- The event handed to the detail API was a copy, recycled immediately after.
+  `PanZoomController` queues the event object itself while it is not attached
+  (`mQueuedEvents.add(...)`) and replays it later, so a recycled copy came back
+  as whatever the pool had written into it — coordinates and pointer indices
+  included. The event now goes in as it arrived and is never recycled.
+- Switching touch delivery off — an overlay appearing over the page — dropped
+  the rest of a gesture that Gecko was holding, and so did detaching the view.
+  Both now close it with an `ACTION_CANCEL` carrying the gesture's own down
+  time (the controller ignores a cancel whose down time does not match the one
+  it recorded), sent straight to `super.onTouchEvent` because the view's own
+  guard would otherwise drop it.
+- The tab-swipe host took any horizontal flick, including a two-finger pan of a
+  zoomed page. A second finger now ends the swipe for good.
+
+Pull-to-refresh is untouched: it still asks Gecko whether the page can scroll
+up and still lets the page receive every event it would have received anyway.
+
+**What is not fixable here, and why the panel confused the report:** the zoom
+slider is text size (Gecko exposes font scaling as one process-wide factor).
+GeckoView has no public API to set or reset the page's own pinch zoom, so a page
+already stuck in that state can only be reloaded — which is why the fix is about
+never entering it.
+
+Not built, not published, nothing pushed: the owner asked for no output this
+round, and a push to `arena/**` starts a debug build and the emulator smoke run
+by itself. None of this has been on a phone.
