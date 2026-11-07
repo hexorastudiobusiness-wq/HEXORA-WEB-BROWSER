@@ -1403,3 +1403,13 @@ never entering it.
 Not built, not published, nothing pushed: the owner asked for no output this
 round, and a push to `arena/**` starts a debug build and the emulator smoke run
 by itself. None of this has been on a phone.
+
+**A note on what "it has not happened again" means here.** The owner reports
+that the zoom defect appeared once and has not recurred since. That is a fact
+about an intermittent failure in the build he is running, not about this fix:
+none of §34 is installed on his phone. An intermittent fault that goes quiet is
+exactly what a touch-stream race looks like from the outside — the duplicate
+`ACTION_DOWN` only costs anything when the second stream lands while the
+controller is mid-gesture — so the report is consistent with the diagnosis
+without confirming it. The fix stays unproven until a build with it runs on the
+phone and a pinch is tried repeatedly.
