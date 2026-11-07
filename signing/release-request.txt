@@ -9,3 +9,5 @@ cut.
 Second release attempt: 1.0.0 (the first run reached the signature check and stopped there).
 
 Third cut of 1.0.0: the release notes now carry the signing certificate.
+
+1.0.1: the defect fixes from the owner's phone.

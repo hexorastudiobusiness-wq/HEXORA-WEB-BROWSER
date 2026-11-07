@@ -34,8 +34,10 @@ Hard technical identity:
 
 Current shipped state (update this section on every release):
 
-- Released version **1.0.0**, `versionCode` **42** — signed with the release
-  key and published as GitHub Release **`v1.0.0`** (arm64-v8a APK only)
+- Released version **1.0.1**, `versionCode` **43** — signed with the release
+  key and published as GitHub Release **`v1.0.1`** (arm64-v8a APK only)
+- 1.0.0 is the build the owner reported on; every defect it surfaced is
+  fixed in §33 of `AUDIT.md`, and fixes now wait for a phone check
 - Development builds: GitHub prereleases named `debug-<short-sha>`
 - Previous signed release before the rewrite: `v0.3.3`
 - Room database version **5** (direct migrations 1→5, 2→5, 3→5 and 4→5

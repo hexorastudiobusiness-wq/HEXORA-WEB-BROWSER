@@ -144,12 +144,36 @@ jobs:
           set -euo pipefail
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           TAG="v$VERSION"
-          cat > notes.md <<'NOTES_EOF'
-          Hexora Browser 1.0.0 — the first official release.
+          # Unquoted heredoc on purpose: the version has to expand. The body
+          # contains no backticks and no other $ so nothing else can.
+          cat > notes.md <<NOTES_EOF
+          Hexora Browser ${VERSION} — signed release.
 
-          Built from `main` and signed with Hexora's release key. The APK is for arm64-v8a devices, meaning every 64-bit Android phone from the last several years.
+          Built from main and signed with Hexora's release key. The APK is for
+          arm64-v8a devices, meaning every 64-bit Android phone from the last
+          several years.
 
-          Installing over an earlier build: if what you have was signed with a different key — any of the older debug builds — Android refuses the update. Uninstall that one first; its bookmarks, history and saved logins are removed with it.
+          Installing over 1.0.0: same key, same applicationId, so the update
+          installs in place and keeps bookmarks, history and saved logins.
+
+          1.0.1 fixes what the phone found:
+
+          - the saved-login unlock button crashed the app (the biometric
+            permission was missing from the manifest)
+          - sending a bug report from Settings crashed the app
+          - a crash trace died with the crashed process, so reports never
+            carried one; it is written to disk now
+          - the app could come back from the background drawn in part of the
+            screen, and restoring a tab on resume could take long enough for
+            the system to report the app as not responding
+          - picking the phone up counted as a shake and opened the report
+            dialog
+          - a site zoomed to 70% was back at 100% after a login, while the
+            panel still said 70%
+          - a mistyped address said "network error"; it says the address could
+            not be found, and the raw error code is gone from the screen
+          - the launcher icon and the splash screen no longer show a white
+            plate with sharp corners
           NOTES_EOF
           if [ -f cert-info.md ]; then
             cat cert-info.md >> notes.md
