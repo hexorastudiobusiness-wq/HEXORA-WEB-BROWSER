@@ -1,16 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Android 12+ system splash. Black was the wrong colour for a light
-         mark on a white plate: it turned the icon into a white square with
-         sharp corners. The splash now uses the brand background, and the icon
-         sits on the same colour, so only the mark is visible. The window
-         background stays light, which is the colour the app itself draws. -->
+    <!-- Android 12+ system splash. The platform can only draw a colour and an
+         icon there, so it draws the colour the artwork starts with and no icon
+         at all; the designed, full-screen splash is painted by the app in its
+         first frame. Nothing square, nothing black. -->
     <style name="Theme.HexoraBrowser" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/splash_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:windowSplashScreenBackground">@color/ic_launcher_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_splash</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">@color/ic_launcher_background</item>
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon_empty</item>
         <item name="android:windowSplashScreenAnimationDuration">0</item>
     </style>
 </resources>

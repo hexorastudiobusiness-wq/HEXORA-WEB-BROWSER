@@ -153,27 +153,26 @@ jobs:
           arm64-v8a devices, meaning every 64-bit Android phone from the last
           several years.
 
-          Installing over 1.0.0: same key, same applicationId, so the update
-          installs in place and keeps bookmarks, history and saved logins.
+          Installing over 1.0.1: same key, same applicationId, so the update
+          installs in place and keeps bookmarks, history, saved logins and the
+          open tab strip.
 
-          1.0.1 fixes what the phone found:
+          What changed in 1.0.2:
 
-          - the saved-login unlock button crashed the app (the biometric
-            permission was missing from the manifest)
-          - sending a bug report from Settings crashed the app
-          - a crash trace died with the crashed process, so reports never
-            carried one; it is written to disk now
-          - the app could come back from the background drawn in part of the
-            screen, and restoring a tab on resume could take long enough for
-            the system to report the app as not responding
-          - picking the phone up counted as a shake and opened the report
-            dialog
-          - a site zoomed to 70% was back at 100% after a login, while the
-            panel still said 70%
-          - a mistyped address said "network error"; it says the address could
-            not be found, and the raw error code is gone from the screen
-          - the launcher icon and the splash screen no longer show a white
-            plate with sharp corners
+          - the launcher icon is 1.0.0's again, file for file. Redrawing it was
+            a change nobody asked for
+          - the splash screen is one designed full-screen image instead of a
+            white plate with sharp corners on a black field, and Android 12's
+            own splash draws the artwork's colour with no icon, so nothing
+            square appears before it
+          - pinch zoom could leave a page scrolled off its own top: the app was
+            handing Gecko the same ACTION_DOWN twice, and two touch streams for
+            one finger leave the pan/zoom controller holding a finger that was
+            never lifted. Fixed at the source, along with a recycled event Gecko
+            could replay and a gesture that was dropped instead of cancelled
+
+          The zoom fix has not been on a phone yet. It is in this build so that
+          it can be.
           NOTES_EOF
           if [ -f cert-info.md ]; then
             cat cert-info.md >> notes.md

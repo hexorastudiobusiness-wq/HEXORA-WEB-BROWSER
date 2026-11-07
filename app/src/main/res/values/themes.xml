@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Plain platform theme: all real styling is done by Compose Material 3.
-         The window background stays light: it is what shows for the moment
-         between the splash and the first Compose frame, and the app's default
-         surface is light. -->
+         The window background matches the top of the splash artwork, so the
+         frames before the app draws are the splash's own colour rather than a
+         white flash or a black screen. -->
     <style name="Theme.HexoraBrowser" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/splash_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
 </resources>

@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.util.SparseArray
 import android.view.MotionEvent
@@ -889,6 +890,7 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
     private var downTime = 0L
     private var swiping = false
     private var fired = false
+    private var multiTouch = false
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
@@ -898,12 +900,21 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
                 downTime = event.eventTime
                 swiping = false
                 fired = false
+                multiTouch = false
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger makes the gesture a pinch or a two-finger
+                // pan of a zoomed page. Taking it for a tab swipe moved the
+                // page out from under the pinch — the gesture that was left
+                // over then had nothing to do with what the fingers were doing.
+                multiTouch = true
+                swiping = false
             }
             MotionEvent.ACTION_MOVE -> {
                 // A tab swipe must be a quick, deliberate flick, and it is
                 // never active while the keyboard is up: slow drags on a text
                 // field belong to the page.
-                if (!swiping && swipeEnabledProvider() && !isKeyboardVisible()) {
+                if (!swiping && !multiTouch && swipeEnabledProvider() && !isKeyboardVisible()) {
                     val dx = event.x - downX
                     val dy = event.y - downY
                     if (event.eventTime - downTime <= SWIPE_MAX_DURATION_MS &&
@@ -915,7 +926,10 @@ internal class SwipeableHostLayout(context: Context) : FrameLayout(context) {
                     }
                 }
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> swiping = false
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                swiping = false
+                multiTouch = false
+            }
         }
         return super.onInterceptTouchEvent(event) || swiping
     }
@@ -981,13 +995,26 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
     private val density = context.resources.displayMetrics.density
     private val pullThresholdPx = PULL_THRESHOLD_DP * density
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val uiHandler = Handler(Looper.getMainLooper())
 
     /**
      * While false the view refuses the gesture outright (no consumption), so a
      * Compose overlay drawn above it — Start Page, crash card, error card —
      * receives the tap. A consuming View would swallow it first.
+     *
+     * Turning it off while Gecko still holds a gesture closes that gesture
+     * (see [cancelTouchInGecko]); an overlay appearing mid-drag used to leave
+     * the pan/zoom controller with a finger that was never lifted.
      */
     var touchDeliveryEnabled: Boolean = true
+        set(value) {
+            if (field == value) return
+            field = value
+            if (!value) {
+                endPullGesture()
+                cancelTouchInGecko()
+            }
+        }
 
     /** Called for every gesture this view refuses while an overlay is up. */
     var onBlockedTouch: (() -> Unit)? = null
@@ -996,17 +1023,23 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
         if (!touchDeliveryEnabled) {
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                 onBlockedTouch?.invoke()
-                // Nothing took this gesture: make sure no stale pull state
-                // survives into the next real one.
-                pulling = false
-                reportPull(0f)
             }
+            // Nothing takes this gesture, and anything of it Gecko already
+            // received is closed rather than dropped.
+            endPullGesture()
+            cancelTouchInGecko()
             return false
         }
         return super.dispatchTouchEvent(event)
     }
 
     private var downY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
+    /** Down time of the gesture in flight; a cancel is only accepted with it. */
+    private var lastDownTime = 0L
+    /** True from a delivered ACTION_DOWN until its UP or CANCEL. */
+    private var gestureInFlight = false
     /** Gecko's answer for the current gesture; pessimistic until it arrives. */
     private var pageCanScrollUp = true
     private var gestureDecided = false
@@ -1017,14 +1050,28 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downY = ev.y
+                lastX = ev.x
+                lastY = ev.y
+                lastDownTime = ev.downTime
+                gestureInFlight = true
                 pulling = false
                 gestureDecided = false
                 pageCanScrollUp = true
                 reportPull(0f)
-                // Ask Gecko who owns this gesture. The same call hands the
-                // event to the page, so nothing is swallowed.
-                val copy = MotionEvent.obtain(ev)
-                onTouchEventForDetailResult(copy).accept(
+                // This call *is* the delivery: Gecko's own documentation says
+                // it is "the same as onTouchEvent(MotionEvent), but instead
+                // returns a result". Sending the same event through
+                // onTouchEvent() afterwards handed Gecko two touch streams for
+                // one finger. What that left behind was a pan/zoom controller
+                // convinced a pinch was still open: the page could be scrolled
+                // off its own top and no scroll would bring it back — only a
+                // new tab did.
+                //
+                // The event is passed as it arrived, never a recycled copy:
+                // while the view is not attached Gecko queues the object and
+                // replays it later, so a copy recycled here came back as
+                // garbage coordinates and pointer indices.
+                onTouchEventForDetailResult(ev).accept(
                     { detail ->
                         val canScrollTop = detail != null &&
                             (detail.scrollableDirections() and
@@ -1036,11 +1083,12 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
                     },
                     { gestureDecided = true },
                 )
-                copy.recycle()
                 return true
             }
 
             MotionEvent.ACTION_MOVE -> {
+                lastX = ev.x
+                lastY = ev.y
                 if (!pulling && gestureDecided && !pageCanScrollUp &&
                     ev.y - downY > touchSlop
                 ) {
@@ -1052,16 +1100,59 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
                 }
             }
 
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger is a pinch; it is not a pull towards refresh.
+                endPullGesture()
+            }
+
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 val shouldRefresh = pulling &&
                     ev.actionMasked == MotionEvent.ACTION_UP &&
                     (ev.y - downY) >= pullThresholdPx * 0.9f
+                gestureInFlight = false
                 pulling = false
                 reportPull(0f)
                 if (shouldRefresh) onPullRefresh?.invoke()
             }
         }
         return super.onTouchEvent(ev)
+    }
+
+    private fun endPullGesture() {
+        pulling = false
+        reportPull(0f)
+    }
+
+    /**
+     * Ends a gesture Gecko is still holding with an ACTION_CANCEL.
+     *
+     * The cancel carries the gesture's own down time: the pan/zoom controller
+     * drops any event whose down time does not match the one it recorded, so a
+     * cancel built from "now" would be ignored and the finger would stay down.
+     *
+     * It goes to [super.onTouchEvent] on purpose — through this class's
+     * [dispatchTouchEvent] it would hit the guard above and be dropped, which
+     * is exactly how the phantom finger used to survive.
+     */
+    private fun cancelTouchInGecko() {
+        if (!gestureInFlight) return
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            // The pan/zoom controller only accepts input on the UI thread.
+            uiHandler.post { cancelTouchInGecko() }
+            return
+        }
+        gestureInFlight = false
+        val cancel = MotionEvent.obtain(
+            lastDownTime,
+            SystemClock.uptimeMillis(),
+            MotionEvent.ACTION_CANCEL,
+            lastX,
+            lastY,
+            0,
+        )
+        // Deliberately not recycled: Gecko queues the object when the view is
+        // between sessions and replays it on re-attach.
+        super.onTouchEvent(cancel)
     }
 
     private fun reportPull(progress: Float) {
@@ -1076,6 +1167,10 @@ internal class HexoraGeckoView(context: Context) : GeckoView(context) {
     }
 
     override fun onDetachedFromWindow() {
+        // A gesture in flight is closed first: a view detached mid-drag leaves
+        // the pan/zoom controller holding a finger it will replay on re-attach.
+        endPullGesture()
+        cancelTouchInGecko()
         // Release first: prevents GeckoView from closing the session.
         if (session != null) releaseSession()
         onViewDetached?.invoke(this)
