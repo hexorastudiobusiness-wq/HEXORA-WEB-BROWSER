@@ -13,7 +13,8 @@ class BrowserApplication : Application() {
         // Before the container: if anything below throws, the report the user
         // can shake out of the app must already know what the process was
         // doing (and the crash handler must be installed).
-        AppLog.install()
+        // The context is what lets the crash trace outlive the crash.
+        AppLog.install(this)
         AppLog.event("process start")
         container = AppContainer(this)
     }

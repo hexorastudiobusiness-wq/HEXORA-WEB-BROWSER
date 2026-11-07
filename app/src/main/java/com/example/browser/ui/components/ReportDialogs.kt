@@ -1,6 +1,5 @@
 package com.example.browser.ui.components
 
-import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -90,20 +89,34 @@ fun BugReportDialog(
                     if (sending) return@TextButton
                     sending = true
                     // Building the report reads the device's own properties,
-                    // which is a process call: keep it off the UI thread.
+                    // which is a process call: keep it off the UI thread. And
+                    // keep the *whole* launch guarded: this button used to be
+                    // one exception away from closing the app.
                     scope.launch {
-                        val text = withContext(Dispatchers.IO) { buildReport(description) }
-                        val intent = BugReport.mailIntent(text)
-                        val opened = try {
-                            context.startActivity(intent)
-                            true
-                        } catch (error: ActivityNotFoundException) {
-                            false
+                        val text = withContext(Dispatchers.IO) {
+                            runCatching { buildReport(description) }.getOrNull()
                         }
+                        if (text == null) {
+                            sending = false
+                            val fallback = withContext(Dispatchers.IO) {
+                                runCatching { BugReport.minimal(description) }.getOrDefault(description)
+                            }
+                            copyToClipboard(context, fallback)
+                            Toast.makeText(
+                                context,
+                                R.string.bug_report_failed,
+                                Toast.LENGTH_LONG,
+                            ).show()
+                            return@launch
+                        }
+                        val opened = BugReport.launch(context, BugReport.mailIntent(text))
                         sending = false
                         if (opened) {
                             onDismiss()
                         } else {
+                            // Nothing answered the intent: hand the owner the
+                            // text instead of a dead button.
+                            copyToClipboard(context, text)
                             Toast.makeText(
                                 context,
                                 R.string.bug_report_no_mail_app,
@@ -119,13 +132,21 @@ fun BugReportDialog(
         dismissButton = {
             TextButton(
                 onClick = {
-                    val text = buildReport(description)
-                    copyToClipboard(context, text)
-                    Toast.makeText(
-                        context,
-                        R.string.bug_report_copied,
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    // Off the UI thread: assembling the report spawns `getprop`
+                    // for the ROM version, and doing that on the main thread
+                    // froze the dialog for a second or more on real devices.
+                    scope.launch {
+                        val text = withContext(Dispatchers.IO) {
+                            runCatching { buildReport(description) }
+                                .getOrElse { runCatching { BugReport.minimal(description) }.getOrDefault(description) }
+                        }
+                        copyToClipboard(context, text)
+                        Toast.makeText(
+                            context,
+                            R.string.bug_report_copied,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
                 },
             ) {
                 Text(stringResource(R.string.bug_report_copy))

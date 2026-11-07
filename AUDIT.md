@@ -1259,3 +1259,79 @@ Publishing:
 Verified for `v1.0.0`: asset `app-arm64-v8a-release.apk`, 107,163,973 bytes,
 marked Latest, not a prerelease; the run's signature step passed, which means a
 real signer was found and it was not the debug certificate.
+
+## 33. 1.0.1 — the seven defects the phone found
+
+1.0.0 was signed, published and broken. The owner ran it on a Galaxy A34
+(One UI 8.5) and a Redmi Note 13 (HyperOS 2) and sent back a list. What
+matters as much as the fixes is why they survived to a release: every build
+up to that point was verified by compiling, and compiling is not running. Three
+of the seven were plain to read in the source, and reading is cheaper than a
+release.
+
+**1. Unlocking the password vault crashed the app.** `BiometricPrompt` is used
+on API 30+, and `AndroidManifest.xml` declared neither `USE_BIOMETRIC` nor
+`USE_FINGERPRINT`. The framework throws `SecurityException` without the former,
+so the button died on both phones every time. The permission is declared now,
+both authentication routes are wrapped, the device-credential fallback is used
+when the prompt is unusable, and a phone with no screen lock says so instead of
+crashing.
+
+**2. Sending a bug report from Settings crashed the app.** The send path caught
+`ActivityNotFoundException` and nothing else, and everything it did — building
+the report, launching the intent — ran outside any other guard, inside a
+coroutine whose failure ends the process. `DeviceInfo.summary()` was also called
+unprotected, and it reads sixteen ROM properties by spawning `getprop`, plus
+`configuration.locales.get(0)`, which throws on an empty list. Now: the whole
+path is guarded twice over, the launch goes through `BugReport.launch()` (which
+adds `FLAG_ACTIVITY_NEW_TASK` for a non-Activity context and catches
+`RuntimeException`), a failed send copies the text instead of leaving a dead
+button, and a report that cannot be assembled falls back to a minimal one.
+
+**3. Crash traces did not survive the crash.** `AppLog.lastCrash` was a
+`@Volatile` field of the process that dies. No report could ever carry a trace,
+which is why the first two reports arrived with an empty "Last crash" block. The
+handler now writes `filesDir/last-crash.txt` and the next report reads it.
+
+**4. The app came back drawn in part of the screen.** The manifest declares that
+the Activity handles `screenSize`, `smallestScreenSize`, `screenLayout` and
+`orientation` itself, and `onConfigurationChanged` was never overridden: the
+window resized and the content kept the old rectangle, page pane black, rest of
+the window in the theme background. Now handled, with a forced layout pass and a
+geometry hook on the engine that re-measures every surface and re-binds one that
+comes back without a frame.
+
+**5. Returning to the app could end in "not responding".** Tab restore ran
+inside `onStart`, before the window had a frame: creating a `GeckoSession`,
+opening it, binding a new surface and loading the URL, on the main thread. After
+a HyperOS freeze the content process is gone, so that is the full cost of waking
+the engine inside the resume transaction — over five seconds on a mid-range
+phone. The restore now happens after the window is real (`onBrowserResumed`),
+which is also when the surface size is known.
+
+**6. Picking the phone up counted as a shake.** The detector counted *samples*
+above 9 m/s² and called three of them a shake; one bump produces five to ten
+such samples, so putting the phone down opened the report dialog. It now counts
+direction reversals with hysteresis and a window, and prefers the linear
+acceleration sensor; a bump has one direction and cannot pass.
+
+**7. A site zoomed to 70% rendered at 100%.** Gecko's font scaling is one
+process-wide factor while the app stores zoom per site, so a login that
+redirects through another host leaves the engine at 100% while the panel still
+shows the stored 70%. Opening the panel now re-applies the stored factor (so the
+page and the slider agree before anything is dragged), a change is persisted
+immediately, and the value is written against the host the panel was opened for
+rather than whatever loaded underneath.
+
+**Also fixed in the same pass, from the same reports:** an unresolvable host
+(`github.con`) is reported as an address that cannot be found instead of a
+network error, and the raw `code 37` is gone from the screen (it stays in the
+diagnostics text); the launcher icon and the splash no longer show a baked-in
+white plate — the foreground is a transparent mark on the brand colour, with a
+monochrome layer for themed icons and a splash drawn on that same colour, which
+is what removes the sharp-cornered square.
+
+Verified: `assembleDebug` on the branch, then `v1.0.1` signed and published
+(`versionCode` 43, same key and applicationId as 1.0.0, so it installs in place).
+What is *not* verified: none of it has been run on a phone yet. That is the
+owner's next step, and the wording here says so rather than implying otherwise.

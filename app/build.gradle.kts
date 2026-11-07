@@ -12,6 +12,7 @@ plugins {
 val releaseStorePath = System.getenv("HEXORA_RELEASE_STORE_FILE")
 val hasReleaseSigning = !releaseStorePath.isNullOrBlank()
 
+
 android {
     // The source tree still lives under com.example.browser; only the install
     // identity is a real one. Play rejects com.example.*, and a placeholder id
@@ -26,8 +27,8 @@ android {
         // current GeckoView releases.
         minSdk = 26
         targetSdk = 37
-        versionCode = 42
-        versionName = "1.0.0"
+        versionCode = 43
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

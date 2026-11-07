@@ -181,10 +181,13 @@ fun AboutScreen(
                         // Explicit contact, no report payload: the address is
                         // prefilled and the composer opened, so nothing is
                         // sent without the owner writing and pressing send.
-                        val intent = com.example.browser.util.BugReport.contactIntent()
-                        try {
-                            context.startActivity(intent)
-                        } catch (error: android.content.ActivityNotFoundException) {
+                        val opened = com.example.browser.util.BugReport.launch(
+                            context,
+                            com.example.browser.util.BugReport.contactIntent(),
+                        )
+                        if (!opened) {
+                            // No mail app: the address itself is the fallback,
+                            // and it is shown on screen right above this button.
                             Toast.makeText(
                                 context,
                                 BrowserRole.DEVELOPER_EMAIL,

@@ -22,12 +22,12 @@
     <string name="action_retry">Retry</string>
     <!-- Why a page failed, so the user (and a screenshot) can tell the
          difference between a network problem and an engine problem. -->
-    <string name="page_load_failed_network">Network error. Check your connection.</string>
+    <string name="page_load_failed_unknown_host">This address could not be found. Check the spelling.</string>
+    <string name="page_load_failed_network">The site could not be reached. Check your connection.</string>
     <string name="page_load_failed_offline">You are offline.</string>
     <string name="page_load_failed_security">Secure connection failed.</string>
     <string name="page_load_failed_redirect">Too many redirects.</string>
     <string name="page_load_failed_renderer">The page rendering process stopped.</string>
-    <string name="page_load_failed_code">code %1$d</string>
     <!-- A saved login may be filled only when the user taps Fill. -->
     <string name="saved_login_available">Saved login for %1$s</string>
     <string name="action_fill_login">Fill</string>
@@ -288,6 +288,7 @@
     <string name="bug_report_copy">Copy report</string>
     <string name="bug_report_copied">Report copied</string>
     <string name="bug_report_no_mail_app">No email app found on this device</string>
+    <string name="bug_report_failed">The report could not be assembled. The log was copied instead.</string>
 
     <!-- 0.6.0: Settings is a sidebar of sections, About is its own screen. -->
     <string name="settings_section_appearance">Appearance</string>
