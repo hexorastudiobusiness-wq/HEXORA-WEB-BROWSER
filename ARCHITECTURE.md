@@ -73,62 +73,66 @@ Use the current stable GeckoView APIs available at implementation time. Do not i
 
 ## 4. Browser Sessions
 
-Each tab owns its own browser session **and its own GeckoView**. This is *not*
-Mozilla's model and should not be described as such: Firefox for Android keeps
-one `GeckoEngineView` with one `GeckoView` and swaps the session into it
-(`engineView.setCurrentSession`, and `GeckoView.releaseSession()` on the tab that
-leaves). This app instead keeps one surface per tab: the engine owns a single
-`FrameLayout` per Activity, every live tab's `SwipeableHostLayout` is a child of
-it, exactly one child is `VISIBLE`, the rest are `INVISIBLE`, so a switch changes
-visibility and not the bound session `(see §4.1)`.
+Each tab owns its own browser session. The app owns **one** GeckoView, and a tab
+switch swaps the session inside it — Mozilla's model, copied from
+android-components rather than argued about:
 
-The single-view design was tried (0.5.0) and was the source of reloading tabs,
-cross-tab repaints and most black-pane reports, so per-tab surfaces stay for now.
-The price of that choice is stated honestly: Firefox has one compositor and this
-app has one per shown tab, a hidden tab's display is only released when the
-platform tears its surface down, and the outgoing tab therefore has to be told
-`GeckoSession.setActive(false)` explicitly at the switch (it is, in
-`present()`). Converging on Mozilla's single-view model is a real surface-layer
-rewrite, not a tweak.
+```kotlin
+geckoView.session?.let { geckoView.releaseSession() }  // the old tab keeps its page
+geckoView.setSession(next.geckoSession)                // the new one is drawn
+```
 
-Priority follows Mozilla's `SessionPrioritizationMiddleware` literally: exactly
-one session — the selected tab's — is `PRIORITY_HIGH`; the tab that was selected
-before it goes back to `PRIORITY_DEFAULT`. Suspension (below) — not silent
-reloading — is the memory control for colder tabs.
+(`components/browser/engine-gecko/GeckoEngineView.kt`, `render()`.)
+
+The session owns the page: history, scroll, form state, the live document. The
+view is only the glass it is drawn through. Nothing suspends a background tab,
+and the app never calls `GeckoSession.setActive(false)`: that API's documented
+right is to drop the document to save memory, and calling it on every tab it
+left is what made a five-second trip to another tab come back as a reload.
+
+Memory for cold tabs is controlled the way Firefox controls it — session
+priority (`PRIORITY_HIGH` for the selected tab, `PRIORITY_DEFAULT` for the one
+that was selected before it) and, only under a critical trim, suspension with
+saved state (§8). Suspension, not silent reloading, is the memory control.
 
 ### 4.1 Content-surface invariants (GeckoView)
 
-These follow Mozilla's own `GeckoEngineView`/`NestedGeckoView` and exist because
-every previous "black tab" and "tab re-loads on switch" report traced back to a
-violation of one of them:
+These follow Mozilla's `GeckoEngineView`/`NestedGeckoView`. Every "black tab",
+"tab reloads on switch" and "page drawn outside its own frame" report so far
+traced back to a violation of one of them:
 
-1. **One view per tab, created once.** `obtainSurface()` builds a tab's
-   `SwipeableHostLayout` + `HexoraGeckoView` the first time that tab is shown
-   and keeps it afterwards. The container `AndroidView` is stable for the whole
-   Activity; a tab switch never recreates a Compose node, a surface or a
-   session.
+1. **One view, one session at a time.** `obtainContainer()` builds
+   `FrameLayout → SwipeableHostLayout → HexoraGeckoView` once per Activity, and
+   `present()` swaps the session into it. A tab switch never recreates a Compose
+   node, a view, or a session.
 2. **The container never unmounts while a tab exists.** The Start Page, crash
    card and error card are drawn *on top of* the content container instead of
    replacing it.
 3. **Release before detach.** `HexoraGeckoView.onDetachedFromWindow()` calls
-   `releaseSession()` before `super`, so GeckoView never closes the session and
-   the page survives; the session is re-bound in `onAttachedToWindow` (see
-   `obtainSurface`). A tab that is merely hidden keeps its view attached, so
-   only the platform's surface comes and goes — a repaint, never a load.
-4. **No opaque cover.** `GeckoView.coverUntilFirstPaint(color)` sets the
+   `releaseSession()` before `super`, so GeckoView never closes the session; on
+   re-attach the live session is bound again. A repaint, never a load.
+4. **Visibility is propagated by hand.** GeckoView does not react to
+   `onVisibilityChanged` (Mozilla bug 1630775), so `setContentHidden()` sets the
+   container *and* the view — the same thing android-components does.
+5. **No opaque cover.** `GeckoView.coverUntilFirstPaint(color)` sets the
    session's compositor clear colour *and* paints an opaque SurfaceView
    background that only GeckoView's internal FIRST_PAINT callback removes. On a
-   long-lived view whose compositor keeps running that callback may never
-   fire again, leaving a
-   permanent black pane. Hexora therefore does not cover the surface.
-5. **Paint verification, not timers.** On foreground return the engine checks
-   every child surface: if the platform dropped one and GeckoView forgot its
-   session, the owning session is bound again (a repaint, not a reload). No
-   timers, no shared-compositor re-acquisition.
-6. **Pull-to-refresh is answered by Gecko.** Each tab's `HexoraGeckoView`
-   keeps every touch; whether a pull may start is decided by APZ
-   (`InputResultDetail`), never by app-side heuristics. There is no
-   `SwipeRefreshLayout` — it broke ordinary scrolling in 0.4.7.
+   long-lived view whose compositor keeps running that callback may never fire
+   again, leaving a permanent black pane. Hexora therefore does not cover the
+   surface.
+6. **Paint verification, not timers.** On foreground return the engine asks the
+   live session's own paint callbacks whether content is on screen; if Gecko
+   said it was dropped and no frame followed, the session is bound to the view
+   again. No blind re-creation, no reload.
+7. **Pull-to-refresh is answered by Gecko.** The view keeps every touch;
+   whether a pull may start is decided by APZ (`InputResultDetail`), never by
+   app-side heuristics. There is no `SwipeRefreshLayout` — it broke ordinary
+   scrolling in 0.4.7.
+8. **Touch is delivered once.** `onTouchEventForDetailResult()` *is* the
+   dispatch — Mozilla's `NestedGeckoView` says it in as many words ("the event
+   should be handled either by onTouchEvent, either by onTouchEventForResult,
+   never by both") — and a gesture that has to end early is closed with
+   `ACTION_CANCEL`, not dropped.
 
 A browser tab should contain:
 

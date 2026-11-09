@@ -2313,9 +2313,10 @@ class BrowserViewModel(
         // surface, and doing it on every switch is a visible stutter on a slow
         // phone. Tiles are refreshed when the tab tray is opened
         // (captureActiveThumbnail) and after each finished load.
-        // Each tab owns its own surface, so GeckoView marks a session
-        // active/inactive on that surface alone; nothing here needs to touch
-        // display state, and doing so in the past left dead compositors.
+        // One surface, and the engine swaps the session into it (Mozilla's
+        // GeckoEngineView model). Nothing here touches display state, and
+        // nothing suspends the tab being left — `setActive(false)` on every
+        // switch is what used to turn a return to a tab into a reload.
         _findVisible.value = false
         _pageContextMenu.value = null
         // An offer belongs to the page the user was looking at.
