@@ -516,6 +516,7 @@ class GeckoBrowserEngine(
         // Re-applied even when the flag does not change: coming back from the
         // background can leave the container INVISIBLE (it was hidden under an
         // overlay) with no state change to trigger a new call.
+        val wasHidden = contentHidden
         contentHidden = hidden
         val visibility = if (hidden) View.INVISIBLE else View.VISIBLE
         contentContainer?.visibility = visibility
@@ -523,6 +524,27 @@ class GeckoBrowserEngine(
         // 1630775); android-components propagates it to the inner view by hand
         // for exactly this reason, and so does this.
         contentView?.visibility = visibility
+        if (wasHidden && !hidden) verifySurfaceAfterUnhide()
+    }
+
+    /**
+     * Coming out from under an overlay: the surface was invisible, and on some
+     * devices GeckoView's display does not come back until it is told again.
+     * The question asked here is Gecko's own — did a frame arrive? — and only a
+     * "no" costs anything, in one re-bind of the live session.
+     */
+    private fun verifySurfaceAfterUnhide() {
+        val session = activeSession ?: return
+        if (!session.geckoSession.isOpen) return
+        val framesAtShow = session.frameCount
+        val token = ++resumeCheckToken
+        mainHandler.postDelayed({
+            if (token != resumeCheckToken) return@postDelayed
+            if (contentHidden) return@postDelayed
+            if (!session.geckoSession.isOpen) return@postDelayed
+            if (session.frameCount != framesAtShow) return@postDelayed
+            reRender(session)
+        }, PAINT_RELOAD_GRACE_MS)
     }
 
     /** Applied from [HexoraGeckoView] when it refuses a gesture. */
@@ -728,15 +750,6 @@ class GeckoBrowserEngine(
 
         /** A load that produced no frame in this window is re-acquired. */
         const val PAINT_RELOAD_GRACE_MS = 1500L
-
-        /** After a tab switch, how long a lost paint has to recover by itself. */
-        const val PAINT_ACTIVATION_GRACE_MS = 700L
-
-        /** Second, later check: some devices report the reset only at first composite. */
-        const val PAINT_ACTIVATION_LATE_MS = 2200L
-
-        /** Grace after a paint reset on the visible tab before the display is re-acquired. */
-        const val PAINT_RESET_REPAIR_MS = 350L
 
         private val RUNTIME_LOCK = Any()
 

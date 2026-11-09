@@ -1419,3 +1419,54 @@ exactly what a touch-stream race looks like from the outside — the duplicate
 controller is mid-gesture — so the report is consistent with the diagnosis
 without confirming it. The fix stays unproven until a build with it runs on the
 phone and a pinch is tried repeatedly.
+
+## 35. The surface layer, rebuilt on Mozilla's model
+
+The 1.0.2 report was two defects and one fair question: the engine is ready-made,
+so why is the browser not stable? The answer was in this repository, not in
+GeckoView, and the proof came from reading Mozilla's own code instead of
+reasoning from the API surface.
+
+**What Mozilla does** (`components/browser/engine-gecko/GeckoEngineView.kt`):
+`GeckoEngineView` is a `FrameLayout` holding **one** `NestedGeckoView`, and
+`render(session)` is three lines — `geckoView.session?.let { geckoView.releaseSession() }`
+then `geckoView.setSession(next.geckoSession)`. `GeckoEngineSession.kt` contains
+`setActive` **zero** times; background tabs are governed by
+`setPriorityHint(PRIORITY_HIGH / PRIORITY_DEFAULT)`. `NestedGeckoView.kt` says in
+a comment what this file had got wrong: "The event should be handled either by
+onTouchEvent, either by onTouchEventForResult, never by both."
+
+**1. A tab switch reloaded the tab.** `present()` called
+`GeckoSession.setActive(false)` on the tab being left, so a five-second trip to
+another tab came back as a fresh page. `setActive` exists precisely to let Gecko
+discard a document it is not showing; using it as a bookkeeping flag on every
+switch is what threw the page away. It is gone — Mozilla never calls it, and
+neither does this now. Cold tabs are controlled the way Firefox controls them:
+priority hints for every tab, suspension with saved state only when the system
+reports `TRIM_MEMORY_RUNNING_CRITICAL` or `TRIM_MEMORY_COMPLETE`.
+
+**2. A page could be drawn outside its own frame.** The app put one
+`SwipeableHostLayout` + GeckoView in the tree per tab, hid the others with
+`INVISIBLE`, and then measured and repaired each surface by hand (`requestLayout`
+walks, `fullReattach`, `reacquireDisplay`, paint bookkeeping, a display-check
+token). A rectangle that goes stale is exactly how a `position: fixed; bottom: 0`
+composer ends up below the visible area — and a refresh cannot fix it, because
+the page is right and the glass it is drawn through is wrong. With one view there
+is one rectangle, measured once by the container. The page is not repaired after
+the fact; it has nowhere to be wrong.
+
+Deleted with the layer: `surfaceOwners`, `bindSurface`, `unbindSurface`,
+`obtainSurface`, `detachSurface`, `ownHost`, `reacquireDisplay`, `fullReattach`,
+`forceShow`, `onSurfaceShown`, `verifyShown`, `repairAfterReset`,
+`onPaintResetOfActiveTab`, `displayCheckToken`, `switchRebinds`, and the two
+activation constants.
+
+What replaced them: `render()` (copy of Mozilla's), `reRender()` for the four
+cases where Gecko itself reports that painted content is gone, and one
+verification when the content comes back out from under an overlay — it asks
+Gecko whether a frame arrived, and only a "no" costs a re-bind.
+
+Verified: debug CI compiles it (run 42616699591). Not verified: none of it has
+run on a phone. The reload fix is a documented API behaviour plus the absence of
+that call in Mozilla's engine; the sizing fix is structural and is expected to
+remove a class of bugs rather than this instance of it.
